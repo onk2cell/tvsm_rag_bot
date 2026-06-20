@@ -1,0 +1,21 @@
+# Secrets — NEVER commit these
+.env
+.env.local
+*.key
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated knowledge-base PDFs (rebuild with build_*.py; KB lives in Gemini File Search)
+*.pdf
+
+# OS / editor / tooling
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
