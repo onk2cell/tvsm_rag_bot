@@ -1,0 +1,2 @@
+# Always use LF for shell scripts so they run on the Linux server (avoid CRLF \r issues)
+*.sh text eol=lf
