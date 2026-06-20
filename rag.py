@@ -8,7 +8,43 @@ from google.genai import errors as genai_errors
 
 import config
 
-client = genai.Client()   # reads GEMINI_API_KEY from the environment
+# The Gemini client is swappable at runtime: an admin can supply a key via the
+# admin page (see web.py), which calls set_api_key() to rebuild it. We initialise
+# from GEMINI_API_KEY in the environment if it's present.
+_client = None
+
+
+def set_api_key(api_key: str, validate: bool = False) -> None:
+    """(Re)create the Gemini client with the given API key.
+
+    If validate=True, the key is checked with a cheap authenticated call before
+    it replaces the current client, so a bad key leaves the old one in place.
+    """
+    global _client
+    if not api_key:
+        raise ValueError("API key must not be empty")
+    candidate = genai.Client(api_key=api_key)
+    if validate:
+        list(candidate.models.list())   # raises if the key is invalid
+    _client = candidate
+
+
+def get_client():
+    """Return the active Gemini client, or explain how to configure one."""
+    if _client is None:
+        raise RuntimeError(
+            "Gemini API key is not configured. Set GEMINI_API_KEY in .env, "
+            "or add it on the admin page."
+        )
+    return _client
+
+
+def has_client() -> bool:
+    return _client is not None
+
+
+if config.GEMINI_API_KEY:
+    set_api_key(config.GEMINI_API_KEY)
 
 SYSTEM = (
     "You are TVS Motor's helpful assistant for TVS three-wheelers. You help with their "
@@ -61,6 +97,7 @@ def ask(question: str, history: list | None = None, model: str | None = None,
     model = model or config.MODEL
     store = store or config.FILE_SEARCH_STORE
     last_err = None
+    client = get_client()
     for attempt in range(3):
         try:
             resp = client.models.generate_content(

@@ -24,7 +24,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse
 
 import config
-from rag import ask, client
+from rag import ask, get_client, has_client, set_api_key
 
 
 class BasicAuthMiddleware:
@@ -88,7 +88,7 @@ def list_models():
     """Gemini models that support generateContent. Falls back to a curated list."""
     names = []
     try:
-        for m in client.models.list():
+        for m in get_client().models.list():
             actions = getattr(m, "supported_actions", None) or []
             if "generateContent" in actions and "gemini" in m.name:
                 names.append(m.name.replace("models/", ""))
@@ -103,7 +103,7 @@ def list_stores():
     """Available knowledge bases (File Search stores) to choose from."""
     stores = []
     try:
-        for s in client.file_search_stores.list():
+        for s in get_client().file_search_stores.list():
             stores.append({"name": s.name, "label": getattr(s, "display_name", None) or s.name})
     except Exception:
         pass
@@ -115,13 +115,32 @@ def list_stores():
 # ----------------------------------------------------------------------------
 # Admin endpoints (token-gated) — create / populate / delete knowledge bases.
 # ----------------------------------------------------------------------------
+@app.get("/admin/gemini-key")
+def admin_gemini_key_status(_=Depends(require_admin)):
+    """Report whether a Gemini API key is currently configured (never echoes it)."""
+    return {"configured": has_client()}
+
+
+@app.post("/admin/gemini-key")
+def admin_set_gemini_key(payload: dict, _=Depends(require_admin)):
+    """Set / replace the Gemini API key used to answer questions (kept in memory)."""
+    api_key = (payload.get("api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
+    try:
+        set_api_key(api_key, validate=True)   # rejects a bad key without swapping
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not use that API key: {e}")
+    return {"configured": True}
+
+
 @app.post("/admin/stores")
 def admin_create_store(payload: dict, _=Depends(require_admin)):
     """Create a new, empty knowledge base (File Search store)."""
     label = (payload.get("display_name") or "").strip()
     if not label:
         raise HTTPException(status_code=400, detail="display_name is required")
-    store = client.file_search_stores.create(config={"display_name": label})
+    store = get_client().file_search_stores.create(config={"display_name": label})
     return {"name": store.name, "label": label}
 
 
@@ -134,7 +153,8 @@ async def admin_upload(store: str = Form(...), file: UploadFile = File(...), _=D
         tmp.write(data)
         tmp_path = tmp.name
     try:
-        op = client.file_search_stores.upload_to_file_search_store(
+        gc = get_client()
+        op = gc.file_search_stores.upload_to_file_search_store(
             file_search_store_name=store,
             file=tmp_path,
             config={"display_name": file.filename},
@@ -143,7 +163,7 @@ async def admin_upload(store: str = Form(...), file: UploadFile = File(...), _=D
         while not getattr(op, "done", False) and waited < 300:
             time.sleep(3)
             waited += 3
-            op = client.operations.get(op)
+            op = gc.operations.get(op)
         return {"status": "indexed", "filename": file.filename, "store": store}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -154,7 +174,7 @@ async def admin_upload(store: str = Form(...), file: UploadFile = File(...), _=D
 @app.delete("/admin/stores")
 def admin_delete_store(name: str, _=Depends(require_admin)):
     """Delete a knowledge base and everything in it."""
-    client.file_search_stores.delete(name=name, config={"force": True})
+    get_client().file_search_stores.delete(name=name, config={"force": True})
     return {"deleted": name}
 
 
@@ -354,6 +374,16 @@ ADMIN_HTML = """<!doctype html>
 </section>
 
 <section>
+  <h2>Gemini API key</h2>
+  <div class="row">
+    <input type="password" id="geminiKey" placeholder="Paste a Gemini API key">
+    <button id="saveKey" type="button">Save key</button>
+    <span id="keyStatus" class="msg"></span>
+  </div>
+  <p class="msg" style="opacity:.6">Kept in memory only — used for answering and managing knowledge bases. Resets to the .env key on restart.</p>
+</section>
+
+<section>
   <h2>Create a new knowledge base</h2>
   <div class="row">
     <input type="text" id="newName" placeholder="Display name, e.g. tvs-spare-parts">
@@ -388,7 +418,42 @@ function headers() { return { 'X-Admin-Token': tokenInput.value }; }
 document.getElementById('saveToken').addEventListener('click', () => {
   sessionStorage.setItem('admin_token', tokenInput.value);
   document.getElementById('tokenMsg').textContent = 'saved';
+  refreshKeyStatus();
 });
+
+const keyStatus = document.getElementById('keyStatus');
+
+async function refreshKeyStatus() {
+  if (!tokenInput.value) { keyStatus.textContent = ''; return; }
+  try {
+    const r = await fetch('/admin/gemini-key', { headers: headers() });
+    if (!r.ok) { keyStatus.textContent = ''; return; }
+    const d = await r.json();
+    keyStatus.textContent = d.configured ? '✓ a key is configured' : 'no key configured';
+  } catch (e) { keyStatus.textContent = ''; }
+}
+
+document.getElementById('saveKey').addEventListener('click', async () => {
+  const keyInput = document.getElementById('geminiKey');
+  const api_key = keyInput.value.trim();
+  if (!api_key) { keyStatus.textContent = 'enter a key'; return; }
+  keyStatus.textContent = 'validating…';
+  const r = await fetch('/admin/gemini-key', {
+    method: 'POST',
+    headers: { ...headers(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key }),
+  });
+  const d = await r.json();
+  if (r.ok) {
+    keyStatus.textContent = '✓ key saved';
+    keyInput.value = '';
+    loadStores();
+  } else {
+    keyStatus.textContent = '✗ ' + (d.detail || 'failed');
+  }
+});
+
+refreshKeyStatus();
 
 async function loadStores() {
   const d = await (await fetch('/stores')).json();

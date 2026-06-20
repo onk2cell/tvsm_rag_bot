@@ -13,7 +13,8 @@ def _require(name: str) -> str:
 
 
 # --- Gemini ---
-GEMINI_API_KEY = _require("GEMINI_API_KEY")        # read implicitly by genai.Client()
+# Optional: if empty, an admin can supply the key at runtime on the admin page.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 FILE_SEARCH_STORE = _require("FILE_SEARCH_STORE")
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
