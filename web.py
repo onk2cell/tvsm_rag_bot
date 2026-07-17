@@ -9,7 +9,10 @@ Features
 End users do NOT upload anything — the knowledge bases are managed separately
 (e.g. with build_tvs_3w_kb.py / index_document.py).
 
-Run:  uvicorn web:app --reload --port 8000     then open  http://localhost:8000
+Run:  uvicorn web:app --reload --port 8000
+  Public qualification chat:  http://localhost:8000/
+  Ric Show entry:             http://localhost:8000/?source=ricshow
+  Dev RAG playground:         http://localhost:8000/playground
 """
 import base64
 import os
@@ -25,6 +28,7 @@ from fastapi.responses import HTMLResponse
 
 import admin_config
 import config
+from qualify_web import register_qualify_routes
 from rag import ask, get_client, has_client, set_api_key
 
 
@@ -80,6 +84,9 @@ app.add_middleware(BasicAuthMiddleware, username=config.APP_USER, password=confi
 @app.on_event("startup")
 def _seed_admin_bot_config() -> None:
     admin_config.get_store().ensure_seeded()
+
+
+register_qualify_routes(app)
 
 CURATED = [
     "gemini-2.5-flash-lite",
@@ -229,8 +236,9 @@ async def ws_chat(ws: WebSocket):
         pass
 
 
-@app.get("/", response_class=HTMLResponse)
-def index():
+@app.get("/playground", response_class=HTMLResponse)
+def playground():
+    """Dev RAG playground — open Q&A with model/store picker (not customer qualification)."""
     return INDEX_HTML
 
 
@@ -263,6 +271,7 @@ INDEX_HTML = """<!doctype html>
 <body>
 <header>
   <h1>TVS RAG Playground</h1>
+  <a href="/" style="font-size:13px">Qualification chat</a>
   <label>Knowledge base: <select id="store"></select></label>
   <label>Model: <select id="model"></select></label>
   <button id="clearBtn" type="button">Clear chat</button>
@@ -428,7 +437,11 @@ ADMIN_HTML = """<!doctype html>
   <table id="storeTable"><tbody></tbody></table>
 </section>
 
-<p><a href="/">&larr; Back to chat</a></p>
+<p>
+  <a href="/">&larr; Qualification chat</a> ·
+  <a href="/playground">RAG playground</a> ·
+  <a href="/admin/test-chat">Test qualification chat</a>
+</p>
 
 <script>
 const tokenInput = document.getElementById('token');
