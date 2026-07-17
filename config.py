@@ -38,3 +38,6 @@ REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "6"))
 HISTORY_TTL_SEC = int(os.environ.get("HISTORY_TTL_SEC", str(24 * 3600)))
 RATE_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_PER_MIN", "12"))
+
+# --- Leads export ---
+LEADS_CSV_PATH = os.environ.get("LEADS_CSV_PATH", "data/leads.csv")
