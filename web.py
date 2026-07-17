@@ -23,6 +23,7 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse
 
+import admin_config
 import config
 from rag import ask, get_client, has_client, set_api_key
 
@@ -75,6 +76,11 @@ def require_admin(x_admin_token: str = Header(default="")):
 app = FastAPI(title="TVS RAG Playground")
 app.add_middleware(BasicAuthMiddleware, username=config.APP_USER, password=config.APP_PASSWORD)
 
+
+@app.on_event("startup")
+def _seed_admin_bot_config() -> None:
+    admin_config.get_store().ensure_seeded()
+
 CURATED = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
@@ -115,6 +121,21 @@ def list_stores():
 # ----------------------------------------------------------------------------
 # Admin endpoints (token-gated) — create / populate / delete knowledge bases.
 # ----------------------------------------------------------------------------
+@app.get("/admin/bot-config")
+def admin_get_bot_config(_=Depends(require_admin)):
+    """Return the full admin bot configuration (qualification flow, languages, campaign, etc.)."""
+    return admin_config.get_store().get()
+
+
+@app.put("/admin/bot-config")
+def admin_put_bot_config(payload: dict, _=Depends(require_admin)):
+    """Replace the full admin bot configuration. Invalid documents are rejected."""
+    try:
+        return admin_config.get_store().update(payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/admin/gemini-key")
 def admin_gemini_key_status(_=Depends(require_admin)):
     """Report whether a Gemini API key is currently configured (never echoes it)."""

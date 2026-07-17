@@ -3,6 +3,9 @@
 .env.local
 *.key
 
+# Runtime admin config (seeded on first run)
+data/
+
 # Python
 venv/
 .venv/

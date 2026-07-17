@@ -27,6 +27,7 @@ GRAPH_VERSION = os.environ.get("GRAPH_VERSION", "v21.0")
 
 # --- Admin ---
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")    # empty = admin endpoints disabled
+ADMIN_CONFIG_PATH = os.environ.get("ADMIN_CONFIG_PATH", "data/admin_config.json")
 
 # --- Web playground access (HTTP Basic Auth) ---
 APP_USER = os.environ.get("APP_USER", "team")
