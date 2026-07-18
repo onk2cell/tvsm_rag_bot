@@ -42,3 +42,23 @@ then set the webhook URL + verify token in Meta and subscribe to the `messages` 
   defensively and simply returns fewer/none if the shape differs.
 - Free-form replies only work within 24h of the user's last message; outside that window,
   WhatsApp requires a pre-approved template.
+
+## Interaction history and load tests
+
+Web and WhatsApp turns are stored in `data/interactions.db` for 90 days. Open
+`/admin` to filter, export, and review failed interactions.
+
+Synthetic traffic is kept in `data/load_test_interactions.db`. Set a secret in
+`.env` before running Locust:
+
+```bash
+LOAD_TEST_TOKEN=replace_with_a_long_random_value
+```
+
+Load the environment and run ten users:
+
+```bash
+set -a; source .env; set +a
+locust -f locustfile.py --host http://127.0.0.1:8000 \
+  --headless -u 10 -r 2 -t 1m
+```

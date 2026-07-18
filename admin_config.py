@@ -65,7 +65,7 @@ ACTIVE CAMPAIGN — "Vaada" scheme (mention proactively, briefly):
 DEFAULT_INTRO_TEXT = (
     "Hi! I'm TVS Motor's assistant for passenger three-wheelers. "
     "I'll ask a few quick questions and share accurate product information "
-    "from our official documents, then connect you with your nearest dealership."
+    "and connect you with your nearest dealership."
 )
 
 # Written to CSV by the engine — not asked as chat questions.

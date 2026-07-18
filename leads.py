@@ -79,3 +79,14 @@ class LeadWriter:
             w.writeheader()
             for old in rows:
                 w.writerow({col: old.get(col, "") for col in columns})
+
+
+def leads_summary(path: Path, config_store: AdminConfigStore) -> dict[str, Any]:
+    """Row count and column list for admin UI."""
+    config = config_store.get()
+    columns = csv_columns(config)
+    if not path.exists():
+        return {"count": 0, "columns": columns, "path": str(path)}
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        count = sum(1 for _ in csv.DictReader(f))
+    return {"count": count, "columns": columns, "path": str(path)}

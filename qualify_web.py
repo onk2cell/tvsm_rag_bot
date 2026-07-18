@@ -1,14 +1,21 @@
 """Public web qualification chat — routes and UI for the conversation engine."""
 from __future__ import annotations
 
+import base64
+import logging
 import uuid
+from time import perf_counter
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse
 
 import admin_config
 import config
+import interactions
 from conversation_engine import ConversationEngine, TurnInput, make_engine
+import voice
+
+log = logging.getLogger(__name__)
 
 _engine: ConversationEngine | None = None
 
@@ -32,6 +39,46 @@ def _normalize_source(source: str | None) -> str:
     return s if s in allowed else "web"
 
 
+def _is_intro_turn(message: str | None, history: list) -> bool:
+    return not (message or "").strip() and not history
+
+
+def _reply_audio_fields(
+    *,
+    reply_text: str,
+    language: str,
+    bot_config: dict,
+    is_intro_turn: bool,
+    user_sent_voice: bool,
+) -> dict:
+    policy = bot_config.get("voice_policy", "intro_only")
+    if not voice.should_speak(
+        policy,
+        is_intro_turn=is_intro_turn,
+        user_sent_voice=user_sent_voice,
+    ):
+        return {}
+
+    if is_intro_turn:
+        intro = (bot_config.get("intro") or {}).get(language) or {}
+        audio_url = intro.get("audio_url")
+        if audio_url:
+            return {"audio_url": audio_url}
+
+    if not (reply_text or "").strip():
+        return {}
+
+    try:
+        wav = voice.synthesize_speech(reply_text, language=language)
+    except Exception:
+        return {}
+
+    return {
+        "audio_mime": "audio/wav",
+        "audio_base64": base64.b64encode(wav).decode("ascii"),
+    }
+
+
 router = APIRouter(tags=["qualify"])
 
 
@@ -50,18 +97,17 @@ def qualify_languages(source: str = Query(default="web")):
 
 
 @router.post("/api/qualify/chat")
-def qualify_chat(payload: dict):
+def qualify_chat(
+    payload: dict,
+    x_load_test_token: str = Header(default=""),
+):
+    started = perf_counter()
     try:
-        from rag import has_client
-        if not has_client():
-            raise HTTPException(
-                status_code=503,
-                detail="Gemini API key is not configured. Set GEMINI_API_KEY in .env or use /admin.",
-            )
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+        interaction_store = interactions.store_for_load_test_token(
+            x_load_test_token
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
 
     language = (payload.get("language") or "").strip()
     if not language:
@@ -86,6 +132,27 @@ def qualify_chat(payload: dict):
 
     source = _normalize_source(payload.get("source"))
     channel = (payload.get("channel") or "web").strip() or "web"
+    user_sent_voice = bool(payload.get("user_sent_voice"))
+
+    from rag import has_client
+
+    if not has_client():
+        error = "Gemini API key is not configured"
+        reply = "Sorry, the assistant is temporarily unavailable. Please try again later."
+        _record_exchange_best_effort(
+            interaction_store,
+            session_id=session_id,
+            channel=channel,
+            source=source,
+            language=language,
+            message=message,
+            answer=reply,
+            latency_ms=_elapsed_ms(started),
+            status="error",
+            error=error,
+            needs_review=True,
+        )
+        raise HTTPException(status_code=503, detail=reply)
 
     try:
         out = get_engine().handle_turn(
@@ -99,16 +166,146 @@ def qualify_chat(payload: dict):
             )
         )
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+        _record_exchange_best_effort(
+            interaction_store,
+            session_id=session_id,
+            channel=channel,
+            source=source,
+            language=language,
+            message=message,
+            answer="Sorry, I could not answer that right now. Please try again shortly.",
+            latency_ms=_elapsed_ms(started),
+            status="error",
+            error=str(e),
+            needs_review=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Sorry, I could not answer that right now. Please try again shortly.",
+        ) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        _record_exchange_best_effort(
+            interaction_store,
+            session_id=session_id,
+            channel=channel,
+            source=source,
+            language=language,
+            message=message,
+            answer="Sorry, something went wrong. Please try again shortly.",
+            latency_ms=_elapsed_ms(started),
+            status="error",
+            error=str(e),
+            needs_review=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Sorry, something went wrong. Please try again shortly.",
+        ) from e
+
+    bot_config = admin_config.get_store().get()
+    audio_fields = _reply_audio_fields(
+        reply_text=out.reply_text,
+        language=language,
+        bot_config=bot_config,
+        is_intro_turn=_is_intro_turn(message, history),
+        user_sent_voice=user_sent_voice,
+    )
+    _record_exchange_best_effort(
+        interaction_store,
+        session_id=session_id,
+        channel=channel,
+        source=source,
+        language=language,
+        message=message,
+        answer=out.reply_text,
+        latency_ms=_elapsed_ms(started),
+        citations=out.citations,
+    )
 
     return {
         "answer": out.reply_text,
         "captured": out.captured,
         "citations": out.citations,
         "session_id": session_id,
+        **audio_fields,
     }
+
+
+def _elapsed_ms(started: float) -> int:
+    return round((perf_counter() - started) * 1000)
+
+
+def _record_exchange_best_effort(
+    store: interactions.InteractionStore,
+    *,
+    session_id: str,
+    channel: str,
+    source: str,
+    language: str,
+    message: str | None,
+    answer: str,
+    latency_ms: int,
+    status: str = "ok",
+    error: str = "",
+    needs_review: bool = False,
+    citations: list[str] | None = None,
+) -> None:
+    try:
+        store.record_exchange(
+            session=session_id,
+            channel=channel,
+            source=source,
+            language=language,
+            user_message=message,
+            assistant_message=answer,
+            latency_ms=latency_ms,
+            status=status,
+            error=error,
+            model=config.MODEL,
+            citations=citations,
+            needs_review=needs_review,
+        )
+    except Exception:
+        log.exception("Could not persist interaction session=%s", session_id)
+
+
+@router.post("/api/qualify/transcribe")
+async def qualify_transcribe(
+    audio: UploadFile = File(...),
+    language: str = Form(default=""),
+):
+    try:
+        from rag import has_client
+        if not has_client():
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini API key is not configured. Set GEMINI_API_KEY in .env or use /admin.",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    raw = await audio.read()
+    mime = audio.content_type or "audio/webm"
+    lang = (language or "").strip() or None
+
+    try:
+        transcript = voice.transcribe_audio(raw, mime, language_hint=lang)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    if not transcript:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not hear speech. Try again closer to the microphone.",
+        )
+
+    return {"transcript": transcript}
 
 
 def qualify_page_html(*, admin_test: bool = False) -> str:
@@ -141,11 +338,15 @@ def qualify_page_html(*, admin_test: bool = False) -> str:
   .msg.user {{ align-self: flex-end; background: #2563eb; color: #fff; }}
   .msg.bot  {{ align-self: flex-start; background: #8882; }}
   .msg.error {{ align-self: flex-start; background: #ef444433; color: #b91c1c; }}
+  .msg-actions {{ margin-top: 6px; }}
+  .msg-actions button {{ font-size: 12px; padding: 2px 8px; }}
   .saved {{ align-self: center; font-size: 12px; color: green; }}
   .cites {{ font-size: 11px; opacity: 0.7; margin-top: 6px; }}
-  form {{ display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; }}
+  form {{ display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #8884; align-items: center; }}
   form input {{ flex: 1; padding: 8px; font-size: 14px; }}
   button {{ padding: 8px 12px; cursor: pointer; font-size: 14px; }}
+  #micBtn {{ min-width: 44px; }}
+  #micBtn.recording {{ background: #ef4444; color: #fff; border-color: #ef4444; }}
   .hidden {{ display: none; }}
 </style></head>
 <body>
@@ -160,16 +361,22 @@ def qualify_page_html(*, admin_test: bool = False) -> str:
 <div id="pick">
   <h2 id="welcomeHeading">Which language are you comfortable in?</h2>
   <p id="localeHint"></p>
+  <p>
+    Privacy notice: your conversation is stored for customer support and lead
+    follow-up, and is automatically deleted after {config.INTERACTION_RETENTION_DAYS} days.
+  </p>
   <div id="langButtons"></div>
 </div>
 
 <main id="chat" class="hidden"></main>
 <form id="form" class="hidden">
   <input type="text" id="input" placeholder="Type your reply…" autocomplete="off">
+  <button type="button" id="micBtn" title="Hold to speak">🎤</button>
   <button type="submit">Send</button>
 </form>
 
 <script>
+const MAX_RECORD_SEC = {config.MAX_AUDIO_RECORD_SEC};
 const params = new URLSearchParams(location.search);
 const SOURCE = params.get('source') || 'web';
 const STORAGE_PREFIX = 'tvs_qualify_' + SOURCE + '_';
@@ -181,8 +388,14 @@ let history = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'history') || '[]
 const chat = document.getElementById('chat');
 const form = document.getElementById('form');
 const input = document.getElementById('input');
+const micBtn = document.getElementById('micBtn');
 const statusEl = document.getElementById('status');
 const pick = document.getElementById('pick');
+
+let mediaRecorder = null;
+let recordChunks = [];
+let recordTimer = null;
+let micStream = null;
 
 function persist() {{
   localStorage.setItem(STORAGE_PREFIX + 'session', sessionId);
@@ -190,7 +403,7 @@ function persist() {{
   localStorage.setItem(STORAGE_PREFIX + 'history', JSON.stringify(history));
 }}
 
-function render(role, text, cites) {{
+function render(role, text, cites, audio) {{
   const div = document.createElement('div');
   div.className = 'msg ' + role;
   div.textContent = text;
@@ -200,8 +413,35 @@ function render(role, text, cites) {{
     c.textContent = 'Sources: ' + cites.join(', ');
     div.appendChild(c);
   }}
+  if (role === 'bot' && audio) {{
+    const actions = document.createElement('div');
+    actions.className = 'msg-actions';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = '🔊 Play';
+    btn.onclick = () => playBotAudio(audio);
+    actions.appendChild(btn);
+    div.appendChild(actions);
+  }}
   chat.appendChild(div);
   chat.scrollTop = chat.scrollHeight;
+  return div;
+}}
+
+function audioPayloadFromResponse(d) {{
+  if (d.audio_url) return {{ url: d.audio_url }};
+  if (d.audio_base64) {{
+    return {{
+      url: 'data:' + (d.audio_mime || 'audio/wav') + ';base64,' + d.audio_base64,
+    }};
+  }}
+  return null;
+}}
+
+function playBotAudio(audio) {{
+  if (!audio || !audio.url) return;
+  const el = new Audio(audio.url);
+  el.play().catch(() => {{}});
 }}
 
 function note(text) {{
@@ -242,7 +482,8 @@ async function loadLanguages() {{
   }});
 }}
 
-async function send(message) {{
+async function send(message, opts) {{
+  opts = opts || {{}};
   statusEl.textContent = '…thinking';
   try {{
     const r = await fetch('/api/qualify/chat', {{
@@ -255,13 +496,16 @@ async function send(message) {{
         channel: 'web',
         history,
         message,
+        user_sent_voice: !!opts.userSentVoice,
       }}),
     }});
     const d = await r.json();
     statusEl.textContent = '';
     if (!r.ok) {{ render('error', '⚠ ' + (d.detail || 'error')); return; }}
     if (d.session_id) sessionId = d.session_id;
-    render('bot', d.answer, d.citations);
+    const audio = audioPayloadFromResponse(d);
+    render('bot', d.answer, d.citations, audio);
+    if (audio) playBotAudio(audio);
     if (message) history.push({{ role: 'user', text: message }});
     history.push({{ role: 'model', text: d.answer }});
     persist();
@@ -271,6 +515,116 @@ async function send(message) {{
     render('error', '⚠ ' + e);
   }}
 }}
+
+function pickRecorderMime() {{
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4',
+  ];
+  if (!window.MediaRecorder) return '';
+  return candidates.find(m => MediaRecorder.isTypeSupported(m)) || '';
+}}
+
+async function stopMicStream() {{
+  if (micStream) {{
+    micStream.getTracks().forEach(t => t.stop());
+    micStream = null;
+  }}
+}}
+
+async function transcribeAndSend(blob, mimeType) {{
+  statusEl.textContent = '…transcribing';
+  const fd = new FormData();
+  fd.append('audio', blob, 'recording.webm');
+  fd.append('language', language || '');
+  try {{
+    const r = await fetch('/api/qualify/transcribe', {{ method: 'POST', body: fd }});
+    const d = await r.json();
+    statusEl.textContent = '';
+    if (!r.ok) {{
+      render('error', '⚠ ' + (d.detail || 'Could not transcribe'));
+      return;
+    }}
+    const text = (d.transcript || '').trim();
+    if (!text) {{
+      render('error', '⚠ Could not hear speech. Try again.');
+      return;
+    }}
+    render('user', text);
+    await send(text, {{ userSentVoice: true }});
+  }} catch (e) {{
+    statusEl.textContent = '';
+    render('error', '⚠ ' + e);
+  }}
+}}
+
+async function stopRecording() {{
+  if (recordTimer) {{
+    clearTimeout(recordTimer);
+    recordTimer = null;
+  }}
+  micBtn.classList.remove('recording');
+  micBtn.title = 'Tap to speak';
+  statusEl.textContent = '';
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') {{
+    await stopMicStream();
+    return;
+  }}
+  const rec = mediaRecorder;
+  mediaRecorder = null;
+  await new Promise(resolve => {{
+    rec.onstop = resolve;
+    rec.stop();
+  }});
+  await stopMicStream();
+  const mimeType = rec.mimeType || 'audio/webm';
+  const blob = new Blob(recordChunks, {{ type: mimeType }});
+  recordChunks = [];
+  if (blob.size === 0) {{
+    render('error', '⚠ No audio captured. Try again.');
+    return;
+  }}
+  await transcribeAndSend(blob, mimeType);
+}}
+
+async function startRecording() {{
+  if (!language) return;
+  if (!navigator.mediaDevices || !window.MediaRecorder) {{
+    render('error', '⚠ Voice input is not supported in this browser.');
+    return;
+  }}
+  const mimeType = pickRecorderMime();
+  if (!mimeType) {{
+    render('error', '⚠ Voice recording is not supported in this browser.');
+    return;
+  }}
+  try {{
+    micStream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+  }} catch (e) {{
+    render('error', '⚠ Microphone permission denied.');
+    return;
+  }}
+  recordChunks = [];
+  mediaRecorder = new MediaRecorder(micStream, {{ mimeType }});
+  mediaRecorder.ondataavailable = (ev) => {{
+    if (ev.data && ev.data.size) recordChunks.push(ev.data);
+  }};
+  mediaRecorder.start();
+  micBtn.classList.add('recording');
+  micBtn.title = 'Tap to stop';
+  statusEl.textContent = 'Recording… tap mic to stop';
+  recordTimer = setTimeout(() => stopRecording(), MAX_RECORD_SEC * 1000);
+}}
+
+micBtn.addEventListener('click', async () => {{
+  if (mediaRecorder && mediaRecorder.state === 'recording') {{
+    await stopRecording();
+  }} else {{
+    await startRecording();
+  }}
+}});
 
 function showChat() {{
   pick.classList.add('hidden');

@@ -15,21 +15,27 @@ Run:  uvicorn web:app --reload --port 8000
   Dev RAG playground:         http://localhost:8000/playground
 """
 import base64
+import logging
 import os
 import secrets
 import tempfile
 import time
+import uuid
 
 from fastapi import (
     Depends, FastAPI, File, Form, Header, HTTPException, UploadFile,
     WebSocket, WebSocketDisconnect,
 )
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 import admin_config
 import config
+import interactions
+from leads import leads_summary
 from qualify_web import register_qualify_routes
 from rag import ask, get_client, has_client, set_api_key
+
+log = logging.getLogger(__name__)
 
 
 class BasicAuthMiddleware:
@@ -206,6 +212,102 @@ def admin_delete_store(name: str, _=Depends(require_admin)):
     return {"deleted": name}
 
 
+@app.get("/admin/leads")
+def admin_leads_info(_=Depends(require_admin)):
+    """Lead CSV summary for the admin UI."""
+    from pathlib import Path
+
+    path = Path(config.LEADS_CSV_PATH)
+    return leads_summary(path, admin_config.get_store())
+
+
+@app.get("/admin/leads.csv")
+def admin_leads_download(_=Depends(require_admin)):
+    """Download captured qualification leads as CSV."""
+    from pathlib import Path
+
+    path = Path(config.LEADS_CSV_PATH)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="No leads captured yet.")
+    return FileResponse(
+        path,
+        media_type="text/csv; charset=utf-8",
+        filename="leads.csv",
+    )
+
+
+@app.get("/admin/interactions")
+def admin_interactions(
+    channel: str = "",
+    language: str = "",
+    status: str = "",
+    session: str = "",
+    search: str = "",
+    needs_review: bool | None = None,
+    load_test: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+    _=Depends(require_admin),
+):
+    """Filter production or load-test interaction history."""
+    return interactions.get_store(load_test=load_test).list_interactions(
+        channel=channel or None,
+        language=language or None,
+        status=status or None,
+        session=session or None,
+        search=search or None,
+        needs_review=needs_review,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/admin/interactions.csv")
+def admin_interactions_download(
+    channel: str = "",
+    language: str = "",
+    status: str = "",
+    session: str = "",
+    search: str = "",
+    needs_review: bool | None = None,
+    load_test: bool = False,
+    _=Depends(require_admin),
+):
+    """Export filtered interaction history as UTF-8 CSV."""
+    content = interactions.get_store(load_test=load_test).export_csv(
+        channel=channel or None,
+        language=language or None,
+        status=status or None,
+        session=session or None,
+        search=search or None,
+        needs_review=needs_review,
+    )
+    filename = "load_test_interactions.csv" if load_test else "interactions.csv"
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.patch("/admin/interactions/{interaction_id}/review")
+def admin_review_interaction(
+    interaction_id: int,
+    payload: dict,
+    load_test: bool = False,
+    _=Depends(require_admin),
+):
+    """Mark one flagged interaction reviewed and retain an optional note."""
+    reviewed = interactions.get_store(load_test=load_test).mark_reviewed(
+        interaction_id, note=str(payload.get("note") or "")
+    )
+    if not reviewed:
+        raise HTTPException(
+            status_code=404, detail="Flagged interaction was not found"
+        )
+    return {"reviewed": True, "id": interaction_id}
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
     return ADMIN_HTML
@@ -216,9 +318,11 @@ async def ws_chat(ws: WebSocket):
     """Continuous chat. The browser sends prior history with each message, so the
     conversation survives a page refresh. The chosen model/store apply per message."""
     await ws.accept()
+    session_id = f"playground-{uuid.uuid4().hex}"
     try:
         while True:
             payload = await ws.receive_json()
+            started = time.perf_counter()
             message = (payload.get("message") or "").strip()
             model = payload.get("model") or config.MODEL
             store = payload.get("store") or config.FILE_SEARCH_STORE
@@ -229,11 +333,61 @@ async def ws_chat(ws: WebSocket):
             try:
                 answer, citations = ask(message, history, model=model, store=store)
             except Exception as e:
-                await ws.send_json({"error": str(e)})
+                reply = "Sorry, I could not answer that right now. Please try again shortly."
+                _record_playground_exchange(
+                    session_id=session_id,
+                    message=message,
+                    answer=reply,
+                    model=model,
+                    started=started,
+                    status="error",
+                    error=str(e),
+                    needs_review=True,
+                )
+                await ws.send_json({"error": reply})
                 continue
+            _record_playground_exchange(
+                session_id=session_id,
+                message=message,
+                answer=answer,
+                model=model,
+                started=started,
+                citations=citations,
+            )
             await ws.send_json({"answer": answer, "citations": citations, "model": model})
     except WebSocketDisconnect:
         pass
+
+
+def _record_playground_exchange(
+    *,
+    session_id: str,
+    message: str,
+    answer: str,
+    model: str,
+    started: float,
+    status: str = "ok",
+    error: str = "",
+    needs_review: bool = False,
+    citations: list[str] | None = None,
+) -> None:
+    try:
+        interactions.get_store().record_exchange(
+            session=session_id,
+            channel="web",
+            source="playground",
+            language="",
+            user_message=message,
+            assistant_message=answer,
+            latency_ms=round((time.perf_counter() - started) * 1000),
+            status=status,
+            error=error,
+            model=model,
+            citations=citations,
+            needs_review=needs_review,
+        )
+    except Exception:
+        log.exception("Could not persist playground interaction session=%s", session_id)
 
 
 @app.get("/playground", response_class=HTMLResponse)
@@ -389,6 +543,9 @@ ADMIN_HTML = """<!doctype html>
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   td, th { border-bottom: 1px solid #8883; padding: 6px 8px; text-align: left; }
   .danger { color: crimson; }
+  .table-wrap { overflow-x: auto; }
+  .interaction-message { min-width: 220px; max-width: 360px; white-space: pre-wrap; }
+  .needs-review { color: #b45309; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -433,6 +590,63 @@ ADMIN_HTML = """<!doctype html>
 </section>
 
 <section>
+  <h2>Qualification leads</h2>
+  <p class="msg" style="opacity:.75;margin-top:0">
+    Completed chats append one row to <code>data/leads.csv</code> on the server.
+  </p>
+  <div class="row">
+    <span id="leadsCount" class="msg">—</span>
+    <button id="downloadLeads" type="button">Download leads.csv</button>
+    <span id="leadsMsg" class="msg"></span>
+  </div>
+</section>
+
+<section>
+  <h2>Saved interactions</h2>
+  <p class="msg" style="opacity:.75;margin-top:0">
+    Web and WhatsApp messages follow the configured retention period. Provider errors are flagged for review.
+  </p>
+  <div class="row">
+    <select id="interactionDb">
+      <option value="false">Production</option>
+      <option value="true">Load test</option>
+    </select>
+    <select id="interactionChannel">
+      <option value="">All channels</option>
+      <option value="web">Web</option>
+      <option value="whatsapp">WhatsApp</option>
+    </select>
+    <select id="interactionLanguage">
+      <option value="">All languages</option>
+      <option>English</option>
+      <option>Hindi</option>
+      <option>Marathi</option>
+      <option>Tamil</option>
+    </select>
+    <select id="interactionReview">
+      <option value="">All review states</option>
+      <option value="true">Needs review</option>
+      <option value="false">Reviewed / normal</option>
+    </select>
+  </div>
+  <div class="row">
+    <input type="text" id="interactionSearch" placeholder="Search message or session">
+    <button id="refreshInteractions" type="button">Refresh</button>
+    <button id="downloadInteractions" type="button">Download CSV</button>
+    <span id="interactionCount" class="msg">—</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Time</th><th>Session</th><th>Channel</th><th>Language</th>
+        <th>Role</th><th>Message</th><th>Status</th><th>Review</th>
+      </tr></thead>
+      <tbody id="interactionRows"></tbody>
+    </table>
+  </div>
+</section>
+
+<section>
   <h2>Existing knowledge bases</h2>
   <table id="storeTable"><tbody></tbody></table>
 </section>
@@ -453,6 +667,8 @@ document.getElementById('saveToken').addEventListener('click', () => {
   sessionStorage.setItem('admin_token', tokenInput.value);
   document.getElementById('tokenMsg').textContent = 'saved';
   refreshKeyStatus();
+  refreshLeads();
+  refreshInteractions();
 });
 
 const keyStatus = document.getElementById('keyStatus');
@@ -488,6 +704,140 @@ document.getElementById('saveKey').addEventListener('click', async () => {
 });
 
 refreshKeyStatus();
+
+async function refreshLeads() {
+  const countEl = document.getElementById('leadsCount');
+  const msg = document.getElementById('leadsMsg');
+  if (!tokenInput.value) {
+    countEl.textContent = 'Save admin token to view leads';
+    return;
+  }
+  try {
+    const r = await fetch('/admin/leads', { headers: headers() });
+    if (!r.ok) {
+      countEl.textContent = '';
+      return;
+    }
+    const d = await r.json();
+    countEl.textContent = d.count
+      ? (d.count + ' lead' + (d.count === 1 ? '' : 's') + ' captured')
+      : 'No leads yet';
+    msg.textContent = '';
+  } catch (e) {
+    countEl.textContent = '';
+  }
+}
+
+document.getElementById('downloadLeads').addEventListener('click', async () => {
+  const msg = document.getElementById('leadsMsg');
+  if (!tokenInput.value) {
+    msg.textContent = 'save admin token first';
+    return;
+  }
+  msg.textContent = 'downloading…';
+  try {
+    const r = await fetch('/admin/leads.csv', { headers: headers() });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      msg.textContent = '✗ ' + (d.detail || 'download failed');
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'leads.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    msg.textContent = '✓ downloaded';
+    refreshLeads();
+  } catch (e) {
+    msg.textContent = '✗ ' + e;
+  }
+});
+
+function interactionQuery() {
+  const params = new URLSearchParams();
+  params.set('load_test', document.getElementById('interactionDb').value);
+  const channel = document.getElementById('interactionChannel').value;
+  const language = document.getElementById('interactionLanguage').value;
+  const review = document.getElementById('interactionReview').value;
+  const search = document.getElementById('interactionSearch').value.trim();
+  if (channel) params.set('channel', channel);
+  if (language) params.set('language', language);
+  if (review) params.set('needs_review', review);
+  if (search) params.set('search', search);
+  return params;
+}
+
+async function refreshInteractions() {
+  const rows = document.getElementById('interactionRows');
+  const count = document.getElementById('interactionCount');
+  rows.innerHTML = '';
+  if (!tokenInput.value) {
+    count.textContent = 'Save admin token to view interactions';
+    return;
+  }
+  const r = await fetch('/admin/interactions?' + interactionQuery(), { headers: headers() });
+  if (!r.ok) {
+    count.textContent = 'Could not load interactions';
+    return;
+  }
+  const d = await r.json();
+  count.textContent = d.count + ' interaction' + (d.count === 1 ? '' : 's');
+  d.items.forEach(item => {
+    const tr = document.createElement('tr');
+    const values = [
+      item.timestamp, item.session, item.channel, item.language,
+      item.role, item.message, item.status,
+    ];
+    values.forEach((value, index) => {
+      const td = document.createElement('td');
+      td.textContent = value == null ? '' : String(value);
+      if (index === 5) td.className = 'interaction-message';
+      if (index === 6 && item.needs_review && !item.reviewed_at) td.className = 'needs-review';
+      tr.appendChild(td);
+    });
+    const action = document.createElement('td');
+    if (item.needs_review && !item.reviewed_at) {
+      const button = document.createElement('button');
+      button.textContent = 'Mark reviewed';
+      button.onclick = () => reviewInteraction(item.id);
+      action.appendChild(button);
+    } else if (item.reviewed_at) {
+      action.textContent = 'Reviewed';
+      action.title = item.review_note || '';
+    }
+    tr.appendChild(action);
+    rows.appendChild(tr);
+  });
+}
+
+async function reviewInteraction(id) {
+  const note = prompt('Optional review note:', '') || '';
+  const loadTest = document.getElementById('interactionDb').value;
+  const r = await fetch('/admin/interactions/' + id + '/review?load_test=' + loadTest, {
+    method: 'PATCH',
+    headers: { ...headers(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note }),
+  });
+  if (r.ok) refreshInteractions();
+  else alert('Could not mark interaction reviewed');
+}
+
+document.getElementById('refreshInteractions').addEventListener('click', refreshInteractions);
+document.getElementById('downloadInteractions').addEventListener('click', async () => {
+  const r = await fetch('/admin/interactions.csv?' + interactionQuery(), { headers: headers() });
+  if (!r.ok) { alert('Could not download interactions'); return; }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = document.getElementById('interactionDb').value === 'true'
+    ? 'load_test_interactions.csv' : 'interactions.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+});
 
 async function loadStores() {
   const d = await (await fetch('/stores')).json();
@@ -552,6 +902,8 @@ async function deleteStore(name, label) {
 }
 
 loadStores();
+refreshLeads();
+refreshInteractions();
 </script>
 </body>
 </html>"""

@@ -22,3 +22,8 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/
+.agents/
+skills-lock.json
+
+# Stale legacy export (runtime leads live in data/leads.csv)
+/leads.csv
