@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import csv
+import fcntl
 import json
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +27,7 @@ class LeadWriter:
     def __init__(self, path: Path, config_store: AdminConfigStore):
         self._path = path
         self._config_store = config_store
+        self._lock = threading.RLock()
 
     @property
     def path(self) -> Path:
@@ -38,28 +42,120 @@ class LeadWriter:
         language: str,
         profile: dict[str, Any],
     ) -> None:
-        config = self._config_store.get()
-        columns = csv_columns(config)
-        row = {col: "" for col in columns}
-        row["timestamp"] = datetime.now().isoformat(timespec="seconds")
-        row["channel"] = channel
-        row["source"] = source
-        row["session"] = session
-        row["language"] = language
-        for key, value in profile.items():
-            if key in row:
-                row[key] = _serialize(value)
+        values = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "channel": channel,
+            "source": source,
+            "session": session,
+            "language": language,
+            **profile,
+        }
+        self._upsert(session, values)
 
+    def upsert_client_identity(
+        self,
+        *,
+        session: str,
+        mobile: str,
+        customer_id: str,
+        customer_name: str,
+        language: str,
+        message_id: str = "",
+        client_timestamp: str = "",
+        received_at: str = "",
+    ) -> None:
+        self._upsert(
+            session,
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "channel": "client_app",
+                "source": "client_app",
+                "session": session,
+                "language": language,
+                "mobile": mobile,
+                "crm_customer_id": customer_id,
+                "customer_name": customer_name,
+                "last_message_id": message_id,
+                "client_timestamp": client_timestamp,
+                "received_at": received_at,
+            },
+        )
+
+    def add_documents(
+        self,
+        *,
+        session: str,
+        document_types: list[str],
+        url: str,
+        status: str,
+    ) -> None:
+        with self._lock:
+            with self._exclusive_file_lock():
+                columns, rows = self._read_rows()
+                row = next(
+                    (item for item in rows if item.get("session") == session),
+                    None,
+                )
+                if row is None:
+                    row = {column: "" for column in columns}
+                    row["session"] = session
+                    rows.append(row)
+                try:
+                    documents = json.loads(row.get("documents") or "[]")
+                except (TypeError, json.JSONDecodeError):
+                    documents = []
+                if not any(item.get("url") == url for item in documents):
+                    documents.append(
+                        {
+                            "types": list(document_types),
+                            "url": url,
+                            "status": status,
+                        }
+                    )
+                row["documents"] = _serialize(documents)
+                self._write_rows(columns, rows)
+
+    def _upsert(self, session: str, values: dict[str, Any]) -> None:
+        with self._lock:
+            with self._exclusive_file_lock():
+                columns, rows = self._read_rows()
+                row = next(
+                    (item for item in rows if item.get("session") == session),
+                    None,
+                )
+                if row is None:
+                    row = {column: "" for column in columns}
+                    rows.append(row)
+                for key, value in values.items():
+                    if key in row:
+                        row[key] = _serialize(value)
+                self._write_rows(columns, rows)
+
+    @contextmanager
+    def _exclusive_file_lock(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        if self._path.exists():
-            self._ensure_header(columns)
-            with self._path.open("a", newline="", encoding="utf-8-sig") as f:
-                csv.DictWriter(f, fieldnames=columns, extrasaction="ignore").writerow(row)
-        else:
-            with self._path.open("w", newline="", encoding="utf-8-sig") as f:
-                w = csv.DictWriter(f, fieldnames=columns)
-                w.writeheader()
-                w.writerow(row)
+        lock_path = self._path.with_suffix(self._path.suffix + ".lock")
+        with lock_path.open("a", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def _read_rows(self) -> tuple[list[str], list[dict[str, str]]]:
+        columns = csv_columns(self._config_store.get())
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._path.exists():
+            return columns, []
+        self._ensure_header(columns)
+        with self._path.open(newline="", encoding="utf-8-sig") as file:
+            return columns, list(csv.DictReader(file))
+
+    def _write_rows(self, columns: list[str], rows: list[dict[str, str]]) -> None:
+        with self._path.open("w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.DictWriter(file, fieldnames=columns, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
 
     def _ensure_header(self, columns: list[str]) -> None:
         with self._path.open(newline="", encoding="utf-8-sig") as f:

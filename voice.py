@@ -129,13 +129,15 @@ def transcribe_audio(
     mime_type: str,
     *,
     language_hint: str | None = None,
+    max_bytes: int | None = None,
 ) -> str:
     """Transcribe short user speech to plain text using Gemini."""
     if not audio_bytes:
         raise ValueError("Audio file is empty")
-    if len(audio_bytes) > config.MAX_AUDIO_BYTES:
+    limit = config.MAX_AUDIO_BYTES if max_bytes is None else max_bytes
+    if len(audio_bytes) > limit:
         raise ValueError(
-            f"Audio too large (max {config.MAX_AUDIO_BYTES // (1024 * 1024)} MB)"
+            f"Audio too large (max {limit // (1024 * 1024)} MB)"
         )
 
     from rag import get_client

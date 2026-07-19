@@ -76,7 +76,11 @@ class LLMPort(Protocol):
 
 def build_contents(history: list[dict[str, str]], user_text: str) -> list[dict]:
     contents: list[dict] = []
-    for turn in history:
+    first_user = next(
+        (index for index, turn in enumerate(history) if turn.get("role") != "model"),
+        len(history),
+    )
+    for turn in history[first_user:]:
         role = "model" if turn.get("role") == "model" else "user"
         contents.append({"role": role, "parts": [{"text": turn["text"]}]})
     contents.append({"role": "user", "parts": [{"text": user_text}]})

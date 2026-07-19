@@ -62,3 +62,33 @@ set -a; source .env; set +a
 locust -f locustfile.py --host http://127.0.0.1:8000 \
   --headless -u 10 -r 2 -t 1m
 ```
+
+## Client CRM webhook and mock stack
+
+The client-app channel is separate from WhatsApp. It accepts Basic-Auth events at
+`POST /client/webhook/messages`, performs the CRM customer lookup asynchronously,
+uses the qualification engine, and posts text replies to one configured callback URL.
+
+Run the isolated deployment-like smoke test:
+
+```bash
+bash test_mock_stack.sh
+```
+
+This builds and starts Redis, the client webhook, a dedicated RQ worker, and a mock
+CRM/callback service under a separate Compose project. It sends a real HTTP event,
+waits for the correlated callback, and removes the isolated stack afterward.
+
+To inspect the services manually:
+
+```bash
+docker compose -p tvsm-rag-mock --profile mock up \
+  --build redis mock-client client-webhook-mock mock-worker
+```
+
+The local webhook is then available on port `8004`, and mock CRM inspection is on
+port `8003`. Values in `.env.mock` are test-only and must not be used in production.
+
+For production, fill the `CLIENT_*` settings in `.env`, then start the dedicated
+client profile with `docker compose --profile client up -d`. Keep `client-worker`
+at one replica: its dedicated FIFO queue is what preserves webhook arrival order.

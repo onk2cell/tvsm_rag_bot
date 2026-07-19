@@ -68,8 +68,21 @@ DEFAULT_INTRO_TEXT = (
     "and connect you with your nearest dealership."
 )
 
-# Written to CSV by the engine — not asked as chat questions.
-SYSTEM_CSV_COLUMNS = ["timestamp", "channel", "source", "session", "language"]
+# Written to CSV by adapters/the engine — not asked as chat questions.
+SYSTEM_CSV_COLUMNS = [
+    "timestamp",
+    "channel",
+    "source",
+    "session",
+    "language",
+    "mobile",
+    "crm_customer_id",
+    "customer_name",
+    "last_message_id",
+    "client_timestamp",
+    "received_at",
+    "documents",
+]
 
 
 def default_config() -> dict[str, Any]:
@@ -91,6 +104,7 @@ def default_config() -> dict[str, Any]:
             "web": {"welcome_override": None},
             "whatsapp": {"welcome_override": None},
             "ricshow": {"welcome_override": None},
+            "client_app": {"welcome_override": None},
         },
     }
 

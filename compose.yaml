@@ -42,6 +42,116 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  client-webhook:
+    profiles: ["client"]
+    build: .
+    command: uvicorn client_webhook:app --host 0.0.0.0 --port 8002
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      CLIENT_QUEUE_NAME: client
+      CLIENT_ENV: production
+      CLIENT_VALIDATE_CONFIG: "true"
+    ports:
+      - "8002:8002"
+    depends_on:
+      redis:
+        condition: service_healthy
+      client-worker:
+        condition: service_healthy
+    restart: unless-stopped
+
+  client-worker:
+    profiles: ["client"]
+    build: .
+    command: python client_worker.py
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      CLIENT_QUEUE_NAME: client
+      CLIENT_ENV: production
+      CLIENT_VALIDATE_CONFIG: "true"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os; os.kill(1, 0)",
+        ]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    restart: unless-stopped
+
+  client-webhook-mock:
+    profiles: ["mock"]
+    build: .
+    command: uvicorn client_webhook:app --host 0.0.0.0 --port 8001
+    env_file:
+      - .env.mock
+    ports:
+      - "8004:8001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      mock-client:
+        condition: service_healthy
+      mock-worker:
+        condition: service_healthy
+
+  mock-worker:
+    profiles: ["mock"]
+    build: .
+    command: python client_worker.py
+    env_file:
+      - .env.mock
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      mock-client:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os; os.kill(1, 0)",
+        ]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
+  mock-client:
+    profiles: ["mock"]
+    build: .
+    command: uvicorn mock_client:app --host 0.0.0.0 --port 8002
+    env_file:
+      - .env.mock
+    ports:
+      - "8003:8002"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')",
+        ]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes

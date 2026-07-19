@@ -15,18 +15,44 @@ def _require(name: str) -> str:
 # --- Gemini ---
 # Optional: if empty, an admin can supply the key at runtime on the admin page.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-FILE_SEARCH_STORE = _require("FILE_SEARCH_STORE")
+FILE_SEARCH_STORE = os.environ.get("FILE_SEARCH_STORE", "")
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_TTS_MODEL = os.environ.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 GEMINI_TTS_VOICE = os.environ.get("GEMINI_TTS_VOICE", "Kore")
 MAX_TTS_CHARS = int(os.environ.get("MAX_TTS_CHARS", "1500"))
 
 # --- WhatsApp (Meta Cloud API) ---
-WHATSAPP_TOKEN = _require("WHATSAPP_TOKEN")
-PHONE_NUMBER_ID = _require("PHONE_NUMBER_ID")
-VERIFY_TOKEN = _require("VERIFY_TOKEN")
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "")
 APP_SECRET = os.environ.get("APP_SECRET", "")      # empty = signature check skipped
 GRAPH_VERSION = os.environ.get("GRAPH_VERSION", "v21.0")
+
+# --- Client app / CRM integration ---
+CLIENT_WEBHOOK_USER = os.environ.get("CLIENT_WEBHOOK_USER", "")
+CLIENT_WEBHOOK_PASSWORD = os.environ.get("CLIENT_WEBHOOK_PASSWORD", "")
+CLIENT_CRM_CUSTOMER_URL = os.environ.get("CLIENT_CRM_CUSTOMER_URL", "")
+CLIENT_REPLY_WEBHOOK_URL = os.environ.get("CLIENT_REPLY_WEBHOOK_URL", "")
+CLIENT_API_USER = os.environ.get("CLIENT_API_USER", "")
+CLIENT_API_PASSWORD = os.environ.get("CLIENT_API_PASSWORD", "")
+CLIENT_HTTP_TIMEOUT_SEC = float(os.environ.get("CLIENT_HTTP_TIMEOUT_SEC", "30"))
+CLIENT_RETRY_WAIT_SEC = float(os.environ.get("CLIENT_RETRY_WAIT_SEC", "30"))
+CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "3600"))
+CLIENT_DEDUP_TTL_SEC = int(os.environ.get("CLIENT_DEDUP_TTL_SEC", str(7 * 24 * 3600)))
+CLIENT_MAX_MEDIA_BYTES = int(
+    os.environ.get("CLIENT_MAX_MEDIA_BYTES", str(10 * 1024 * 1024))
+)
+CLIENT_TEST_MODE = os.environ.get("CLIENT_TEST_MODE", "").lower() in {"1", "true", "yes"}
+CLIENT_ENV = os.environ.get("CLIENT_ENV", "development").strip().lower()
+CLIENT_VALIDATE_CONFIG = os.environ.get(
+    "CLIENT_VALIDATE_CONFIG", ""
+).lower() in {"1", "true", "yes"}
+CLIENT_TEST_MEDIA_HOSTS = {
+    host.strip()
+    for host in os.environ.get("CLIENT_TEST_MEDIA_HOSTS", "").split(",")
+    if host.strip()
+}
+CLIENT_QUEUE_NAME = os.environ.get("CLIENT_QUEUE_NAME", "default")
 
 # --- Admin ---
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")    # empty = admin endpoints disabled

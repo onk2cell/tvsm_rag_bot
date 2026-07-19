@@ -5,6 +5,7 @@ google-genai==1.73.1
 python-dotenv==1.0.1
 python-multipart==0.0.20
 websockets==15.0.1
+mutagen==1.48.1
 
 # --- WhatsApp webhook stack (app.py) — only needed if you run the WhatsApp bot ---
 redis==7.4.0
