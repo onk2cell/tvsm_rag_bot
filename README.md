@@ -89,6 +89,36 @@ docker compose -p tvsm-rag-mock --profile mock up \
 The local webhook is then available on port `8004`, and mock CRM inspection is on
 port `8003`. Values in `.env.mock` are test-only and must not be used in production.
 
+### Interactive chat with real Gemini
+
+To test a continuous conversation through the real webhook and Gemini without
+calling the client's APIs, first set `GEMINI_API_KEY` and `FILE_SEARCH_STORE` in
+`.env`, then run:
+
+```bash
+bash real_chat_test.sh up
+```
+
+Open `http://localhost:8003/mock/chat`. Each message gets a unique webhook
+`message_id`, while the fixed mobile number keeps all turns in one server-side
+conversation. The flow is:
+
+```text
+browser chat → client webhook → Redis queue → real Gemini
+             → mock CRM/callback → browser chat
+```
+
+Useful commands:
+
+```bash
+bash real_chat_test.sh logs
+bash real_chat_test.sh down
+```
+
+This profile uses the mock customer record and callback, but sets
+`CLIENT_TEST_MODE=false`, so model answers come from Gemini. It is a local test
+profile and must not be exposed publicly.
+
 For production, fill the `CLIENT_*` settings in `.env`, then start the dedicated
 client profile with `docker compose --profile client up -d`. Keep `client-worker`
 at one replica: its dedicated FIFO queue is what preserves webhook arrival order.
