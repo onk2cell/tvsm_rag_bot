@@ -12,21 +12,11 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator
 
+from client_media import ALLOWED_AUDIO_MIME_TYPES, ALLOWED_IMAGE_MIME_TYPES
+
 
 SUPPORTED_MESSAGE_TYPES = frozenset({"text", "image", "audio"})
 INDIAN_E164_PATTERN = r"^\+91[6-9][0-9]{9}$"
-ALLOWED_IMAGE_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
-ALLOWED_AUDIO_MIME_TYPES = frozenset(
-    {
-        "audio/webm",
-        "audio/ogg",
-        "audio/mp4",
-        "audio/mpeg",
-        "audio/wav",
-        "audio/x-wav",
-        "audio/mp3",
-    }
-)
 
 
 class InboundMessage(BaseModel):
@@ -120,11 +110,7 @@ def _payload_errors(event: InboundMessage) -> list[dict[str, str]]:
             errors.append(
                 {"field": "media_url", "message": "media_url is required for media"}
             )
-        if not (event.mime_type or "").strip():
-            errors.append(
-                {"field": "mime_type", "message": "mime_type is required for media"}
-            )
-        else:
+        if (event.mime_type or "").strip():
             normalized_mime = event.mime_type.split(";", 1)[0].strip().lower()
             allowed = (
                 ALLOWED_IMAGE_MIME_TYPES

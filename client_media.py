@@ -23,6 +23,34 @@ class MediaFetchError(ValueError):
     pass
 
 
+ALLOWED_IMAGE_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
+ALLOWED_AUDIO_MIME_TYPES = frozenset(
+    {
+        "audio/webm",
+        "audio/ogg",
+        "audio/mp4",
+        "audio/mpeg",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/mp3",
+    }
+)
+
+EXTENSION_MIME_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".webm": "audio/webm",
+    ".ogg": "audio/ogg",
+    ".mp4": "audio/mp4",
+    ".m4a": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".mpeg": "audio/mpeg",
+    ".wav": "audio/wav",
+}
+
+
 class _PinnedResponse:
     def __init__(self, response, pool):
         self.status_code = response.status
@@ -64,7 +92,13 @@ class SafeMediaFetcher:
         self._pin_connections = http is requests
         self._resolver = resolver
 
-    def fetch(self, url: str, mime_type: str) -> bytes:
+    def fetch(
+        self,
+        url: str,
+        mime_type: str | None = None,
+        *,
+        message_type: str | None = None,
+    ) -> tuple[bytes, str]:
         current_url = url
         for _ in range(4):
             response = self._get(current_url)
@@ -81,7 +115,12 @@ class SafeMediaFetcher:
                     f"Media server returned HTTP {response.status_code}"
                 )
             try:
-                self._validate_mime(response, mime_type)
+                resolved_mime = self._resolve_mime(
+                    response,
+                    url=current_url,
+                    declared=mime_type,
+                    message_type=message_type,
+                )
                 data = bytearray()
                 for chunk in response.iter_content(chunk_size=64 * 1024):
                     if not chunk:
@@ -91,7 +130,7 @@ class SafeMediaFetcher:
                         raise MediaFetchError("Media file is too large")
                 if not data:
                     raise MediaFetchError("Media file is empty")
-                return bytes(data)
+                return bytes(data), resolved_mime
             finally:
                 response.close()
         raise MediaFetchError("Too many media redirects")
@@ -171,13 +210,62 @@ class SafeMediaFetcher:
         return hostname, addresses[0], False
 
     @staticmethod
-    def _validate_mime(response, expected: str) -> None:
-        actual = (response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
-        declared = (expected or "").split(";", 1)[0].lower()
-        if not actual or actual != declared:
-            raise MediaFetchError(
-                f"Media MIME mismatch: expected {declared}, received {actual or 'missing'}"
-            )
+    def _normalize_mime(value: str | None) -> str:
+        return (value or "").split(";", 1)[0].strip().lower()
+
+    @classmethod
+    def _allowed_for_message_type(cls, message_type: str | None) -> frozenset[str]:
+        if message_type == "image":
+            return ALLOWED_IMAGE_MIME_TYPES
+        if message_type == "audio":
+            return ALLOWED_AUDIO_MIME_TYPES
+        return ALLOWED_IMAGE_MIME_TYPES | ALLOWED_AUDIO_MIME_TYPES
+
+    @classmethod
+    def _mime_from_url(cls, url: str) -> str:
+        path = urlparse(url).path.lower()
+        for extension, mime_type in EXTENSION_MIME_TYPES.items():
+            if path.endswith(extension):
+                return mime_type
+        return ""
+
+    @classmethod
+    def _resolve_mime(
+        cls,
+        response,
+        *,
+        url: str,
+        declared: str | None,
+        message_type: str | None,
+    ) -> str:
+        actual = cls._normalize_mime(response.headers.get("Content-Type"))
+        expected = cls._normalize_mime(declared)
+        allowed = cls._allowed_for_message_type(message_type)
+
+        if expected:
+            if not actual or actual != expected:
+                raise MediaFetchError(
+                    f"Media MIME mismatch: expected {expected}, received {actual or 'missing'}"
+                )
+            if expected not in allowed:
+                raise MediaFetchError(
+                    f"Media MIME mismatch: expected type for {message_type or 'media'}, "
+                    f"received {expected}"
+                )
+            return expected
+
+        if actual in allowed:
+            return actual
+
+        guessed = cls._mime_from_url(url)
+        if guessed in allowed:
+            return guessed
+
+        raise MediaFetchError(
+            f"Media MIME mismatch: could not resolve supported type for "
+            f"{message_type or 'media'} "
+            f"(received {actual or 'missing'})"
+        )
 
 
 class GeminiAudioTranscriber:

@@ -1,0 +1,374 @@
+# Client API and Webhook Integration Guide
+
+This document describes the production contracts between the TVS qualification bot and the client CRM / customer app.
+
+There are three APIs:
+
+1. **Inbound message webhook** — client app/CRM calls the bot when a customer sends a message.
+2. **Customer lookup API** — bot calls the client CRM to fetch customer details by mobile.
+3. **Reply callback webhook** — bot calls the client to deliver the bot’s text reply.
+
+```text
+Customer app
+    │
+    │  1. POST /client/webhook/messages
+    ▼
+Bot webhook  ──enqueue──▶  Worker
+                              │
+                              │  2. GET customer by mobile
+                              ▼
+                         Client CRM
+                              │
+                              │  3. POST reply callback
+                              ▼
+                         Client app/CRM
+```
+
+All production traffic must use **HTTPS** and **HTTP Basic Authentication**.
+
+---
+
+## 1. Inbound message webhook (client → bot)
+
+### Endpoint
+
+```http
+POST /client/webhook/messages
+Authorization: Basic <base64(username:password)>
+Content-Type: application/json
+```
+
+Credentials are provided during go-live. The production base URL will be shared separately.
+
+### Purpose
+
+Notify the bot that a customer sent a message. The bot acknowledges immediately (`202`) and processes the message asynchronously. The reply is **not** returned in this response.
+
+### Required headers
+
+| Header | Value |
+|---|---|
+| `Authorization` | HTTP Basic Auth |
+| `Content-Type` | `application/json` |
+
+### Request body
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `message_id` | string | Yes | Unique ID for this message. Max 128 chars. Used for deduplication (7 days). |
+| `type` | string | Yes | `text`, `image`, or `audio` |
+| `mobile` | string | Yes | Indian E.164: `+91` followed by a 10-digit mobile starting with 6–9 |
+| `timestamp` | string | Yes | Client-supplied timestamp string (any format). Stored as metadata only. |
+| `content` | string | Required for `text` | Max 4096 characters. Optional caption for media. |
+| `media_url` | string | Required for `image`/`audio` | Public HTTPS URL the bot can download |
+| `mime_type` | string | Optional | If omitted, the bot detects type from the download `Content-Type`, then from the URL extension |
+
+#### Allowed MIME types
+
+**Images**
+
+- `image/jpeg`
+- `image/png`
+- `image/webp`
+
+**Audio**
+
+- `audio/webm`
+- `audio/ogg`
+- `audio/mp4`
+- `audio/mpeg`
+- `audio/mp3`
+- `audio/wav`
+- `audio/x-wav`
+
+Media limits: max **10 MB**. Audio max duration: **60 seconds**.
+
+If `mime_type` is omitted:
+
+1. Bot uses the media server’s `Content-Type` when it is a supported type.
+2. Otherwise bot guesses from the URL extension (for example `.jpg` → `image/jpeg`, `.mp3` → `audio/mpeg`).
+3. If neither works, the bot asks the customer to resend the media.
+
+### Example — text
+
+```bash
+curl -X POST "https://<bot-host>/client/webhook/messages" \
+  -u "CLIENT_USER:CLIENT_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message_id": "crm-msg-1001",
+    "type": "text",
+    "mobile": "+918286871533",
+    "timestamp": "2026-07-20T09:00:00+05:30",
+    "content": "Hi, I want details about Jupiter"
+  }'
+```
+
+### Example — image (document)
+
+```json
+{
+  "message_id": "crm-msg-1002",
+  "type": "image",
+  "mobile": "+918286871533",
+  "timestamp": "2026-07-20T09:01:00+05:30",
+  "media_url": "https://cdn.example.com/docs/dl-front.jpg",
+  "content": "Driving licence"
+}
+```
+
+### Example — audio
+
+```json
+{
+  "message_id": "crm-msg-1003",
+  "type": "audio",
+  "mobile": "+918286871533",
+  "timestamp": "2026-07-20T09:02:00+05:30",
+  "media_url": "https://cdn.example.com/voice/note.mp3"
+}
+```
+
+### Success responses (`202`)
+
+**Accepted**
+
+```json
+{
+  "status": "accepted",
+  "message_id": "crm-msg-1001",
+  "duplicate": false
+}
+```
+
+**Duplicate** (same `message_id` already received)
+
+```json
+{
+  "status": "duplicate",
+  "message_id": "crm-msg-1001",
+  "duplicate": true
+}
+```
+
+**Ignored** (unsupported `type`)
+
+```json
+{
+  "status": "ignored",
+  "message_id": "crm-msg-1004",
+  "duplicate": false,
+  "reason": "unsupported_type"
+}
+```
+
+### Error responses
+
+| HTTP | Meaning |
+|---|---|
+| `400` | Invalid payload (missing/invalid fields) |
+| `401` | Invalid Basic Auth credentials |
+| `429` | Rate limited (more than 12 messages/minute for the same mobile) |
+| `5xx` | Temporary server error — safe to retry with the same `message_id` |
+
+Example validation error:
+
+```json
+{
+  "code": "invalid_payload",
+  "errors": [
+    {"field": "mobile", "message": "String should match pattern ..."},
+    {"field": "content", "message": "content is required for text"}
+  ]
+}
+```
+
+### Client responsibilities for inbound webhook
+
+- Generate a **new unique `message_id`** for every customer message.
+- On network timeout or `5xx`, retry with the **same** `message_id` (idempotent).
+- Do not wait for the bot reply on this call; wait for the reply callback instead.
+- Keep using the same `mobile` for the same customer so conversation continuity works.
+
+---
+
+## 2. Customer lookup API (bot → client CRM)
+
+### Endpoint (client provides)
+
+```http
+GET <CLIENT_CRM_CUSTOMER_URL>?mobile=+918286871533
+Authorization: Basic <base64(username:password)>
+```
+
+Exact production URL and credentials are provided by the client.
+
+### Purpose
+
+On the first message of a conversation, the bot looks up the customer by mobile number to get identity and preferred language.
+
+### Query parameter
+
+| Param | Example | Required |
+|---|---|---|
+| `mobile` | `+918286871533` | Yes |
+
+### Expected successful response (`200`)
+
+Preferred shape:
+
+```json
+{
+  "customers": [
+    {
+      "customer_id": "C12345",
+      "name": "Asha Patil",
+      "preferred_language": "Marathi"
+    }
+  ]
+}
+```
+
+Also accepted:
+
+- A bare array of customer objects
+- A single customer object
+
+Required fields per customer:
+
+| Field | Required | Notes |
+|---|---|---|
+| `customer_id` (or `id`) | Yes | CRM customer identifier |
+| `name` (or `customer_name`) | Yes | Display name |
+| `preferred_language` | Recommended | Used for reply language. If missing/unsupported, bot detects from message text |
+
+If multiple customers are returned, the bot uses the **first** record.
+
+### Expected error responses
+
+| HTTP | Bot behavior |
+|---|---|
+| `404` / empty list | Treated as lookup failure |
+| `5xx` | Retried up to 3 times, then customer gets a temporary-unavailable reply |
+
+### Client responsibilities for customer API
+
+- Return identity for known mobiles.
+- Prefer stable `customer_id` values.
+- Prefer languages the bot supports (for example English, Hindi, Marathi). Exact supported set is configured in the bot admin.
+
+---
+
+## 3. Reply callback webhook (bot → client)
+
+### Endpoint (client provides)
+
+```http
+POST <CLIENT_REPLY_WEBHOOK_URL>
+Authorization: Basic <base64(username:password)>
+Content-Type: application/json
+```
+
+Exact production URL and credentials are provided by the client.
+
+### Purpose
+
+Deliver the bot’s text reply so the client app can show it to the customer.
+
+### Request body
+
+| Field | Type | Always present | Notes |
+|---|---|---|---|
+| `message_id` | string | Yes | Unique outbound reply ID (client should dedupe on this) |
+| `in_reply_to` | string | Yes | Original inbound `message_id` |
+| `type` | string | Yes | Always `text` in v1 |
+| `mobile` | string | Yes | Same customer mobile |
+| `content` | string | Yes | Reply text, max 4096 chars per part |
+| `timestamp` | string | Yes | ISO 8601 UTC, e.g. `2026-07-20T03:30:00+00:00` |
+| `part_number` | integer | Yes | Starts at `1` |
+| `part_count` | integer | Yes | Total parts for this reply |
+
+### Example
+
+```json
+{
+  "message_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "in_reply_to": "crm-msg-1001",
+  "type": "text",
+  "mobile": "+918286871533",
+  "content": "Namaste Asha! Jupiter chi mahiti pahije ka?",
+  "timestamp": "2026-07-20T03:30:12+00:00",
+  "part_number": 1,
+  "part_count": 1
+}
+```
+
+### Long replies
+
+If content exceeds 4096 characters, the bot splits it into ordered parts:
+
+1. Sends part 1 and waits for success
+2. Then sends part 2, and so on
+
+Use `part_number` / `part_count` plus `in_reply_to` to reassemble.
+
+### Success definition
+
+Any HTTP **`2xx`** response (including `200` or `204`) means the reply was delivered successfully.
+
+### Retry policy (bot side)
+
+- Timeout: 30 seconds per attempt
+- Attempts: 3 total
+- Wait between attempts: 30 seconds
+- After permanent failure: bot keeps the reply for admin review
+
+### Client responsibilities for reply webhook
+
+- Acknowledge with any `2xx` as soon as the reply is safely received/stored.
+- Deduplicate by outbound `message_id`.
+- Correlate the UI reply using `in_reply_to` (and `part_number` when split).
+- Do not require the bot to wait for delivery/read receipts in v1.
+
+---
+
+## Conversation behavior (important for integrators)
+
+| Topic | Behavior |
+|---|---|
+| Session key | `mobile` |
+| Continuity | Same mobile continues one conversation while active |
+| Idle expiry | After **1 hour** of inactivity, a new conversation starts |
+| Ordering | Messages for one mobile are processed in arrival order |
+| Reply type | Text only in v1 |
+| Images | Used for document recognition (licence, ID, finance, vehicle docs, etc.) |
+| Audio | Transcribed, then answered as text |
+| Lead notes | Stored locally by the bot; not written back to CRM in v1 |
+
+---
+
+## Checklist before go-live
+
+Client must provide:
+
+- [ ] Production customer lookup URL
+- [ ] Production reply callback URL
+- [ ] Basic Auth username/password for both client APIs
+- [ ] Confirmation of customer response JSON shape (sample payload)
+- [ ] Confirmation that reply webhook returns `2xx` on success
+
+Bot team will provide:
+
+- [ ] Production inbound webhook URL
+- [ ] Basic Auth username/password for inbound webhook
+- [ ] Staging/test window for end-to-end verification
+
+---
+
+## Quick reference
+
+| Direction | API | Method | Who hosts it |
+|---|---|---|---|
+| Client → Bot | `/client/webhook/messages` | `POST` | Bot |
+| Bot → Client | Customer lookup by `mobile` | `GET` | Client CRM |
+| Bot → Client | Reply callback | `POST` | Client app/CRM |

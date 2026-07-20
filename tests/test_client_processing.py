@@ -97,12 +97,17 @@ class FakeInteractionStore:
 
 
 class FakeMediaFetcher:
-    def fetch(self, url: str, mime_type: str) -> bytes:
-        return f"bytes:{url}:{mime_type}".encode()
+    def fetch(
+        self, url: str, mime_type: str | None = None, *, message_type: str | None = None
+    ) -> tuple[bytes, str]:
+        resolved = mime_type or f"resolved/{message_type or 'media'}"
+        return f"bytes:{url}:{resolved}".encode(), resolved
 
 
 class FailingMediaFetcher:
-    def fetch(self, url: str, mime_type: str) -> bytes:
+    def fetch(
+        self, url: str, mime_type: str | None = None, *, message_type: str | None = None
+    ) -> tuple[bytes, str]:
         raise ValueError("media unavailable")
 
 

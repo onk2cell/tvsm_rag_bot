@@ -104,7 +104,8 @@ The production and mock paths will use the same interfaces and payload validatio
 - Generate a server-owned UTC `received_at` value for operational use.
 - Supported types are `text`, `image`, and `audio`.
 - Text events require `content`.
-- Image and audio events require `media_url` and `mime_type`; `content` is an optional caption.
+- Image and audio events require `media_url`; `content` is an optional caption.
+- `mime_type` is optional. When omitted, resolve from the download `Content-Type`, then from the URL extension, and reject only if no supported type can be determined.
 - Limit text and captions to 4,096 characters.
 - Return detailed HTTP 400 responses with stable field-level error codes for malformed JSON or invalid required fields.
 - Return HTTP 401 for invalid Basic Authentication.

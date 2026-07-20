@@ -54,7 +54,9 @@ class ClientLeadStore(Protocol):
 
 
 class MediaFetcher(Protocol):
-    def fetch(self, url: str, mime_type: str) -> bytes: ...
+    def fetch(
+        self, url: str, mime_type: str | None = None, *, message_type: str | None = None
+    ) -> tuple[bytes, str]: ...
 
 
 class AudioTranscriber(Protocol):
@@ -257,12 +259,16 @@ class ClientMessageProcessor:
         if event["type"] == "text":
             return (event.get("content") or "").strip(), None
 
-        data = self._media_fetcher.fetch(event["media_url"], event["mime_type"])
+        data, mime_type = self._media_fetcher.fetch(
+            event["media_url"],
+            event.get("mime_type"),
+            message_type=event["type"],
+        )
         if event["type"] == "audio":
             transcript = self._attempt(
                 lambda: self._transcriber.transcribe(
                     data,
-                    event["mime_type"],
+                    mime_type,
                     language,
                 )
             )
@@ -271,7 +277,7 @@ class ClientMessageProcessor:
             return transcript, None
 
         result = self._attempt(
-            lambda: self._document_recognizer.recognize(data, event["mime_type"])
+            lambda: self._document_recognizer.recognize(data, mime_type)
         )
         if result.status == "not_document":
             return (

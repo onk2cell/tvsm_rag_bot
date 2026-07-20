@@ -65,6 +65,9 @@ locust -f locustfile.py --host http://127.0.0.1:8000 \
 
 ## Client CRM webhook and mock stack
 
+Client-facing API contracts (inbound webhook, customer lookup, reply callback)
+are documented in [`docs/CLIENT_API_AND_WEBHOOK_GUIDE.md`](docs/CLIENT_API_AND_WEBHOOK_GUIDE.md).
+
 The client-app channel is separate from WhatsApp. It accepts Basic-Auth events at
 `POST /client/webhook/messages`, performs the CRM customer lookup asynchronously,
 uses the qualification engine, and posts text replies to one configured callback URL.

@@ -157,23 +157,32 @@ def test_text_requires_content():
     assert publisher.events == []
 
 
-def test_media_requires_url_and_mime_type():
-    client, _, _ = _client()
+def test_media_requires_url_but_mime_type_is_optional():
+    client, _, publisher = _client()
 
-    response = client.post(
+    missing_url = client.post(
         "/client/webhook/messages",
         auth=("client", "secret"),
         json=_text_event(type="audio", content=None),
     )
+    without_mime = client.post(
+        "/client/webhook/messages",
+        auth=("client", "secret"),
+        json=_text_event(
+            type="audio",
+            content=None,
+            media_url="https://client.example/file.mp3",
+        ),
+    )
 
-    assert response.status_code == 400
-    assert {error["field"] for error in response.json()["errors"]} >= {
-        "media_url",
-        "mime_type",
-    }
+    assert missing_url.status_code == 400
+    assert {error["field"] for error in missing_url.json()["errors"]} == {"media_url"}
+    assert without_mime.status_code == 202
+    assert without_mime.json()["status"] == "accepted"
+    assert "mime_type" not in publisher.events[0]
 
 
-def test_media_mime_must_match_message_type():
+def test_media_mime_must_match_message_type_when_provided():
     client, _, publisher = _client()
 
     response = client.post(

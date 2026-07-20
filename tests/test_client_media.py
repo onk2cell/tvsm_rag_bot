@@ -87,6 +87,46 @@ def test_media_fetcher_rejects_mime_mismatch():
         fetcher.fetch("https://client.example/audio.mp3", "audio/mpeg")
 
 
+def test_media_fetcher_resolves_mime_from_content_type_when_not_declared():
+    http = FakeHttp([FakeResponse(mime="audio/mpeg")])
+    fetcher = SafeMediaFetcher(http=http, resolver=lambda _: ["8.8.8.8"])
+
+    data, mime_type = fetcher.fetch(
+        "https://client.example/voice",
+        None,
+        message_type="audio",
+    )
+
+    assert data == b"audio"
+    assert mime_type == "audio/mpeg"
+
+
+def test_media_fetcher_falls_back_to_url_extension_for_generic_content_type():
+    http = FakeHttp([FakeResponse(mime="application/octet-stream")])
+    fetcher = SafeMediaFetcher(http=http, resolver=lambda _: ["8.8.8.8"])
+
+    data, mime_type = fetcher.fetch(
+        "https://client.example/docs/licence.jpg?token=1",
+        None,
+        message_type="image",
+    )
+
+    assert data == b"audio"
+    assert mime_type == "image/jpeg"
+
+
+def test_media_fetcher_rejects_unresolvable_mime_for_message_type():
+    http = FakeHttp([FakeResponse(mime="application/octet-stream")])
+    fetcher = SafeMediaFetcher(http=http, resolver=lambda _: ["8.8.8.8"])
+
+    with pytest.raises(MediaFetchError, match="MIME"):
+        fetcher.fetch(
+            "https://client.example/file.bin",
+            None,
+            message_type="audio",
+        )
+
+
 def test_audio_transcriber_rejects_audio_longer_than_sixty_seconds():
     output = io.BytesIO()
     with wave.open(output, "wb") as audio:
@@ -134,7 +174,7 @@ def test_production_fetch_pins_the_validated_ip(monkeypatch):
     assert fetcher.fetch(
         "https://client.example/audio.mp3?token=x",
         "audio/mpeg",
-    ) == b"audio"
+    ) == (b"audio", "audio/mpeg")
     assert captured["host"] == "8.8.8.8"
     assert captured["kwargs"]["server_hostname"] == "client.example"
     assert captured["kwargs"]["assert_hostname"] == "client.example"
