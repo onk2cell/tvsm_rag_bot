@@ -144,6 +144,93 @@ class HttpReplySender:
         raise ReplyDeliveryError(last_error)
 
 
+class JamWhatsAppReplySender:
+    """Outbound sender for JAM WhatsApp Bot send API (X-API-KEY)."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        api_key: str,
+        timeout: float = 30,
+        retry_wait: float = 30,
+        http=requests,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self._url = url
+        self._api_key = api_key
+        self._timeout = timeout
+        self._retry_wait = retry_wait
+        self._http = http
+        self._sleep = sleep
+
+    def send(self, *, mobile: str, in_reply_to: str, text: str) -> None:
+        del in_reply_to  # JAM send API correlates by mobile only
+        for part in _split_text(text, 4096):
+            self._deliver(
+                {
+                    "mobile": _jam_mobile(mobile),
+                    "type": "text",
+                    "message": part,
+                }
+            )
+
+    def _deliver(self, payload: dict) -> None:
+        last_error = "JAM WhatsApp send failed"
+        for attempt in range(3):
+            try:
+                response = self._http.post(
+                    self._url,
+                    json=payload,
+                    headers={
+                        "X-API-KEY": self._api_key,
+                        "Content-Type": "application/json",
+                    },
+                    timeout=self._timeout,
+                )
+                if response.status_code == 200:
+                    body = _safe_json(response)
+                    if isinstance(body, dict) and body.get("status") == "success":
+                        return
+                    last_error = f"JAM send rejected payload: {body}"
+                else:
+                    last_error = f"JAM send returned HTTP {response.status_code}"
+            except (requests.RequestException, ValueError, TypeError) as error:
+                last_error = str(error)
+            if attempt < 2:
+                self._sleep(self._retry_wait)
+        raise ReplyDeliveryError(last_error)
+
+
+class StubCustomerDirectory:
+    """Temporary identity when client CRM lookup API is not ready yet."""
+
+    def lookup(self, mobile: str) -> Customer:
+        digits = "".join(ch for ch in mobile if ch.isdigit())
+        display = digits[2:] if digits.startswith("91") and len(digits) > 2 else digits
+        return Customer(
+            customer_id=f"stub-{digits or 'unknown'}",
+            name=f"Customer {display or mobile}",
+            preferred_language="English",
+        )
+
+
+def _jam_mobile(mobile: str) -> str:
+    digits = "".join(ch for ch in mobile if ch.isdigit())
+    if digits.startswith("91") and len(digits) == 12:
+        return digits
+    if len(digits) == 10:
+        return "91" + digits
+    return digits
+
+
+def _safe_json(response):
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
 def _split_text(text: str, limit: int) -> list[str]:
     return [text[index : index + limit] for index in range(0, len(text), limit)] or [""]
 

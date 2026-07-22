@@ -53,6 +53,10 @@ services:
       CLIENT_QUEUE_NAME: client
       CLIENT_ENV: production
       CLIENT_VALIDATE_CONFIG: "true"
+      CLIENT_TEST_MODE: "false"
+      CLIENT_STUB_CUSTOMER: "true"
+      CLIENT_REPLY_AUTH_MODE: api_key
+      CLIENT_REPLY_WEBHOOK_URL: https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send
     ports:
       - "8002:8002"
     depends_on:
@@ -73,6 +77,10 @@ services:
       CLIENT_QUEUE_NAME: client
       CLIENT_ENV: production
       CLIENT_VALIDATE_CONFIG: "true"
+      CLIENT_TEST_MODE: "false"
+      CLIENT_STUB_CUSTOMER: "true"
+      CLIENT_REPLY_AUTH_MODE: api_key
+      CLIENT_REPLY_WEBHOOK_URL: https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send
     volumes:
       - ./data:/app/data
     depends_on:

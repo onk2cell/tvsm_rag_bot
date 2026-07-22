@@ -146,6 +146,69 @@ def test_reply_sender_retries_three_times_then_flags_failure():
     assert waits == [30, 30]
 
 
+def test_jam_whatsapp_reply_sender_uses_api_key_and_strips_plus():
+    from client_adapters import JamWhatsAppReplySender
+
+    http = FakeHttp([FakeResponse(200, {"status": "success", "data": {}})])
+    sender = JamWhatsAppReplySender(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send",
+        api_key="secret-key",
+        timeout=30,
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    sender.send(
+        mobile="+918459522206",
+        in_reply_to="incoming-1",
+        text="Hello from bot",
+    )
+
+    call = http.calls[0]
+    assert call["url"].endswith("/whatsapp_bot/send")
+    assert call["headers"]["X-API-KEY"] == "secret-key"
+    assert call["json"] == {
+        "mobile": "918459522206",
+        "type": "text",
+        "message": "Hello from bot",
+    }
+
+
+def test_jam_whatsapp_reply_sender_splits_long_text():
+    from client_adapters import JamWhatsAppReplySender
+
+    http = FakeHttp(
+        [
+            FakeResponse(200, {"status": "success"}),
+            FakeResponse(200, {"status": "success"}),
+        ]
+    )
+    sender = JamWhatsAppReplySender(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    sender.send(
+        mobile="918459522206",
+        in_reply_to="incoming-1",
+        text="x" * 4097,
+    )
+
+    assert [len(call["json"]["message"]) for call in http.calls] == [4096, 1]
+
+
+def test_stub_customer_directory_builds_identity_from_mobile():
+    from client_adapters import StubCustomerDirectory
+
+    customer = StubCustomerDirectory().lookup("+918459522206")
+
+    assert customer.customer_id == "stub-918459522206"
+    assert customer.name == "Customer 8459522206"
+    assert customer.preferred_language == "English"
+
+
 class FakeRedis:
     def __init__(self):
         self.data: dict[str, str] = {}

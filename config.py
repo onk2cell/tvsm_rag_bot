@@ -35,6 +35,13 @@ CLIENT_CRM_CUSTOMER_URL = os.environ.get("CLIENT_CRM_CUSTOMER_URL", "")
 CLIENT_REPLY_WEBHOOK_URL = os.environ.get("CLIENT_REPLY_WEBHOOK_URL", "")
 CLIENT_API_USER = os.environ.get("CLIENT_API_USER", "")
 CLIENT_API_PASSWORD = os.environ.get("CLIENT_API_PASSWORD", "")
+CLIENT_REPLY_AUTH_MODE = os.environ.get("CLIENT_REPLY_AUTH_MODE", "basic").strip().lower()
+CLIENT_REPLY_API_KEY = os.environ.get("CLIENT_REPLY_API_KEY", "")
+CLIENT_STUB_CUSTOMER = os.environ.get("CLIENT_STUB_CUSTOMER", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 CLIENT_HTTP_TIMEOUT_SEC = float(os.environ.get("CLIENT_HTTP_TIMEOUT_SEC", "30"))
 CLIENT_RETRY_WAIT_SEC = float(os.environ.get("CLIENT_RETRY_WAIT_SEC", "30"))
 CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "3600"))

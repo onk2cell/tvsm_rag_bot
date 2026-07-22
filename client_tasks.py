@@ -10,7 +10,13 @@ from rq import get_current_job
 import admin_config
 import config
 import interactions
-from client_adapters import HttpCustomerDirectory, HttpReplySender, RedisClientState
+from client_adapters import (
+    HttpCustomerDirectory,
+    HttpReplySender,
+    JamWhatsAppReplySender,
+    RedisClientState,
+    StubCustomerDirectory,
+)
 from client_media import (
     DeterministicAudioTranscriber,
     DeterministicDocumentRecognizer,
@@ -39,16 +45,24 @@ def validate_worker_config() -> None:
         raise RuntimeError("CLIENT_TEST_MODE cannot be enabled in production")
     if not config.CLIENT_VALIDATE_CONFIG:
         return
-    missing = [
-        name
-        for name, value in (
-            ("CLIENT_CRM_CUSTOMER_URL", config.CLIENT_CRM_CUSTOMER_URL),
-            ("CLIENT_REPLY_WEBHOOK_URL", config.CLIENT_REPLY_WEBHOOK_URL),
-            ("CLIENT_API_USER", config.CLIENT_API_USER),
-            ("CLIENT_API_PASSWORD", config.CLIENT_API_PASSWORD),
-        )
-        if not value
-    ]
+    missing = []
+    if not config.CLIENT_STUB_CUSTOMER and not config.CLIENT_CRM_CUSTOMER_URL:
+        missing.append("CLIENT_CRM_CUSTOMER_URL")
+    if not config.CLIENT_REPLY_WEBHOOK_URL:
+        missing.append("CLIENT_REPLY_WEBHOOK_URL")
+    if config.CLIENT_REPLY_AUTH_MODE == "api_key":
+        if not config.CLIENT_REPLY_API_KEY:
+            missing.append("CLIENT_REPLY_API_KEY")
+    else:
+        if not config.CLIENT_API_USER:
+            missing.append("CLIENT_API_USER")
+        if not config.CLIENT_API_PASSWORD:
+            missing.append("CLIENT_API_PASSWORD")
+        if not config.CLIENT_STUB_CUSTOMER and (
+            not config.CLIENT_API_USER or not config.CLIENT_API_PASSWORD
+        ):
+            # CRM basic auth uses the same outbound credentials in basic mode.
+            pass
     if missing:
         raise RuntimeError(
             "Missing required client worker settings: " + ", ".join(missing)
@@ -75,26 +89,41 @@ def build_processor(redis: Redis | None = None) -> ClientMessageProcessor:
         transcriber = GeminiAudioTranscriber()
         recognizer = GeminiDocumentRecognizer()
 
-    return ClientMessageProcessor(
-        state=RedisClientState(
-            redis,
-            ttl_seconds=config.CLIENT_HISTORY_TTL_SEC,
-        ),
-        directory=HttpCustomerDirectory(
+    if config.CLIENT_STUB_CUSTOMER:
+        directory = StubCustomerDirectory()
+    else:
+        directory = HttpCustomerDirectory(
             config.CLIENT_CRM_CUSTOMER_URL,
             username=config.CLIENT_API_USER,
             password=config.CLIENT_API_PASSWORD,
             timeout=config.CLIENT_HTTP_TIMEOUT_SEC,
             retry_wait=config.CLIENT_RETRY_WAIT_SEC,
-        ),
-        engine=engine,
-        reply_sender=HttpReplySender(
+        )
+
+    if config.CLIENT_REPLY_AUTH_MODE == "api_key":
+        reply_sender = JamWhatsAppReplySender(
+            config.CLIENT_REPLY_WEBHOOK_URL,
+            api_key=config.CLIENT_REPLY_API_KEY,
+            timeout=config.CLIENT_HTTP_TIMEOUT_SEC,
+            retry_wait=config.CLIENT_RETRY_WAIT_SEC,
+        )
+    else:
+        reply_sender = HttpReplySender(
             config.CLIENT_REPLY_WEBHOOK_URL,
             username=config.CLIENT_API_USER,
             password=config.CLIENT_API_PASSWORD,
             timeout=config.CLIENT_HTTP_TIMEOUT_SEC,
             retry_wait=config.CLIENT_RETRY_WAIT_SEC,
+        )
+
+    return ClientMessageProcessor(
+        state=RedisClientState(
+            redis,
+            ttl_seconds=config.CLIENT_HISTORY_TTL_SEC,
         ),
+        directory=directory,
+        engine=engine,
+        reply_sender=reply_sender,
         lead_store=lead_writer,
         interaction_store=interactions.get_store(),
         media_fetcher=SafeMediaFetcher(

@@ -259,7 +259,32 @@ If multiple customers are returned, the bot uses the **first** record.
 
 ---
 
-## 3. Reply callback webhook (bot → client)
+## 3. Reply delivery (bot → client / WhatsApp)
+
+### Current production path (JAM WhatsApp send API)
+
+```http
+POST https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send
+X-API-KEY: <key from JAM>
+Content-Type: application/json
+```
+
+```json
+{
+  "mobile": "918459522206",
+  "type": "text",
+  "message": "Bot reply text"
+}
+```
+
+Notes:
+
+- Mobile must be digits only (`91...`), no `+`
+- Success is HTTP `200` with `"status":"success"`
+- No `in_reply_to` field in JAM send API; correlation is by mobile
+- Until CRM lookup API is ready, bot may use a temporary stub customer identity
+
+### Legacy callback shape (mock / older assumption)
 
 ### Endpoint (client provides)
 
