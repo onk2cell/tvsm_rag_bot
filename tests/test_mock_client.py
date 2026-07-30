@@ -167,8 +167,70 @@ def test_webhook_chat_page_is_available():
     response = client.get("/mock/chat")
 
     assert response.status_code == 200
-    assert "Webhook Test Chat" in response.text
+    assert "WhatsApp Bot Lab" in response.text
     assert "/mock/chat/send" in response.text
+    assert "CRM customer JSON" in response.text
+
+
+def test_presets_and_put_crm_fixture():
+    client = _client()
+
+    presets = client.get("/mock/presets").json()["presets"]
+    assert any(item["id"] == "returning_ev_max" for item in presets)
+    unknown = next(item for item in presets if item["id"] == "unknown_number")
+    assert unknown["customers"] == []
+
+    response = client.put(
+        "/mock/chat/crm",
+        json={
+            "mobile": "+918459522206",
+            "customers": [
+                {
+                    "customer_id": "313784",
+                    "name": "Onkar Game",
+                    "product_enquired": "King EV MAX",
+                    "last_status": "Interested",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    crm = client.get("/mock/chat/crm", params={"mobile": "+918459522206"}).json()
+    assert crm["customers"][0]["name"] == "Onkar Game"
+
+    cleared = client.put(
+        "/mock/chat/crm",
+        json={"mobile": "+919999000111", "customers": []},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["customers"] == []
+    missing = client.get(
+        "/mock/customers",
+        params={"mobile": "+919999000111"},
+        auth=("api", "secret"),
+    )
+    assert missing.status_code == 404
+
+
+def test_chat_reset_clears_replies_without_redis():
+    client = _client()
+    client.post(
+        "/mock/replies",
+        auth=("api", "secret"),
+        json={
+            "message_id": "reply-1",
+            "mobile": "+918459522206",
+            "type": "text",
+            "content": "Hi",
+        },
+    )
+    reset = client.post("/mock/chat/reset", json={"mobile": "+918459522206"})
+    assert reset.status_code == 200
+    assert reset.json()["session_deleted"] is False
+    replies = client.get(
+        "/mock/chat/replies", params={"mobile": "+918459522206"}
+    ).json()["replies"]
+    assert replies == []
 
 
 def test_webhook_chat_sends_unique_event_to_bot():

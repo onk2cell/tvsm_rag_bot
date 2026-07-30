@@ -44,7 +44,7 @@ def main() -> None:
     mock_auth = ("mock-client", "mock-secret")
     webhook_auth = ("mock-app", "mock-app-secret")
     wait_for_health("http://127.0.0.1:8003/health")
-    wait_for_health("http://127.0.0.1:8004/health")
+    wait_for_health("http://127.0.0.1:8005/health")
     request(
         "http://127.0.0.1:8003/mock/control/reset",
         auth=mock_auth,
@@ -53,7 +53,7 @@ def main() -> None:
     message_id = f"smoke-{uuid.uuid4()}"
     message_text = f"smoke message {message_id}"
     status, acknowledgement = request(
-        "http://127.0.0.1:8004/client/webhook/messages",
+        "http://127.0.0.1:8005/client/webhook/messages",
         auth=webhook_auth,
         payload={
             "message_id": message_id,

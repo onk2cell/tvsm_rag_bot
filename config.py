@@ -21,14 +21,7 @@ GEMINI_TTS_MODEL = os.environ.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-
 GEMINI_TTS_VOICE = os.environ.get("GEMINI_TTS_VOICE", "Kore")
 MAX_TTS_CHARS = int(os.environ.get("MAX_TTS_CHARS", "1500"))
 
-# --- WhatsApp (Meta Cloud API) ---
-WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID", "")
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "")
-APP_SECRET = os.environ.get("APP_SECRET", "")      # empty = signature check skipped
-GRAPH_VERSION = os.environ.get("GRAPH_VERSION", "v21.0")
-
-# --- Client app / CRM integration ---
+# --- Client app / CRM integration (JAM WhatsApp) ---
 CLIENT_WEBHOOK_USER = os.environ.get("CLIENT_WEBHOOK_USER", "")
 CLIENT_WEBHOOK_PASSWORD = os.environ.get("CLIENT_WEBHOOK_PASSWORD", "")
 CLIENT_CRM_CUSTOMER_URL = os.environ.get("CLIENT_CRM_CUSTOMER_URL", "")
@@ -37,6 +30,7 @@ CLIENT_API_USER = os.environ.get("CLIENT_API_USER", "")
 CLIENT_API_PASSWORD = os.environ.get("CLIENT_API_PASSWORD", "")
 CLIENT_REPLY_AUTH_MODE = os.environ.get("CLIENT_REPLY_AUTH_MODE", "basic").strip().lower()
 CLIENT_REPLY_API_KEY = os.environ.get("CLIENT_REPLY_API_KEY", "")
+CLIENT_DISPOSE_URL = os.environ.get("CLIENT_DISPOSE_URL", "")
 CLIENT_STUB_CUSTOMER = os.environ.get("CLIENT_STUB_CUSTOMER", "").lower() in {
     "1",
     "true",
@@ -44,7 +38,7 @@ CLIENT_STUB_CUSTOMER = os.environ.get("CLIENT_STUB_CUSTOMER", "").lower() in {
 }
 CLIENT_HTTP_TIMEOUT_SEC = float(os.environ.get("CLIENT_HTTP_TIMEOUT_SEC", "30"))
 CLIENT_RETRY_WAIT_SEC = float(os.environ.get("CLIENT_RETRY_WAIT_SEC", "30"))
-CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "3600"))
+CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "14400"))
 CLIENT_DEDUP_TTL_SEC = int(os.environ.get("CLIENT_DEDUP_TTL_SEC", str(7 * 24 * 3600)))
 CLIENT_MAX_MEDIA_BYTES = int(
     os.environ.get("CLIENT_MAX_MEDIA_BYTES", str(10 * 1024 * 1024))
@@ -60,14 +54,14 @@ CLIENT_TEST_MEDIA_HOSTS = {
     if host.strip()
 }
 CLIENT_QUEUE_NAME = os.environ.get("CLIENT_QUEUE_NAME", "default")
+CLIENT_MEDIA_BASE_URL = os.environ.get(
+    "CLIENT_MEDIA_BASE_URL",
+    "https://aichatbot.jamoutsourcing.com/media",
+).strip()
 
 # --- Admin ---
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")    # empty = admin endpoints disabled
 ADMIN_CONFIG_PATH = os.environ.get("ADMIN_CONFIG_PATH", "data/admin_config.json")
-
-# --- Web playground access (HTTP Basic Auth) ---
-APP_USER = os.environ.get("APP_USER", "team")
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "")  # empty = no login required (open)
 
 # --- Redis / behaviour ---
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")

@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "==> TVS RAG bot — local setup"
+echo "==> TVS WhatsApp bot — local setup"
 
 if ! command -v python3 >/dev/null; then
   echo "ERROR: python3 not found. Install: sudo apt install python3 python3-venv python3-pip"
@@ -51,9 +51,9 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
   echo "  source venv/bin/activate"
   echo "  python index_document.py tvs_three_wheelers_kb.pdf"
   echo ""
-  echo "Run the qualification web chat:"
-  echo "  uvicorn web:app --reload --port 8000"
-  echo "  open http://localhost:8000/"
+  echo "Run the local mock CRM lab:"
+  echo "  docker compose --profile lab up -d --build"
+  echo "  open http://localhost:8003/mock/chat"
   echo "------------------------------------------------------------------"
   exit 0
 fi
@@ -75,11 +75,8 @@ if [[ -z "${FILE_SEARCH_STORE:-}" ]]; then
 fi
 
 echo ""
-echo "==> Ready. Start the qualification chat:"
-echo "  source venv/bin/activate"
-echo "  uvicorn web:app --reload --port 8000"
-echo ""
-echo "  http://localhost:8000/              — qualification chat"
-echo "  http://localhost:8000/?source=ricshow"
-echo "  http://localhost:8000/playground    — dev RAG playground"
-echo "  http://localhost:8000/admin         — admin (token: \${ADMIN_TOKEN} in .env)"
+echo "==> Ready."
+echo "  Local lab:  docker compose --profile lab up -d --build"
+echo "              http://localhost:8003/mock/chat"
+echo "  Production: docker compose --profile client up -d --build"
+echo "  Tests:      .venv/bin/python -m pytest tests/ -q"

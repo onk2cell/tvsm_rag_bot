@@ -31,7 +31,7 @@ def test_default_config_has_required_keys():
         "intro",
     ):
         assert key in cfg
-    assert len(cfg["languages"]) == 4
+    assert len(cfg["languages"]) == 7
     assert cfg["voice_policy"] == "intro_only"
 
 

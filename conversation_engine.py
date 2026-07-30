@@ -26,11 +26,22 @@ FLOW_STEP_GUIDANCE: dict[str, str] = {
         "Proactively mention the current campaign in 1-2 lines "
         "(CAMPAIGN section only)."
     ),
-    "timeline": "Ask when they want to buy or take delivery.",
+    "timeline": (
+        "Ask when they want to buy or take delivery. Prefer a concrete date "
+        "(DD/MM/YYYY) but do not force it. "
+        "If they say something like 'in the next 10 days' / within ~10 days, ask for an exact date. "
+        "If they say 'next month', accept it — the system will use the 7th of next month. "
+        "If they give a farther range (e.g. in 20 days), accept it."
+    ),
     "location": (
-        "Ask for their pincode to route to the nearest dealership. "
-        "It may arrive across several messages. If unknown, ask city/area. "
-        "If they are out of town, also capture delivery_location — where they want the vehicle."
+        "Ask for their 6-digit pincode to route to the nearest dealership. "
+        "It may arrive across several messages. "
+        "If they do not know the pincode, ask them to share WhatsApp current/live location only. "
+        "Do NOT ask for city, area, town, or district. "
+        "If they are out of town, still use pincode or live location for routing — do not ask city names. "
+        "After a valid pincode or location is shared, the system attaches nearest-dealer details "
+        "(name, address, phone, map) — do NOT invent dealer names, addresses, or phone numbers "
+        "yourself. Never claim a dealership exists unless the system attached it."
     ),
     "feature_awareness": (
         "Ask if they already know the vehicle features. If not, give a SHORT accurate "
@@ -54,6 +65,8 @@ class TurnInput:
     channel: str = "web"
     source: str = "web"
     history: list[dict[str, str]] = field(default_factory=list)
+    product_hint: str = ""
+    confirm_crm_dealer: bool = False
 
 
 @dataclass
@@ -91,12 +104,48 @@ def capture_field_ids(config: dict[str, Any]) -> list[str]:
     return [f["id"] for f in config["capture_fields"]]
 
 
-def build_system_instruction(config: dict[str, Any], language: str) -> str:
+def _step_guidance(
+    step: str,
+    *,
+    product_hint: str = "",
+    confirm_crm_dealer: bool = False,
+) -> str:
+    if step == "model_interest" and product_hint:
+        return (
+            f'Soft-ask naturally whether they are interested in the {product_hint} '
+            '(e.g. "Are you interested in the King EV MAX?"). '
+            "Do NOT mention CRM, records, or any system. "
+            "If they say no or name another model, ask which of "
+            "King EV MAX, King Deluxe, or King Duramax Plus they want."
+        )
+    if step == "location" and confirm_crm_dealer:
+        return (
+            "At the location step, briefly say you will share dealership details "
+            "for them to confirm. Do NOT ask for a pincode yet — the system attaches "
+            "the confirmation ask. If they already rejected that dealership, ask for "
+            "their 6-digit pincode OR WhatsApp current/live location only. "
+            "Do NOT ask for city, area, town, or district. "
+            "Do not invent dealer names yourself."
+        )
+    return FLOW_STEP_GUIDANCE.get(step, step.replace("_", " "))
+
+
+def build_system_instruction(
+    config: dict[str, Any],
+    language: str,
+    *,
+    product_hint: str = "",
+    confirm_crm_dealer: bool = False,
+) -> str:
     """Assemble the qualification system prompt from admin config."""
     profile_keys = capture_field_ids(config)
     flow_lines = []
     for i, step in enumerate(config["flow_steps"], start=1):
-        guidance = FLOW_STEP_GUIDANCE.get(step, step.replace("_", " "))
+        guidance = _step_guidance(
+            step,
+            product_hint=product_hint,
+            confirm_crm_dealer=confirm_crm_dealer,
+        )
         flow_lines.append(f"   {i}. {guidance}")
 
     return f"""You are {config["bot_name"]} for TVS PASSENGER three-wheelers \
@@ -109,7 +158,7 @@ them to the dealership.
 RULES
 1. Conduct the ENTIRE conversation in this language: {language}.
 2. Qualify the lead by asking, ONE QUESTION AT A TIME, acknowledging each answer first:
-{chr(10).join(flow_lines)}
+   {chr(10).join(flow_lines)}
 3. Keep every reply short and clear (chat / WhatsApp style). Ask only ONE thing per message.
 4. If the customer asks a product question mid-flow (e.g. CNG vs petrol vs electric), \
 answer in at most TWO sentences using ONLY the KNOWLEDGE BASE, then resume qualification.
@@ -132,8 +181,12 @@ Field formats:
 - doc_license / doc_permit / doc_badge: "yes", "no", or "unknown".
 - campaign_shown: the campaign NAME you mentioned (e.g. "Vaada"), or "" if none.
 - lead_quality: HOT (near-term timeline + location + >=2/3 docs yes), WARM, or COLD.
+- disposition: one of interested, not_interested, already_purchased_tvs_motor, not_enquired. \
+If they named any TVS passenger model they want, use interested. Ask briefly if unclear \
+(e.g. already purchased / not interested / just browsing).
 - blockers: short list of strings; next_step / notes: short strings.
 - delivery_location: where they want the vehicle if out of town, else "".
+- purchase_timeline: keep their words; include a DD/MM/YYYY when they gave one.
 Do not output PROFILE_JSON until you are wrapping up.
 
 CAMPAIGN:
@@ -176,7 +229,12 @@ class ConversationEngine:
         if not user_text:
             user_text = LANGUAGE_SELECTED_TRIGGER
 
-        system = build_system_instruction(config, turn.language)
+        system = build_system_instruction(
+            config,
+            turn.language,
+            product_hint=turn.product_hint,
+            confirm_crm_dealer=turn.confirm_crm_dealer,
+        )
         contents = build_contents(turn.history, user_text)
         result = self._llm.generate(system_instruction=system, contents=contents)
 

@@ -199,6 +199,242 @@ def test_jam_whatsapp_reply_sender_splits_long_text():
     assert [len(call["json"]["message"]) for call in http.calls] == [4096, 1]
 
 
+def test_jam_whatsapp_reply_sender_send_image():
+    from client_adapters import JamWhatsAppReplySender
+
+    http = FakeHttp([FakeResponse(200, {"status": "success", "data": {}})])
+    sender = JamWhatsAppReplySender(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    sender.send_image(
+        mobile="+918459522206",
+        link="https://aichatbot.jamoutsourcing.com/media/share_location/english.jpg",
+        caption="Please share location",
+    )
+
+    assert http.calls[0]["json"] == {
+        "mobile": "918459522206",
+        "type": "image",
+        "link": "https://aichatbot.jamoutsourcing.com/media/share_location/english.jpg",
+        "message": "Please share location",
+    }
+
+
+def test_jam_whatsapp_reply_sender_send_document():
+    from client_adapters import JamWhatsAppReplySender
+
+    http = FakeHttp([FakeResponse(200, {"status": "success", "data": {}})])
+    sender = JamWhatsAppReplySender(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    sender.send_document(
+        mobile="+918459522206",
+        link="https://example.com/media/brochures/king_ev_max.pdf",
+        caption="King EV MAX brochure",
+    )
+
+    assert http.calls[0]["json"] == {
+        "mobile": "918459522206",
+        "type": "document",
+        "link": "https://example.com/media/brochures/king_ev_max.pdf",
+        "message": "King EV MAX brochure",
+    }
+
+
+def test_jam_dispose_client_posts_payload_with_api_key():
+    from client_adapters import JamDisposeClient
+
+    http = FakeHttp([FakeResponse(200, {"status": "success", "message": "ok"})])
+    client = JamDisposeClient(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/dispose",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    client.dispose(
+        {
+            "mobile": "+918459522206",
+            "status": "interested",
+            "remark": "ok",
+            "dealer_code": "11689",
+            "expected_purchased_date": "07/08/2026",
+            "product_name": "King Deluxe",
+        }
+    )
+
+    call = http.calls[0]
+    assert call["url"].endswith("/dispose")
+    assert call["headers"]["X-API-KEY"] == "secret-key"
+    assert call["json"]["mobile"] == "918459522206"
+    assert call["json"]["status"] == "interested"
+
+
+def test_jam_customer_directory_does_not_invent_language_from_state():
+    from client_adapters import JamCustomerDirectory
+
+    http = FakeHttp(
+        [
+            FakeResponse(
+                200,
+                {
+                    "status": "success",
+                    "data": {
+                        "fldi_lead_id": 123,
+                        "Customer Name": "Ravi Kumar",
+                        "State": "MAHARASHTRA",
+                    },
+                },
+            )
+        ]
+    )
+    directory = JamCustomerDirectory(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    customer = directory.lookup("+918459522206")
+
+    assert customer.customer_id == "123"
+    assert customer.name == "Ravi Kumar"
+    assert customer.state == "MAHARASHTRA"
+    # Maharashtra must NOT force Marathi — customer gets the language menu.
+    assert customer.preferred_language == ""
+    assert http.calls[0]["json"] == {"mobile": "918459522206"}
+    assert http.calls[0]["headers"]["X-API-KEY"] == "secret-key"
+
+
+def test_jam_customer_directory_recovers_language_from_dispose_remark():
+    from client_adapters import JamCustomerDirectory
+
+    http = FakeHttp(
+        [
+            FakeResponse(
+                200,
+                {
+                    "status": "success",
+                    "data": {
+                        "fldi_lead_id": 123,
+                        "Customer Name": "Ravi Kumar",
+                        "State": "MAHARASHTRA",
+                        "fldt_last_comment": (
+                            "preferred_language: Hindi | product_interest: King EV MAX"
+                        ),
+                    },
+                },
+            )
+        ]
+    )
+    directory = JamCustomerDirectory(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    customer = directory.lookup("+918459522206")
+    assert customer.preferred_language == "Hindi"
+
+
+def test_jam_customer_directory_maps_product_and_dealership_fields():
+    from client_adapters import JamCustomerDirectory
+
+    http = FakeHttp(
+        [
+            FakeResponse(
+                200,
+                {
+                    "status": "success",
+                    "data": {
+                        "fldi_lead_id": 307569,
+                        "Customer Name": "Ajit Trimbak Sutar",
+                        "State": "MAHARASHTRA",
+                        "City": "Pune",
+                        "Dealership Id": "11982",
+                        "Dealership Name": "Sarthak Auto",
+                        "Product Enquired": "TVS KING PASSENGER DELUXE",
+                    },
+                },
+            )
+        ]
+    )
+    directory = JamCustomerDirectory(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    customer = directory.lookup("919922325350")
+
+    assert customer.product_enquired == "TVS KING PASSENGER DELUXE"
+    assert customer.dealership_id == "11982"
+    assert customer.dealership_name == "Sarthak Auto"
+    assert customer.city == "Pune"
+    assert customer.state == "MAHARASHTRA"
+    assert customer.preferred_language == ""
+
+
+def test_jam_customer_directory_maps_last_remark_and_status():
+    from client_adapters import JamCustomerDirectory
+
+    http = FakeHttp(
+        [
+            FakeResponse(
+                200,
+                {
+                    "status": "success",
+                    "data": {
+                        "fldi_lead_id": 1,
+                        "Customer Name": "Ravi",
+                        "State": "KERALA",
+                        "fldt_last_comment": "Asked for callback on King Deluxe",
+                        "fldv_last_status": "Call Back",
+                    },
+                },
+            )
+        ]
+    )
+    directory = JamCustomerDirectory(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    customer = directory.lookup("919999999999")
+    assert customer.last_remark == "Asked for callback on King Deluxe"
+    assert customer.last_status == "Call Back"
+    assert customer.preferred_language == ""
+
+
+def test_jam_customer_directory_404_returns_empty_language_for_picker():
+    from client_adapters import JamCustomerDirectory
+
+    http = FakeHttp([FakeResponse(404, {"status": "fail", "message": "No customer"})])
+    directory = JamCustomerDirectory(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    customer = directory.lookup("918459522206")
+
+    assert customer.preferred_language == ""
+    assert customer.customer_id.startswith("unknown-")
+
+
 def test_stub_customer_directory_builds_identity_from_mobile():
     from client_adapters import StubCustomerDirectory
 
@@ -224,9 +460,9 @@ class FakeRedis:
         return True
 
 
-def test_client_state_persists_history_customer_and_one_hour_ttl():
+def test_client_state_persists_history_customer_and_four_hour_ttl():
     redis = FakeRedis()
-    state = RedisClientState(redis, ttl_seconds=3600, id_factory=lambda: "conversation-1")
+    state = RedisClientState(redis, ttl_seconds=14400, id_factory=lambda: "conversation-1")
     session = state.load_or_start("+918286871533")
     session.history.append({"role": "user", "text": "hi"})
     state.save(session)
@@ -235,7 +471,7 @@ def test_client_state_persists_history_customer_and_one_hour_ttl():
 
     assert loaded.conversation_id == "conversation-1"
     assert loaded.history == [{"role": "user", "text": "hi"}]
-    assert redis.expiries["client:session:+918286871533"] == 3600
+    assert redis.expiries["client:session:+918286871533"] == 14400
     assert json.loads(redis.data["client:session:+918286871533"])["mobile"] == (
         "+918286871533"
     )

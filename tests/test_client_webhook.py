@@ -240,3 +240,39 @@ def test_rate_limited_mobile_is_not_published():
     assert response.status_code == 429
     assert response.json()["code"] == "rate_limited"
     assert publisher.events == []
+
+
+def test_location_message_is_accepted_and_published():
+    client, _, publisher = _client()
+
+    response = client.post(
+        "/client/webhook/messages",
+        auth=("client", "secret"),
+        json=_text_event(
+            type="location",
+            content="",
+            latitude=18.5204,
+            longitude=73.8567,
+        ),
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "accepted"
+    assert publisher.events[0]["type"] == "location"
+    assert publisher.events[0]["latitude"] == 18.5204
+    assert publisher.events[0]["longitude"] == 73.8567
+
+
+def test_location_without_coords_is_still_accepted():
+    """JAM currently forwards type=location with empty content and no lat/lng."""
+    client, _, publisher = _client()
+
+    response = client.post(
+        "/client/webhook/messages",
+        auth=("client", "secret"),
+        json=_text_event(type="location", content=""),
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "accepted"
+    assert publisher.events[0]["type"] == "location"

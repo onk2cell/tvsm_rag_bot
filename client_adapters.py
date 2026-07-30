@@ -4,12 +4,18 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import datetime, timezone
 from typing import Callable
 
 import requests
 
+from client_language import (
+    extract_customer_name,
+    extract_preferred_language,
+    extract_state,
+    language_from_remark,
+)
 from client_processing import ClientSession, Customer
 
 
@@ -18,6 +24,10 @@ class CustomerLookupError(RuntimeError):
 
 
 class ReplyDeliveryError(RuntimeError):
+    pass
+
+
+class DisposeDeliveryError(RuntimeError):
     pass
 
 
@@ -74,14 +84,35 @@ def _customer_from_response(payload) -> Customer:
     if not matches:
         raise CustomerLookupError("customer API returned no customer")
     first = matches[0]
+    if not isinstance(first, dict):
+        raise CustomerLookupError("customer API response is missing id or name")
     customer_id = str(first.get("customer_id") or first.get("id") or "").strip()
     name = str(first.get("name") or first.get("customer_name") or "").strip()
     if not customer_id or not name:
         raise CustomerLookupError("customer API response is missing id or name")
+    last_remark = str(
+        first.get("last_remark")
+        or first.get("fldt_last_comment")
+        or first.get("remark")
+        or ""
+    ).strip()
+    preferred = (
+        str(first.get("preferred_language") or "").strip()
+        or language_from_remark(last_remark)
+    )
     return Customer(
         customer_id=customer_id,
         name=name,
-        preferred_language=str(first.get("preferred_language") or "").strip(),
+        preferred_language=preferred,
+        product_enquired=str(first.get("product_enquired") or "").strip(),
+        dealership_id=str(first.get("dealership_id") or "").strip(),
+        dealership_name=str(first.get("dealership_name") or "").strip(),
+        city=str(first.get("city") or "").strip(),
+        state=str(first.get("state") or "").strip(),
+        last_remark=last_remark,
+        last_status=str(
+            first.get("last_status") or first.get("fldv_last_status") or ""
+        ).strip(),
     )
 
 
@@ -123,6 +154,15 @@ class HttpReplySender:
                 "part_count": len(parts),
             }
             self._deliver(payload)
+
+    def send_image(self, *, mobile: str, link: str, caption: str = "") -> None:
+        # Legacy callback path has no image contract; fall back to caption/link text.
+        text = caption.strip() if caption else f"Please open this link: {link}"
+        self.send(mobile=mobile, in_reply_to="image", text=text)
+
+    def send_document(self, *, mobile: str, link: str, caption: str = "") -> None:
+        text = caption.strip() if caption else f"Please open this document: {link}"
+        self.send(mobile=mobile, in_reply_to="document", text=text)
 
     def _deliver(self, payload: dict) -> None:
         last_error = "reply callback failed"
@@ -175,6 +215,26 @@ class JamWhatsAppReplySender:
                 }
             )
 
+    def send_image(self, *, mobile: str, link: str, caption: str = "") -> None:
+        payload = {
+            "mobile": _jam_mobile(mobile),
+            "type": "image",
+            "link": link,
+        }
+        if caption.strip():
+            payload["message"] = caption.strip()
+        self._deliver(payload)
+
+    def send_document(self, *, mobile: str, link: str, caption: str = "") -> None:
+        payload = {
+            "mobile": _jam_mobile(mobile),
+            "type": "document",
+            "link": link,
+        }
+        if caption.strip():
+            payload["message"] = caption.strip()
+        self._deliver(payload)
+
     def _deliver(self, payload: dict) -> None:
         last_error = "JAM WhatsApp send failed"
         for attempt in range(3):
@@ -202,6 +262,65 @@ class JamWhatsAppReplySender:
         raise ReplyDeliveryError(last_error)
 
 
+class JamDisposeClient:
+    """Outbound client for JAM WhatsApp Bot dispose API (X-API-KEY)."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        api_key: str,
+        timeout: float = 30,
+        retry_wait: float = 30,
+        http=requests,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self._url = url
+        self._api_key = api_key
+        self._timeout = timeout
+        self._retry_wait = retry_wait
+        self._http = http
+        self._sleep = sleep
+
+    def dispose(self, payload: dict) -> dict:
+        body = dict(payload)
+        if "mobile" in body:
+            body["mobile"] = _jam_mobile(str(body["mobile"]))
+        last_error = "JAM dispose failed"
+        for attempt in range(3):
+            try:
+                response = self._http.post(
+                    self._url,
+                    json=body,
+                    headers={
+                        "X-API-KEY": self._api_key,
+                        "Content-Type": "application/json",
+                    },
+                    timeout=self._timeout,
+                )
+                parsed = _safe_json(response)
+                if response.status_code == 200:
+                    if isinstance(parsed, dict) and parsed.get("status") == "success":
+                        return parsed if isinstance(parsed, dict) else {"status": "success"}
+                    last_error = f"JAM dispose rejected payload: {parsed}"
+                elif response.status_code == 404:
+                    # Still attempted — caller may treat as soft failure.
+                    raise DisposeDeliveryError(
+                        f"JAM dispose returned HTTP 404: {parsed}"
+                    )
+                else:
+                    last_error = f"JAM dispose returned HTTP {response.status_code}"
+                    if response.status_code < 500 and response.status_code != 429:
+                        break
+            except DisposeDeliveryError:
+                raise
+            except (requests.RequestException, ValueError, TypeError) as error:
+                last_error = str(error)
+            if attempt < 2:
+                self._sleep(self._retry_wait)
+        raise DisposeDeliveryError(last_error)
+
+
 class StubCustomerDirectory:
     """Temporary identity when client CRM lookup API is not ready yet."""
 
@@ -213,6 +332,121 @@ class StubCustomerDirectory:
             name=f"Customer {display or mobile}",
             preferred_language="English",
         )
+
+
+class JamCustomerDirectory:
+    """JAM WhatsApp Bot Get Customer Details (`POST /whatsapp_bot/customer`)."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        api_key: str,
+        timeout: float = 30,
+        retry_wait: float = 30,
+        http=requests,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        self._url = url
+        self._api_key = api_key
+        self._timeout = timeout
+        self._retry_wait = retry_wait
+        self._http = http
+        self._sleep = sleep
+
+    def lookup(self, mobile: str) -> Customer:
+        last_error = "customer lookup failed"
+        for attempt in range(3):
+            try:
+                response = self._http.post(
+                    self._url,
+                    json={"mobile": _jam_mobile(mobile)},
+                    headers={
+                        "X-API-KEY": self._api_key,
+                        "Content-Type": "application/json",
+                    },
+                    timeout=self._timeout,
+                )
+                if response.status_code == 404:
+                    return _stub_customer(mobile, preferred_language="")
+                if response.status_code == 200:
+                    body = _safe_json(response)
+                    if not isinstance(body, dict):
+                        raise CustomerLookupError("customer API returned invalid JSON")
+                    if body.get("status") == "fail":
+                        return _stub_customer(mobile, preferred_language="")
+                    data = body.get("data") if isinstance(body.get("data"), dict) else body
+                    return _customer_from_jam_data(data, mobile=mobile)
+                last_error = f"customer API returned HTTP {response.status_code}"
+                if response.status_code < 500:
+                    break
+            except (requests.RequestException, ValueError, TypeError, KeyError) as error:
+                last_error = str(error)
+            if attempt < 2:
+                self._sleep(self._retry_wait)
+        raise CustomerLookupError(last_error)
+
+
+def _stub_customer(mobile: str, *, preferred_language: str) -> Customer:
+    digits = "".join(ch for ch in mobile if ch.isdigit())
+    display = digits[2:] if digits.startswith("91") and len(digits) > 2 else digits
+    return Customer(
+        customer_id=f"unknown-{digits or 'unknown'}",
+        name=f"Customer {display or mobile}",
+        preferred_language=preferred_language,
+    )
+
+
+def _jam_field(data: dict, *keys: str) -> str:
+    for key in keys:
+        value = data.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text and text.lower() not in {"null", "none", "n/a"}:
+            return text
+    return ""
+
+
+def _customer_from_jam_data(data: dict, *, mobile: str) -> Customer:
+    lead_id = data.get("fldi_lead_id") or data.get("customer_id") or data.get("id")
+    name = extract_customer_name(data)
+    if not name:
+        name = _stub_customer(mobile, preferred_language="").name
+    customer_id = str(lead_id or "").strip() or f"lead-{_jam_mobile(mobile)}"
+
+    last_remark = _jam_field(
+        data,
+        "fldt_last_comment",
+        "remark",
+        "Remark",
+        "last_comment",
+        "Last Comment",
+        "Last Remark",
+    )
+    # Prefer an explicit CRM language field; else recover what we last wrote
+    # into dispose remarks. Never invent language from State (Maharashtra≠Marathi).
+    preferred = extract_preferred_language(data) or language_from_remark(last_remark)
+    return Customer(
+        customer_id=customer_id,
+        name=name,
+        preferred_language=preferred,
+        product_enquired=_jam_field(data, "Product Enquired", "product_enquired"),
+        dealership_id=_jam_field(
+            data, "Dealership Id", "Dealership ID", "dealership_id", "dealer_code"
+        ),
+        dealership_name=_jam_field(data, "Dealership Name", "dealership_name"),
+        city=_jam_field(data, "City", "city"),
+        state=_jam_field(data, "State", "state") or extract_state(data),
+        last_remark=last_remark,
+        last_status=_jam_field(
+            data,
+            "fldv_last_status",
+            "last_status",
+            "Last Status",
+            "status",
+        ),
+    )
 
 
 def _jam_mobile(mobile: str) -> str:
@@ -240,7 +474,7 @@ class RedisClientState:
         self,
         redis,
         *,
-        ttl_seconds: int = 3600,
+        ttl_seconds: int = 14400,
         id_factory: Callable[[], str] | None = None,
     ):
         self._redis = redis
@@ -254,7 +488,12 @@ class RedisClientState:
                 raw = raw.decode()
             data = json.loads(raw)
             customer_data = data.get("customer")
-            customer = Customer(**customer_data) if customer_data else None
+            customer = None
+            if customer_data:
+                allowed = {item.name for item in fields(Customer)}
+                customer = Customer(
+                    **{key: value for key, value in customer_data.items() if key in allowed}
+                )
             return ClientSession(
                 conversation_id=data["conversation_id"],
                 mobile=data["mobile"],
@@ -264,6 +503,39 @@ class RedisClientState:
                     data.get("unclear_document_count") or 0
                 ),
                 pending_replies=dict(data.get("pending_replies") or {}),
+                language=str(data.get("language") or ""),
+                awaiting_language_selection=bool(
+                    data.get("awaiting_language_selection") or False
+                ),
+                dealer_shared_for_pincode=str(
+                    data.get("dealer_shared_for_pincode") or ""
+                ),
+                last_dealer_code=str(data.get("last_dealer_code") or ""),
+                dispose_sent=bool(data.get("dispose_sent") or False),
+                last_dispose_fingerprint=str(
+                    data.get("last_dispose_fingerprint") or ""
+                ),
+                lead_profile=dict(data.get("lead_profile") or {}),
+                brochures_sent=list(data.get("brochures_sent") or []),
+                share_location_guide_sent=bool(
+                    data.get("share_location_guide_sent") or False
+                ),
+                invalid_pincode_attempts=int(
+                    data.get("invalid_pincode_attempts") or 0
+                ),
+                awaiting_dealer_confirm=bool(
+                    data.get("awaiting_dealer_confirm") or False
+                ),
+                crm_dealer_offered=bool(data.get("crm_dealer_offered") or False),
+                dealer_confirmed=bool(data.get("dealer_confirmed") or False),
+                callback_requested=bool(data.get("callback_requested") or False),
+                welcome_back_sent=bool(data.get("welcome_back_sent") or False),
+                awaiting_still_interested=bool(
+                    data.get("awaiting_still_interested") or False
+                ),
+                still_interested_asked=bool(
+                    data.get("still_interested_asked") or False
+                ),
             )
         return ClientSession(
             conversation_id=self._id_factory(),
@@ -278,6 +550,23 @@ class RedisClientState:
             "history": session.history,
             "unclear_document_count": session.unclear_document_count,
             "pending_replies": session.pending_replies,
+            "language": session.language,
+            "awaiting_language_selection": session.awaiting_language_selection,
+            "dealer_shared_for_pincode": session.dealer_shared_for_pincode,
+            "last_dealer_code": session.last_dealer_code,
+            "dispose_sent": session.dispose_sent,
+            "last_dispose_fingerprint": session.last_dispose_fingerprint,
+            "lead_profile": session.lead_profile,
+            "brochures_sent": session.brochures_sent,
+            "share_location_guide_sent": session.share_location_guide_sent,
+            "invalid_pincode_attempts": session.invalid_pincode_attempts,
+            "awaiting_dealer_confirm": session.awaiting_dealer_confirm,
+            "crm_dealer_offered": session.crm_dealer_offered,
+            "dealer_confirmed": session.dealer_confirmed,
+            "callback_requested": session.callback_requested,
+            "welcome_back_sent": session.welcome_back_sent,
+            "awaiting_still_interested": session.awaiting_still_interested,
+            "still_interested_asked": session.still_interested_asked,
         }
         self._redis.set(
             self._key(session.mobile),

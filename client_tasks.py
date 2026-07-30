@@ -13,6 +13,8 @@ import interactions
 from client_adapters import (
     HttpCustomerDirectory,
     HttpReplySender,
+    JamCustomerDirectory,
+    JamDisposeClient,
     JamWhatsAppReplySender,
     RedisClientState,
     StubCustomerDirectory,
@@ -26,6 +28,7 @@ from client_media import (
 )
 from client_processing import ClientMessageProcessor
 from conversation_engine import ConversationEngine, GenerateResult, make_engine
+from dealers import DealerDirectory
 from leads import LeadWriter
 
 
@@ -46,7 +49,9 @@ def validate_worker_config() -> None:
     if not config.CLIENT_VALIDATE_CONFIG:
         return
     missing = []
-    if not config.CLIENT_STUB_CUSTOMER and not config.CLIENT_CRM_CUSTOMER_URL:
+    if not config.CLIENT_STUB_CUSTOMER and not (
+        config.CLIENT_CRM_CUSTOMER_URL or _default_jam_customer_url()
+    ):
         missing.append("CLIENT_CRM_CUSTOMER_URL")
     if not config.CLIENT_REPLY_WEBHOOK_URL:
         missing.append("CLIENT_REPLY_WEBHOOK_URL")
@@ -91,6 +96,13 @@ def build_processor(redis: Redis | None = None) -> ClientMessageProcessor:
 
     if config.CLIENT_STUB_CUSTOMER:
         directory = StubCustomerDirectory()
+    elif config.CLIENT_REPLY_AUTH_MODE == "api_key":
+        directory = JamCustomerDirectory(
+            _jam_customer_url(),
+            api_key=config.CLIENT_REPLY_API_KEY,
+            timeout=config.CLIENT_HTTP_TIMEOUT_SEC,
+            retry_wait=config.CLIENT_RETRY_WAIT_SEC,
+        )
     else:
         directory = HttpCustomerDirectory(
             config.CLIENT_CRM_CUSTOMER_URL,
@@ -116,6 +128,22 @@ def build_processor(redis: Redis | None = None) -> ClientMessageProcessor:
             retry_wait=config.CLIENT_RETRY_WAIT_SEC,
         )
 
+    dealer_directory = None
+    try:
+        dealer_directory = DealerDirectory()
+    except Exception:
+        log.exception("Dealer directory unavailable; pincode routing disabled")
+
+    dispose_client = None
+    dispose_url = _jam_dispose_url()
+    if config.CLIENT_REPLY_AUTH_MODE == "api_key" and dispose_url and config.CLIENT_REPLY_API_KEY:
+        dispose_client = JamDisposeClient(
+            dispose_url,
+            api_key=config.CLIENT_REPLY_API_KEY,
+            timeout=config.CLIENT_HTTP_TIMEOUT_SEC,
+            retry_wait=config.CLIENT_RETRY_WAIT_SEC,
+        )
+
     return ClientMessageProcessor(
         state=RedisClientState(
             redis,
@@ -133,6 +161,8 @@ def build_processor(redis: Redis | None = None) -> ClientMessageProcessor:
         ),
         transcriber=transcriber,
         document_recognizer=recognizer,
+        dealer_directory=dealer_directory,
+        dispose_client=dispose_client,
         retry_wait=config.CLIENT_RETRY_WAIT_SEC,
     )
 
@@ -164,3 +194,25 @@ def handle_client_message(event: dict) -> None:
         event.get("message_id"),
         event.get("mobile"),
     )
+
+
+def _default_jam_customer_url() -> str:
+    send_url = (config.CLIENT_REPLY_WEBHOOK_URL or "").rstrip("/")
+    if send_url.endswith("/send"):
+        return send_url[: -len("/send")] + "/customer"
+    return ""
+
+
+def _jam_customer_url() -> str:
+    return (config.CLIENT_CRM_CUSTOMER_URL or "").strip() or _default_jam_customer_url()
+
+
+def _default_jam_dispose_url() -> str:
+    send_url = (config.CLIENT_REPLY_WEBHOOK_URL or "").rstrip("/")
+    if send_url.endswith("/send"):
+        return send_url[: -len("/send")] + "/dispose"
+    return ""
+
+
+def _jam_dispose_url() -> str:
+    return (config.CLIENT_DISPOSE_URL or "").strip() or _default_jam_dispose_url()

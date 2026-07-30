@@ -55,15 +55,17 @@ def test_build_system_includes_campaign_and_guardrails(stores):
     assert "gently redirect" in system.lower() or "off-topic" in system.lower()
 
 
-def test_language_selected_trigger_on_empty_message(stores):
-    config_store, lead_writer, _ = stores
-    llm = FakeLLM(["Which TVS model interests you?"])
-    engine = ConversationEngine(config_store=config_store, llm=llm, lead_writer=lead_writer)
-    out = engine.handle_turn(TurnInput(session_id="s1", language="English", message=""))
-    assert out.reply_text == "Which TVS model interests you?"
-    assert out.captured is False
-    last_user = llm.calls[0]["contents"][-1]["parts"][0]["text"]
-    assert "selected their language" in last_user
+def test_system_instruction_soft_asks_product_hint(stores):
+    config_store, _, _ = stores
+    system = build_system_instruction(
+        config_store.get(),
+        "English",
+        product_hint="King EV MAX",
+        confirm_crm_dealer=True,
+    )
+    assert "King EV MAX" in system
+    assert "Do NOT mention CRM" in system
+    assert "Do NOT ask for a pincode yet" in system
 
 
 def test_profile_json_stripped_from_customer_reply(stores):

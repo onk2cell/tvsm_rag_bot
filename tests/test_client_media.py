@@ -48,6 +48,22 @@ def test_media_fetcher_rejects_private_network_destination():
         fetcher.fetch("https://client.example/audio.mp3", "audio/mpeg")
 
 
+def test_media_fetcher_prefers_ipv4_when_aaaa_listed_first():
+    fetcher = SafeMediaFetcher(
+        http=FakeHttp([]),
+        resolver=lambda _: [
+            "2600:9000:2654:ce00:1f:14b4:ddc0:21",
+            "18.67.224.62",
+        ],
+    )
+
+    _hostname, address, _trusted = fetcher._validate_destination(
+        "https://client.example/image.jpg"
+    )
+
+    assert address == "18.67.224.62"
+
+
 def test_media_fetcher_allows_explicit_test_host_and_validates_size():
     http = FakeHttp([FakeResponse(chunks=[b"1234", b"5678"])])
     fetcher = SafeMediaFetcher(
@@ -179,3 +195,47 @@ def test_production_fetch_pins_the_validated_ip(monkeypatch):
     assert captured["kwargs"]["server_hostname"] == "client.example"
     assert captured["kwargs"]["assert_hostname"] == "client.example"
     assert captured["target"] == "/audio.mp3?token=x"
+
+
+def test_audio_transcriber_reads_duration_from_falsy_mutagen_file(monkeypatch):
+    """OggOpus with no tags is an empty mapping (falsy) but still has info.length."""
+
+    class FakeInfo:
+        length = 1.5
+
+    class FakeOgg(dict):
+        info = FakeInfo()
+
+    monkeypatch.setattr("client_media.mutagen.File", lambda *_a, **_k: FakeOgg())
+    monkeypatch.setattr(
+        "client_media.voice.transcribe_audio",
+        lambda *a, **k: "hello from voice",
+    )
+
+    text = GeminiAudioTranscriber().transcribe(b"ogg-bytes", "audio/ogg", "English")
+
+    assert text == "hello from voice"
+
+
+def test_recognize_maps_unlisted_document_types_to_identity_document(monkeypatch):
+    from client_media import GeminiDocumentRecognizer
+
+    class FakeResponse:
+        text = (
+            '{"status":"recognized",'
+            '"document_types":["court_order","legal_heirship_certificate"]}'
+        )
+
+    class FakeModels:
+        def generate_content(self, **kwargs):
+            return FakeResponse()
+
+    class FakeClient:
+        models = FakeModels()
+
+    monkeypatch.setattr("rag.get_client", lambda: FakeClient())
+
+    result = GeminiDocumentRecognizer().recognize(b"fake-image", "image/jpeg")
+
+    assert result.status == "recognized"
+    assert result.document_types == ["identity_document"]

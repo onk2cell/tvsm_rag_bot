@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Glossary — Ops seams</title>
+  <link rel="stylesheet" href="../assets/lesson.css" />
+</head>
+<body>
+  <article class="page">
+    <header class="lesson-header">
+      <p class="eyebrow">Reference</p>
+      <h1>Glossary: ops seams</h1>
+      <p class="lede">Terms that decide where work runs in this bot. Stick to these meanings in lessons.</p>
+    </header>
+
+    <dl>
+      <dt><strong>Webhook (HTTP process)</strong></dt>
+      <dd>FastAPI app that accepts inbound CRM/WhatsApp events. Must return quickly (<code>202</code>). File: <code>client_webhook.py</code>.</dd>
+
+      <dt><strong>Worker (RQ process)</strong></dt>
+      <dd>Separate process that dequeues jobs and runs slow work (CRM, Gemini, dispose, reply). File: <code>client_worker.py</code> → <code>client_tasks.handle_client_message</code>.</dd>
+
+      <dt><strong>Redis</strong></dt>
+      <dd>In-memory store used as RQ broker <em>and</em> for session/dedupe/rate-limit/locks. Not the CRM database.</dd>
+
+      <dt><strong>RQ (Redis Queue)</strong></dt>
+      <dd>Python library: enqueue a function name + args; a worker executes it later. Backed by Redis.</dd>
+
+      <dt><strong>Enqueue</strong></dt>
+      <dd>Put a job on the queue. Webhook enqueues; does not run the handler itself.</dd>
+
+      <dt><strong>Service (Compose)</strong></dt>
+      <dd>One container definition in <code>compose.yaml</code> (e.g. <code>redis</code>, <code>client-webhook</code>, <code>client-worker</code>).</dd>
+
+      <dt><strong>Service DNS</strong></dt>
+      <dd>On Compose’s default network, containers reach each other by service name (<code>redis://redis:6379</code>).</dd>
+
+      <dt><strong>Profile</strong></dt>
+      <dd>Compose switch that includes optional services (<code>client</code>, <code>mock</code>). Production client path uses profile <code>client</code>.</dd>
+
+      <dt><strong>Dedupe key</strong></dt>
+      <dd><code>client:seen:{message_id}</code> — Redis key so redelivered messages are not processed twice.</dd>
+
+      <dt><strong>Queue name</strong></dt>
+      <dd><code>CLIENT_QUEUE_NAME</code> — webhook and worker must share the same name or jobs sit forever.</dd>
+    </dl>
+
+    <footer class="lesson-footer">
+      <p>Related: <a href="../lessons/0001-webhook-redis-worker.html">Lesson 0001 — Why three processes</a></p>
+    </footer>
+  </article>
+</body>
+</html>

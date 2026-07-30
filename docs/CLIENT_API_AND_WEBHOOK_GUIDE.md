@@ -192,9 +192,38 @@ Example validation error:
 
 ---
 
-## 2. Customer lookup API (bot → client CRM)
+## 2. Customer lookup API (bot → JAM / CRM)
 
-### Endpoint (client provides)
+### Current production path (JAM Get Customer Details)
+
+```http
+POST https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer
+X-API-KEY: <key from JAM>
+Content-Type: application/json
+```
+
+```json
+{ "mobile": "918459522206" }
+```
+
+Notes:
+
+- Mobile may include `+` / spaces; JAM matches on the last 10 digits
+- Success: HTTP `200` with `"status":"success"` and `data` lead fields
+- `404` / no lead: bot creates a temporary identity and shows a **text** language menu
+- If `data` includes `state` / `fldv_state` (or aliases), bot maps it to a default language:
+  - Maharashtra, Goa → Marathi
+  - Tamil Nadu, Puducherry → Tamil
+  - Andhra Pradesh, Telangana → Telugu
+  - Karnataka → Kannada
+  - Kerala → Malayalam
+  - Hindi-belt states → Hindi
+  - Other / unknown state → English
+- If language/state is missing, bot asks (English text only, no buttons):
+  1. English  2. हिंदी  3. मराठी  4. தமிழ்
+- Customer can later switch by saying the language name or `1`–`4`
+
+### Legacy CRM GET shape (mock / Basic Auth)
 
 ```http
 GET <CLIENT_CRM_CUSTOMER_URL>?mobile=+918286871533
@@ -282,7 +311,43 @@ Notes:
 - Mobile must be digits only (`91...`), no `+`
 - Success is HTTP `200` with `"status":"success"`
 - No `in_reply_to` field in JAM send API; correlation is by mobile
-- Until CRM lookup API is ready, bot may use a temporary stub customer identity
+- Customer lookup uses the same `X-API-KEY` against `/whatsapp_bot/customer`
+
+### Lead disposition (JAM Dispose API)
+
+After qualification wrap-up, the bot pushes the conversation outcome once:
+
+```http
+POST https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/dispose
+X-API-KEY: <same key as send/customer>
+Content-Type: application/json
+```
+
+```json
+{
+  "mobile": "918459522206",
+  "pincode": "411001",
+  "status": "interested",
+  "remark": "notes from chat",
+  "dealer_code": "11689",
+  "expected_purchased_date": "07/08/2026",
+  "product_name": "King Deluxe"
+}
+```
+
+| Status | Extra fields |
+|---|---|
+| **all statuses** | `pincode` (mandatory, 6-digit) |
+| `interested` | `dealer_code`, `expected_purchased_date` (`DD/MM/YYYY`), `product_name` |
+| `not_interested` / `already_purchased_tvs_motor` / `not_enquired` | none beyond pincode |
+
+Notes:
+
+- Updates an existing CRM lead by mobile (does not create leads).
+- Bot still attempts dispose even if CRM previously returned no customer (may 404).
+- Dispose is skipped until a 6-digit pincode is known (from customer message, location→dealer pin, or CRM dealer pin).
+- Purchase-date mapping: “next month” → 7th of next month; “in ≤10 days” → bot asks for exact date; farther day ranges are converted to a concrete date.
+- Source: `docs/JAM_WhatsApp_Bot_Dispose_API_postman_collection_v1.1_pincode.json` / PDF docs.
 
 ### Legacy callback shape (mock / older assumption)
 
@@ -363,7 +428,7 @@ Any HTTP **`2xx`** response (including `200` or `204`) means the reply was deliv
 |---|---|
 | Session key | `mobile` |
 | Continuity | Same mobile continues one conversation while active |
-| Idle expiry | After **1 hour** of inactivity, a new conversation starts |
+| Idle expiry | After **4 hours** of inactivity, Redis session expires and a **new conversation** starts. The bot **always shows the language menu first** (even if CRM has a preferred language), then uses CRM remarks/status for welcome-back |
 | Ordering | Messages for one mobile are processed in arrival order |
 | Reply type | Text only in v1 |
 | Images | Used for document recognition (licence, ID, finance, vehicle docs, etc.) |
@@ -397,3 +462,26 @@ Bot team will provide:
 | Client → Bot | `/client/webhook/messages` | `POST` | Bot |
 | Bot → Client | Customer lookup by `mobile` | `GET` | Client CRM |
 | Bot → Client | Reply callback | `POST` | Client app/CRM |
+
+---
+
+## Local mock CRM lab
+
+For end-to-end verification **before production deploy**, run the lab profile.
+It uses the same inbound webhook → Redis → worker path, with CRM lookup and
+reply callbacks pointed at `mock_client`.
+
+```bash
+docker compose --profile lab up -d --build
+# open http://localhost:8003/mock/chat
+```
+
+In the lab UI:
+
+1. Choose a **preset** (or edit mobile + CRM JSON)
+2. **Save CRM for this mobile**
+3. **Reset session** to simulate 4h idle expiry (language menu)
+4. Chat — replies appear from the mock reply sink
+
+Lab ports: mock UI `8003`, lab webhook `8005`. Values live in `.env.mock`
+(test-only). Production remains `docker compose --profile client up -d`.

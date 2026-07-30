@@ -1,0 +1,222 @@
+:root {
+  --ink: #1a1a1a;
+  --muted: #5c5c5c;
+  --paper: #f7f4ef;
+  --card: #fffdf9;
+  --line: #d9d2c5;
+  --accent: #0b5f4b;
+  --accent-soft: #d8ebe5;
+  --warn: #8a3b12;
+  --warn-soft: #f3e0d4;
+  --ok: #1f5c2e;
+  --ok-soft: #dcecdd;
+  --bad: #7a1f1f;
+  --bad-soft: #f3d6d6;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  --serif: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  --sans: "Source Sans 3", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { font-size: 18px; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 500px at 10% -10%, #efe7d8 0%, transparent 55%),
+    var(--paper);
+  font-family: var(--serif);
+  line-height: 1.55;
+}
+
+.page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+header.lesson-header {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.75rem;
+}
+
+.eyebrow {
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+
+h1 {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 2rem;
+  line-height: 1.2;
+  margin: 0 0 0.75rem;
+}
+
+.lede {
+  font-family: var(--sans);
+  font-size: 1.05rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+h2 {
+  font-size: 1.25rem;
+  margin: 2rem 0 0.75rem;
+  font-weight: 600;
+}
+
+h3 {
+  font-size: 1.05rem;
+  margin: 1.5rem 0 0.5rem;
+  font-weight: 600;
+}
+
+p, li { margin: 0 0 0.85rem; }
+
+ul, ol { padding-left: 1.25rem; }
+
+a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}
+
+code, .mono {
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+
+pre {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 0.85rem 1rem;
+  margin: 1.25rem 0;
+  font-family: var(--sans);
+  font-size: 0.95rem;
+}
+
+.callout.warn {
+  border-left-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.flow {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1.25rem 0;
+  font-family: var(--sans);
+  font-size: 0.95rem;
+}
+
+.flow-step {
+  display: grid;
+  grid-template-columns: 2.2rem 1fr;
+  gap: 0.75rem;
+  align-items: start;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+}
+
+.flow-step .n {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.quiz {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  font-family: var(--sans);
+}
+
+.quiz h3 {
+  margin-top: 0;
+  font-family: var(--serif);
+}
+
+.quiz .options {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.quiz button.option {
+  text-align: left;
+  font: inherit;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.quiz button.option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.quiz button.option.correct {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+}
+
+.quiz button.option.wrong {
+  background: var(--bad-soft);
+  border-color: var(--bad);
+}
+
+.quiz .feedback {
+  min-height: 1.4em;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.quiz .feedback.ok { color: var(--ok); }
+.quiz .feedback.bad { color: var(--bad); }
+
+footer.lesson-footer {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  font-family: var(--sans);
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cite {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-family: var(--sans);
+}

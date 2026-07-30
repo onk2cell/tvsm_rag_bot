@@ -1,29 +1,26 @@
 #!/usr/bin/env bash
+# Start the local WhatsApp bot lab (mock CRM + real webhook/worker path).
 set -euo pipefail
 
-project="tvsm-rag-real-chat"
-profile="real-chat-test"
-services=(redis real-chat-client real-chat-worker client-webhook-real-chat)
+project="${COMPOSE_PROJECT_NAME:-tvsm-rag-lab}"
 action="${1:-up}"
 
 case "$action" in
   up)
-    if [[ ! -f .env ]]; then
-      echo "Missing .env. Copy .env.example to .env and set GEMINI_API_KEY and FILE_SEARCH_STORE."
-      exit 1
-    fi
-    docker compose -p "$project" --profile "$profile" up \
-      --build --detach --wait "${services[@]}"
+    docker compose -p "$project" --profile lab up \
+      --build --detach --wait redis mock-client lab-webhook lab-worker
     echo
-    echo "Real webhook test chat is ready:"
+    echo "WhatsApp bot lab is ready:"
     echo "http://localhost:8003/mock/chat"
+    echo
+    echo "Tip: Save CRM, then Reset session before a fresh language-menu flow."
     ;;
   down)
-    docker compose -p "$project" --profile "$profile" down
+    docker compose -p "$project" --profile lab down
     ;;
   logs)
-    docker compose -p "$project" --profile "$profile" logs --follow \
-      real-chat-client real-chat-worker client-webhook-real-chat
+    docker compose -p "$project" --profile lab logs --follow \
+      mock-client lab-webhook lab-worker
     ;;
   *)
     echo "Usage: bash real_chat_test.sh [up|down|logs]"

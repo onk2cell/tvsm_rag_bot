@@ -1,47 +1,17 @@
 services:
-  web:
-    build: .
-    command: uvicorn web:app --host 0.0.0.0 --port 8000
-    env_file:
-      - .env
-    environment:
-      REDIS_URL: redis://redis:6379
-    ports:
-      - "8000:8000"
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
     volumes:
-      - ./data:/app/data
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
-  webhook:
-    build: .
-    command: uvicorn app:app --host 0.0.0.0 --port 8001
-    env_file:
-      - .env
-    environment:
-      REDIS_URL: redis://redis:6379
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  worker:
-    build: .
-    command: rq worker --url redis://redis:6379
-    env_file:
-      - .env
-    environment:
-      REDIS_URL: redis://redis:6379
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
+  # Production JAM CRM WhatsApp bot
   client-webhook:
     profiles: ["client"]
     build: .
@@ -54,11 +24,13 @@ services:
       CLIENT_ENV: production
       CLIENT_VALIDATE_CONFIG: "true"
       CLIENT_TEST_MODE: "false"
-      CLIENT_STUB_CUSTOMER: "true"
+      CLIENT_STUB_CUSTOMER: "false"
       CLIENT_REPLY_AUTH_MODE: api_key
       CLIENT_REPLY_WEBHOOK_URL: https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send
+      CLIENT_CRM_CUSTOMER_URL: https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer
     ports:
       - "8002:8002"
+      - "8004:8002"
     depends_on:
       redis:
         condition: service_healthy
@@ -78,76 +50,39 @@ services:
       CLIENT_ENV: production
       CLIENT_VALIDATE_CONFIG: "true"
       CLIENT_TEST_MODE: "false"
-      CLIENT_STUB_CUSTOMER: "true"
+      CLIENT_STUB_CUSTOMER: "false"
       CLIENT_REPLY_AUTH_MODE: api_key
       CLIENT_REPLY_WEBHOOK_URL: https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send
+      CLIENT_CRM_CUSTOMER_URL: https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer
     volumes:
       - ./data:/app/data
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import os; os.kill(1, 0)",
-        ]
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
       interval: 3s
       timeout: 2s
       retries: 20
     restart: unless-stopped
 
-  client-webhook-mock:
-    profiles: ["mock"]
-    build: .
-    command: uvicorn client_webhook:app --host 0.0.0.0 --port 8001
-    env_file:
-      - .env.mock
-    ports:
-      - "8004:8001"
-    depends_on:
-      redis:
-        condition: service_healthy
-      mock-client:
-        condition: service_healthy
-      mock-worker:
-        condition: service_healthy
-
-  mock-worker:
-    profiles: ["mock"]
-    build: .
-    command: python client_worker.py
-    env_file:
-      - .env.mock
-    volumes:
-      - ./data:/app/data
-    depends_on:
-      redis:
-        condition: service_healthy
-      mock-client:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import os; os.kill(1, 0)",
-        ]
-      interval: 3s
-      timeout: 2s
-      retries: 20
-
+  # Local lab: mock CRM chat UI → real webhook → worker → mock replies
   mock-client:
-    profiles: ["mock"]
+    profiles: ["lab"]
     build: .
     command: uvicorn mock_client:app --host 0.0.0.0 --port 8002
     env_file:
       - .env.mock
+    environment:
+      REDIS_URL: redis://redis:6379
+      MOCK_BOT_WEBHOOK_URL: http://lab-webhook:8001/client/webhook/messages
+      MOCK_BOT_WEBHOOK_USER: mock-app
+      MOCK_BOT_WEBHOOK_PASSWORD: mock-app-secret
     ports:
       - "8003:8002"
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -160,30 +95,33 @@ services:
       timeout: 2s
       retries: 20
 
-  client-webhook-real-chat:
-    profiles: ["real-chat-test"]
+  lab-webhook:
+    profiles: ["lab"]
     build: .
     command: uvicorn client_webhook:app --host 0.0.0.0 --port 8001
     env_file:
-      - .env
       - .env.mock
     environment:
       REDIS_URL: redis://redis:6379
-      CLIENT_QUEUE_NAME: client-real-chat
-      CLIENT_TEST_MODE: "false"
+      CLIENT_QUEUE_NAME: client-lab
       CLIENT_ENV: test
       CLIENT_VALIDATE_CONFIG: "true"
-      CLIENT_CRM_CUSTOMER_URL: http://real-chat-client:8002/mock/customers
-      CLIENT_REPLY_WEBHOOK_URL: http://real-chat-client:8002/mock/replies
-      CLIENT_TEST_MEDIA_HOSTS: real-chat-client
+      CLIENT_TEST_MODE: "true"
+      CLIENT_STUB_CUSTOMER: "false"
+      CLIENT_CRM_CUSTOMER_URL: http://mock-client:8002/mock/customers
+      CLIENT_REPLY_WEBHOOK_URL: http://mock-client:8002/mock/replies
+      CLIENT_REPLY_AUTH_MODE: basic
+      CLIENT_API_USER: mock-client
+      CLIENT_API_PASSWORD: mock-secret
+      CLIENT_TEST_MEDIA_HOSTS: mock-client
     ports:
       - "8005:8001"
     depends_on:
       redis:
         condition: service_healthy
-      real-chat-client:
+      mock-client:
         condition: service_healthy
-      real-chat-worker:
+      lab-worker:
         condition: service_healthy
     healthcheck:
       test:
@@ -197,74 +135,37 @@ services:
       timeout: 2s
       retries: 20
 
-  real-chat-worker:
-    profiles: ["real-chat-test"]
+  lab-worker:
+    profiles: ["lab"]
     build: .
     command: python client_worker.py
     env_file:
-      - .env
       - .env.mock
     environment:
       REDIS_URL: redis://redis:6379
-      CLIENT_QUEUE_NAME: client-real-chat
-      CLIENT_TEST_MODE: "false"
+      CLIENT_QUEUE_NAME: client-lab
       CLIENT_ENV: test
       CLIENT_VALIDATE_CONFIG: "true"
-      CLIENT_CRM_CUSTOMER_URL: http://real-chat-client:8002/mock/customers
-      CLIENT_REPLY_WEBHOOK_URL: http://real-chat-client:8002/mock/replies
-      CLIENT_TEST_MEDIA_HOSTS: real-chat-client
+      CLIENT_TEST_MODE: "true"
+      CLIENT_STUB_CUSTOMER: "false"
+      CLIENT_CRM_CUSTOMER_URL: http://mock-client:8002/mock/customers
+      CLIENT_REPLY_WEBHOOK_URL: http://mock-client:8002/mock/replies
+      CLIENT_REPLY_AUTH_MODE: basic
+      CLIENT_API_USER: mock-client
+      CLIENT_API_PASSWORD: mock-secret
+      CLIENT_TEST_MEDIA_HOSTS: mock-client
     volumes:
       - ./data:/app/data
     depends_on:
       redis:
         condition: service_healthy
-      real-chat-client:
+      mock-client:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import os; os.kill(1, 0)",
-        ]
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
       interval: 3s
       timeout: 2s
       retries: 20
-
-  real-chat-client:
-    profiles: ["real-chat-test"]
-    build: .
-    command: uvicorn mock_client:app --host 0.0.0.0 --port 8002
-    env_file:
-      - .env.mock
-    environment:
-      MOCK_BOT_WEBHOOK_URL: http://client-webhook-real-chat:8001/client/webhook/messages
-    ports:
-      - "8003:8002"
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')",
-        ]
-      interval: 3s
-      timeout: 2s
-      retries: 20
-
-  redis:
-    image: redis:7-alpine
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
 
 volumes:
   redis-data:

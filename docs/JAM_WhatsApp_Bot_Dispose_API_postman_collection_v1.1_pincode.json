@@ -1,0 +1,510 @@
+{
+	"info": {
+		"name": "JAM WhatsApp Bot API - Dispose",
+		"description": "Disposition update endpoint for the WhatsApp Bot API. Updates a lead's status (interested / not_interested / not_enquired / already_purchased_tvs_motor) by mobile number. Requires the X-API-KEY header. pincode is now a mandatory field for every status.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot",
+			"type": "string"
+		},
+		{
+			"key": "api_key",
+			"value": "YOUR_API_KEY",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Dispose - Interested (full flow)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"interested\",\n  \"dealer_code\": \"D12345\",\n  \"expected_purchased_date\": \"25/08/2026\",\n  \"product_name\": \"TVS King Deluxe\",\n  \"remark\": \"Customer wants to visit the showroom this weekend\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Marks a lead as Interested. Requires dealer_code, expected_purchased_date (d/m/Y), and product_name in addition to the base fields (mobile, status, remark, pincode). Triggers lead stage calculation and, if the resulting stage is LEAD/HOT, a WhatsApp notification to the dealer."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Not Interested",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"not_interested\",\n  \"remark\": \"Customer already owns a competitor vehicle\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Marks a lead as Not Interested. Requires mobile, status, remark, and pincode."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Already Purchased TVS Motor",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"already_purchased_tvs_motor\",\n  \"remark\": \"Customer bought a TVS vehicle last month\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Marks a lead as Already Purchased TVS Motor. Requires mobile, status, remark, and pincode."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Not Enquired",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"not_enquired\",\n  \"remark\": \"Customer says they never made this enquiry\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Marks a lead as Not Enquired. Requires mobile, status, remark, and pincode."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Missing Mobile (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"status\": \"not_interested\",\n  \"remark\": \"Missing mobile field, should return 422\",\n  \"pincode\": \"400001\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Omits mobile to verify a 422 'mobile is required' response."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Missing Remark (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"not_interested\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Omits remark to verify a 422 'remark is required' response."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Missing Pincode (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"status\": \"not_interested\",\n  \"remark\": \"Missing pincode field, should return 422\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Omits pincode to verify a 422 'pincode is required' response."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Invalid Pincode (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"status\": \"not_interested\",\n  \"pincode\": \"12AB\",\n  \"remark\": \"Invalid pincode format, should return 422\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Sends a non-numeric / malformed pincode to verify a 422 'pincode must be a valid 6-digit code' response."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Interested Missing Dealer Code (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"interested\",\n  \"expected_purchased_date\": \"25/08/2026\",\n  \"product_name\": \"TVS King Deluxe\",\n  \"remark\": \"Missing dealer_code, should return 422\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "For status = interested, dealer_code is mandatory. Omitting it should return a 422."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Invalid Dealer Code (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"interested\",\n  \"dealer_code\": \"INVALID_CODE_XYZ\",\n  \"expected_purchased_date\": \"25/08/2026\",\n  \"product_name\": \"TVS King Deluxe\",\n  \"remark\": \"Dealer code does not exist, should return 404\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Uses a dealer_code that doesn't exist in tbl_dealers_details to verify a 404 'Invalid dealer code provided' response."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Invalid Status (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"maybe_later\",\n  \"remark\": \"Invalid status value, should return 422\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Uses a status value outside the allowed set to verify a 422 'status is invalid' response."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Customer Not Found (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-KEY",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"0000000000\",\n  \"pincode\": \"400001\",\n  \"status\": \"not_interested\",\n  \"remark\": \"No matching lead, should return 404\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Uses a mobile number with no matching lead to verify a 404 'No customer found for this mobile number' response."
+			},
+			"response": []
+		},
+		{
+			"name": "Dispose - Missing API Key (negative test)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"mobile\": \"919999999999\",\n  \"pincode\": \"400001\",\n  \"status\": \"not_interested\",\n  \"remark\": \"No API key, should return 401\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/dispose",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"dispose"
+					]
+				},
+				"description": "Deliberately omits X-API-KEY to verify the endpoint returns 401 Unauthorized."
+			},
+			"response": []
+		}
+	]
+}

@@ -16,9 +16,12 @@ VOICE_POLICIES = frozenset({"always", "intro_only", "never", "mirror_user"})
 
 DEFAULT_LANGUAGES = [
     {"code": "English", "label": "English"},
-    {"code": "Marathi", "label": "मराठी (Marathi)"},
     {"code": "Hindi", "label": "हिंदी (Hindi)"},
+    {"code": "Marathi", "label": "मराठी (Marathi)"},
+    {"code": "Telugu", "label": "తెలుగు (Telugu)"},
     {"code": "Tamil", "label": "தமிழ் (Tamil)"},
+    {"code": "Kannada", "label": "ಕನ್ನಡ (Kannada)"},
+    {"code": "Malayalam", "label": "മലയാളം (Malayalam)"},
 ]
 
 DEFAULT_CAPTURE_FIELDS = [
@@ -36,6 +39,7 @@ DEFAULT_CAPTURE_FIELDS = [
     {"id": "doc_badge", "label": "Commercial badge", "required": False},
     {"id": "campaign_shown", "label": "Campaign shown", "required": False},
     {"id": "lead_quality", "label": "Lead quality", "required": False},
+    {"id": "disposition", "label": "Disposition", "required": False},
     {"id": "blockers", "label": "Blockers", "required": False},
     {"id": "next_step", "label": "Next step", "required": False},
     {"id": "notes", "label": "Notes", "required": False},

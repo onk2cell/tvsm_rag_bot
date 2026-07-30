@@ -196,6 +196,7 @@ class SafeMediaFetcher:
             raise MediaFetchError("Media hostname could not be resolved") from error
         if not addresses:
             raise MediaFetchError("Media hostname could not be resolved")
+        public_addresses: list[str] = []
         for address in addresses:
             ip = ipaddress.ip_address(address)
             if (
@@ -207,7 +208,15 @@ class SafeMediaFetcher:
                 or ip.is_unspecified
             ):
                 raise MediaFetchError("Media URL resolves to a private network")
-        return hostname, addresses[0], False
+            public_addresses.append(address)
+        # Prefer IPv4: many deploy hosts (incl. this worker) have no IPv6 route,
+        # and socket.getaddrinfo often returns AAAA first for CloudFront.
+        ipv4 = [
+            address
+            for address in public_addresses
+            if ipaddress.ip_address(address).version == 4
+        ]
+        return hostname, (ipv4[0] if ipv4 else public_addresses[0]), False
 
     @staticmethod
     def _normalize_mime(value: str | None) -> str:
@@ -278,8 +287,11 @@ class GeminiAudioTranscriber:
                 with wave.open(io.BytesIO(data), "rb") as audio:
                     duration = audio.getnframes() / audio.getframerate()
             else:
+                # mutagen file objects are dict-like; empty tag maps are falsy even
+                # when stream info (duration) is present — never use bare `if media`.
                 media = mutagen.File(io.BytesIO(data))
-                duration = float(media.info.length) if media and media.info else 0
+                info = getattr(media, "info", None) if media is not None else None
+                duration = float(info.length) if info is not None else 0.0
         except Exception as error:
             raise MediaFetchError("Audio duration could not be determined") from error
         if duration <= 0:
@@ -327,7 +339,16 @@ class GeminiDocumentRecognizer:
                             text=(
                                 "Classify only the document types visible in this image. "
                                 "Do not transcribe names, numbers, addresses, financial "
-                                "values, or any personal data. Return JSON only as "
+                                "values, or any personal data. "
+                                "Allowed document_types values only: "
+                                + ", ".join(sorted(self._ALLOWED))
+                                + ". "
+                                "If the image is clearly a document but none of those "
+                                "labels fit, use status recognized and "
+                                'document_types ["identity_document"]. '
+                                "Use unknown only when the document type cannot be "
+                                "determined. Use not_document for non-document photos. "
+                                "Return JSON only as "
                                 '{"status":"recognized|unknown|not_document",'
                                 '"document_types":["snake_case_type"]}.'
                             )
@@ -342,15 +363,17 @@ class GeminiDocumentRecognizer:
         except json.JSONDecodeError:
             return DocumentRecognition(["unknown"], "unknown")
         status = str(payload.get("status") or "unknown")
+        raw_types = [str(item) for item in payload.get("document_types") or []]
         if status not in {"recognized", "unknown", "not_document"}:
             status = "unknown"
-        document_types = [
-            str(item)
-            for item in payload.get("document_types") or []
-            if str(item) in self._ALLOWED
-        ]
+        document_types = [item for item in raw_types if item in self._ALLOWED]
         if status == "recognized" and not document_types:
-            status = "unknown"
+            # Model recognized a document but used labels outside the allowlist
+            # (e.g. court_order). Keep recognition and fall back to a generic type.
+            if raw_types:
+                document_types = ["identity_document"]
+            else:
+                status = "unknown"
         return DocumentRecognition(
             document_types=document_types or ([] if status == "not_document" else ["unknown"]),
             status=status,

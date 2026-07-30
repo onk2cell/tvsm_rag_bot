@@ -23,7 +23,10 @@ LANGUAGE_TTS_CODES = {
     "English": "en-in",
     "Hindi": "hi-in",
     "Marathi": "mr-in",
+    "Telugu": "te-in",
     "Tamil": "ta-in",
+    "Kannada": "kn-in",
+    "Malayalam": "ml-in",
 }
 
 

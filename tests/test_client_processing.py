@@ -10,6 +10,50 @@ from client_processing import (
     Customer,
     DocumentRecognition,
 )
+from dealers import Dealer, DealerDirectory
+from dispose import resolve_purchase_date
+
+
+class FakeDisposeClient:
+    def __init__(self):
+        self.calls: list[dict] = []
+        self.error: Exception | None = None
+
+    def dispose(self, payload: dict) -> dict:
+        self.calls.append(payload)
+        if self.error is not None:
+            raise self.error
+        return {"status": "success"}
+
+
+
+class FakeDealerDirectory:
+    def __init__(self, dealer: Dealer | None, *, by_code: dict[str, Dealer] | None = None):
+        self.dealer = dealer
+        self.by_code = dict(by_code or {})
+        if dealer is not None and dealer.dealer_code:
+            self.by_code.setdefault(dealer.dealer_code, dealer)
+        self.calls: list[str] = []
+        self.coord_calls: list[tuple[float, float]] = []
+        self.place_calls: list[str] = []
+
+    def find_nearest_by_pincode(self, pincode: str) -> Dealer | None:
+        self.calls.append(pincode)
+        return self.dealer
+
+    def find_nearest_by_place(self, place: str, *, max_km: float = 120.0) -> Dealer | None:
+        del max_km
+        self.place_calls.append(place)
+        return self.dealer
+
+    def find_nearest_by_coords(
+        self, latitude: float, longitude: float
+    ) -> Dealer | None:
+        self.coord_calls.append((latitude, longitude))
+        return self.dealer
+
+    def get_by_code(self, dealer_code: str) -> Dealer | None:
+        return self.by_code.get((dealer_code or "").strip())
 
 
 class FakeState:
@@ -31,7 +75,9 @@ class FakeState:
 class FakeDirectory:
     def __init__(self):
         self.calls: list[str] = []
-        self.customer = Customer("crm-1", "Asha", "Marathi")
+        # Default English so static-message assertions stay stable; set Marathi
+        # explicitly in language-specific tests.
+        self.customer = Customer("crm-1", "Asha", "English")
 
     def lookup(self, mobile: str) -> Customer:
         self.calls.append(mobile)
@@ -48,19 +94,32 @@ class FakeEngine:
     def __init__(self):
         self.turns = []
         self.reply = "तुम्हाला कोणते TVS मॉडेल आवडते?"
+        self.profile = None
 
     def handle_turn(self, turn):
         self.turns.append(turn)
-        return TurnOutput(reply_text=self.reply)
+        return TurnOutput(reply_text=self.reply, profile=self.profile, captured=bool(self.profile))
 
 
 class FakeReplySender:
     def __init__(self):
         self.calls: list[dict] = []
+        self.image_calls: list[dict] = []
+        self.document_calls: list[dict] = []
 
     def send(self, *, mobile: str, in_reply_to: str, text: str) -> None:
         self.calls.append(
             {"mobile": mobile, "in_reply_to": in_reply_to, "text": text}
+        )
+
+    def send_image(self, *, mobile: str, link: str, caption: str = "") -> None:
+        self.image_calls.append(
+            {"mobile": mobile, "link": link, "caption": caption}
+        )
+
+    def send_document(self, *, mobile: str, link: str, caption: str = "") -> None:
+        self.document_calls.append(
+            {"mobile": mobile, "link": link, "caption": caption}
         )
 
 
@@ -125,6 +184,9 @@ class FakeDocumentRecognizer:
 
 
 def _processor(**overrides):
+    preselect_language = overrides.pop("preselect_language", "English")
+    # Qualification tests are not about welcome-back; opt in with False.
+    skip_still_interested = overrides.pop("skip_still_interested", True)
     dependencies = {
         "state": FakeState(),
         "directory": FakeDirectory(),
@@ -137,6 +199,16 @@ def _processor(**overrides):
         "document_recognizer": FakeDocumentRecognizer(),
     }
     dependencies.update(overrides)
+    # Most tests exercise qualification, not the language menu. Fresh sessions
+    # always prompt for language in production; pre-select here unless disabled.
+    if preselect_language or skip_still_interested:
+        session = dependencies["state"].load_or_start("+918286871533")
+        if preselect_language:
+            session.language = preselect_language
+            session.awaiting_language_selection = False
+        if skip_still_interested:
+            session.still_interested_asked = True
+        dependencies["state"].save(session)
     return ClientMessageProcessor(**dependencies), dependencies
 
 
@@ -160,10 +232,12 @@ def test_text_message_uses_crm_identity_engine_and_callback():
     assert deps["directory"].calls == ["+918286871533"]
     turn = deps["engine"].turns[0]
     assert turn.session_id == "client-1533-1"
-    assert turn.language == "Marathi"
+    assert turn.language == "English"
     assert turn.channel == "client_app"
     assert turn.source == "client_app"
-    assert turn.message == "नमस्कार"
+    # First turn carries the CRM context (preferred language) after the message.
+    assert turn.message.startswith("नमस्कार")
+    assert "preferred language: English" in turn.message
     assert deps["reply_sender"].calls == [
         {
             "mobile": "+918286871533",
@@ -187,14 +261,338 @@ def test_customer_lookup_is_cached_for_the_conversation():
     assert len(deps["engine"].turns[1].history) == 2
 
 
-def test_unsupported_crm_language_falls_back_to_message_detection():
+def test_naming_product_sends_brochure_pdf_once(monkeypatch):
+    """When the customer picks a model, send that brochure once (no explicit ask)."""
+    del monkeypatch  # CDN URLs are absolute; no media-base stub needed
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King Deluxe."
+
+    processor.process(_event(message_id="m1", content="King deluxe"))
+
+    assert deps["reply_sender"].document_calls == [
+        {
+            "mobile": "+918286871533",
+            "link": "https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf",
+            "caption": "King Deluxe brochure",
+        },
+        {
+            "mobile": "+918286871533",
+            "link": "https://1.jamoutsourcing.com/f/Deluxe-PMS-Schedule.pdf",
+            "caption": "King Deluxe PMS schedule",
+        },
+        {
+            "mobile": "+918286871533",
+            "link": "https://1.jamoutsourcing.com/f/Deluxe-Warranty-Policy-new.pdf",
+            "caption": "King Deluxe warranty policy",
+        },
+    ]
+    assert deps["state"].sessions["+918286871533"].brochures_sent == ["King Deluxe"]
+
+    deps["engine"].reply = "Noted."
+    processor.process(_event(message_id="m2", content="Ok"))
+    processor.process(_event(message_id="m3", content="King deluxe again"))
+    # Pack is sent once per product per session (brochure + PMS + warranty).
+    assert len(deps["reply_sender"].document_calls) == 3
+
+
+def test_brochure_not_sent_without_product(monkeypatch):
+    monkeypatch.setattr(
+        "client_media_assets.media_base_url",
+        lambda: "https://example.com/media",
+    )
+    processor, deps = _processor()
+    processor.process(_event(message_id="m1", content="Hi"))
+    processor.process(_event(message_id="m2", content="Yes"))
+    assert deps["reply_sender"].document_calls == []
+
+
+def test_engine_profile_product_sends_brochure(monkeypatch):
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "EV MAX is a good fit."
+    deps["engine"].profile = {"product_interest": "King EV MAX"}
+
+    processor.process(_event(message_id="m1", content="मुझे इलेक्ट्रिक वाली चाहिए"))
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert links == [
+        "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
+    ]
+
+
+def test_crm_product_enquired_sends_brochure_on_first_message(monkeypatch):
+    """CRM already knows the product — send the PDF without any ask."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "Marathi",
+        product_enquired="TVS KING EV MAX",
+    )
+
+    processor.process(_event(message_id="m1", content="Hi"))
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert links == [
+        "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
+    ]
+
+
+def test_marathi_product_name_sends_brochure(monkeypatch):
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "छान निवड!"
+
+    processor.process(_event(message_id="m1", content="मला ईव्ही मॅक्स पाहिजे"))
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert links == [
+        "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
+    ]
+
+
+def test_bare_dont_know_reply_sends_share_location_image(monkeypatch):
+    """After the bot asks for a pincode, "nahi pata" should get the how-to image."""
+    monkeypatch.setattr(
+        "client_media_assets.media_base_url",
+        lambda: "https://example.com/media",
+    )
+    processor, deps = _processor()
+    deps["engine"].reply = "Please share your current location."
+
+    processor.process(_event(message_id="m1", content="nahi pata"))
+
+    assert deps["engine"].turns == []  # static path — no LLM duplicate ask
+    assert deps["reply_sender"].image_calls
+    image = deps["reply_sender"].image_calls[0]
+    assert image["link"].endswith("/share_location/how_to.jpg")
+    assert image["caption"] == ""  # text reply carries the ask once
+    assert "6-digit pincode" in deps["reply_sender"].calls[-1]["text"]
+    assert deps["state"].sessions["+918286871533"].share_location_guide_sent is True
+
+
+def test_invalid_pincode_asks_once_then_offers_location(monkeypatch):
+    monkeypatch.setattr(
+        "client_media_assets.media_base_url",
+        lambda: "https://example.com/media",
+    )
+    processor, deps = _processor()
+
+    processor.process(_event(message_id="m1", content="41100"))
+    assert deps["engine"].turns == []
+    assert not deps["reply_sender"].image_calls
+    first = deps["reply_sender"].calls[-1]["text"]
+    assert "valid 6-digit pincode" in first.lower()
+    assert deps["state"].sessions["+918286871533"].invalid_pincode_attempts == 1
+
+    processor.process(_event(message_id="m2", content="4110011"))
+    assert deps["reply_sender"].image_calls
+    assert deps["reply_sender"].image_calls[0]["caption"] == ""
+    second = deps["reply_sender"].calls[-1]["text"]
+    assert "location" in second.lower()
+    assert "6-digit" in second.lower()
+    # One text + one image — not a duplicated caption+text pair
+    assert len(deps["reply_sender"].calls) == 2
+    assert len(deps["reply_sender"].image_calls) == 1
+
+
+def test_share_location_image_retries_on_transient_failure(monkeypatch):
+    monkeypatch.setattr(
+        "client_media_assets.media_base_url",
+        lambda: "https://example.com/media",
+    )
+
+    class FlakyImageSender(FakeReplySender):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        def send_image(self, *, mobile: str, link: str, caption: str = "") -> None:
+            self.attempts += 1
+            if self.attempts < 2:
+                raise RuntimeError("transient send failure")
+            super().send_image(mobile=mobile, link=link, caption=caption)
+
+    sender = FlakyImageSender()
+    processor, deps = _processor(reply_sender=sender, sleep=lambda _s: None)
+
+    processor.process(_event(message_id="m1", content="nahi pata"))
+
+    assert sender.attempts == 2
+    assert deps["state"].sessions["+918286871533"].share_location_guide_sent is True
+    assert sender.image_calls
+
+
+def test_unsupported_crm_language_prompts_for_language_choice():
     directory = FakeDirectory()
     directory.customer = Customer("crm-1", "Asha", "Unsupported")
-    processor, deps = _processor(directory=directory)
+    processor, deps = _processor(directory=directory, preselect_language=None)
 
     processor.process(_event(content="Hello"))
 
-    assert deps["engine"].turns[0].language == "English"
+    assert deps["engine"].turns == []
+    assert "Which language do you prefer?" in deps["reply_sender"].calls[0]["text"]
+
+
+def test_missing_language_menu_then_choice_starts_qualification():
+    directory = FakeDirectory()
+    directory.customer = Customer("crm-1", "Asha", "")
+    processor, deps = _processor(directory=directory, preselect_language=None)
+
+    processor.process(_event(message_id="incoming-1", content="hi"))
+    processor.process(_event(message_id="incoming-2", content="2"))
+
+    assert "Which language do you prefer?" in deps["reply_sender"].calls[0]["text"]
+    assert deps["engine"].turns[0].language == "Hindi"
+    assert "selected Hindi" in deps["engine"].turns[0].message
+
+
+def test_crm_preferred_language_still_shows_menu_on_fresh_session():
+    """After 4h TTL / new session, always ask language even if CRM has one."""
+    directory = FakeDirectory()
+    directory.customer = Customer("crm-1", "Asha", "Tamil")
+    processor, deps = _processor(directory=directory, preselect_language=None)
+
+    processor.process(_event(content="Hello"))
+
+    assert deps["engine"].turns == []
+    assert "Which language do you prefer?" in deps["reply_sender"].calls[0]["text"]
+    assert deps["state"].sessions["+918286871533"].awaiting_language_selection is True
+
+
+def test_returning_customer_chooses_language_then_gets_welcome_back():
+    """Fresh session: language menu first, then static still-interested in chosen lang."""
+    directory = FakeDirectory()
+    directory.customer = Customer(
+        "crm-1",
+        "Asha",
+        "Tamil",
+        product_enquired="TVS KING EV MAX",
+        last_remark="Interested in EV MAX",
+        last_status="Interested",
+    )
+    processor, deps = _processor(directory=directory, preselect_language=None)
+
+    processor.process(_event(message_id="m1", content="Hi"))
+    assert "Which language do you prefer?" in deps["reply_sender"].calls[0]["text"]
+
+    # Language chosen — still-interested must fire (do not skip).
+    session = deps["state"].sessions["+918286871533"]
+    session.welcome_back_sent = False
+    session.still_interested_asked = False
+    deps["state"].save(session)
+
+    processor.process(_event(message_id="m2", content="1"))  # English
+    assert deps["engine"].turns == []  # static ask, not LLM
+    ask = deps["reply_sender"].calls[-1]["text"]
+    assert ask.startswith("Asha.")
+    assert "King EV MAX" in ask
+    assert "still planning to purchase" in ask.lower()
+    assert "Press 1 for Yes" in ask
+    assert "Press 2 for No" in ask
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_still_interested is True
+    assert session.language == "English"
+
+
+def test_unknown_crm_name_reply_is_captured_before_wrap_up():
+    """Name must reach dispose.customername even before PROFILE_JSON wrap-up."""
+    dispose = FakeDisposeClient()
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    processor, deps = _processor(
+        dispose_client=dispose,
+        dealer_directory=FakeDealerDirectory(dealer),
+    )
+    deps["directory"].customer = Customer(
+        "unknown-918459522206",
+        "Customer 8459522206",
+        "",
+    )
+
+    # Language menu → Marathi
+    processor.process(_event(message_id="n1", content="Hi"))
+    deps["engine"].reply = "नमस्ते! तुमचे नाव सांगू शकाल का?"
+    processor.process(_event(message_id="n2", content="3"))
+
+    # Name reply (no PROFILE_JSON yet)
+    deps["engine"].reply = "धन्यवाद!"
+    deps["engine"].profile = None
+    processor.process(_event(message_id="n3", content="राहुल पाटील"))
+    assert (
+        deps["state"].sessions["+918286871533"].lead_profile["lead_name"]
+        == "राहुल पाटील"
+    )
+
+    # Later pincode should dispose with customername
+    deps["engine"].reply = "Noted."
+    deps["engine"].profile = {"product_interest": "King EV MAX"}
+    processor.process(_event(message_id="n4", content="411057"))
+    assert dispose.calls
+    assert dispose.calls[-1].get("customername") == "राहुल पाटील"
+
+
+def test_unknown_crm_customer_dispose_sends_customername():
+    dispose = FakeDisposeClient()
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    processor, deps = _processor(
+        dispose_client=dispose,
+        dealer_directory=FakeDealerDirectory(dealer),
+    )
+    deps["directory"].customer = Customer(
+        "unknown-918459522206",
+        "Customer 8459522206",
+        "English",
+    )
+    deps["engine"].reply = "Thanks Ravi."
+    deps["engine"].profile = {
+        "lead_name": "Ravi Kumar",
+        "product_interest": "King Deluxe",
+        "purchase_timeline": "15/08/2026",
+        "pincode": "411001",
+    }
+
+    processor.process(_event(message_id="u1", content="My name is Ravi Kumar"))
+
+    assert dispose.calls
+    assert dispose.calls[-1]["customername"] == "Ravi Kumar"
+
+
+def test_empty_crm_language_shows_menu_even_when_state_known():
+    directory = FakeDirectory()
+    directory.customer = Customer(
+        "crm-1",
+        "Asha",
+        "",
+        state="Maharashtra",
+    )
+    processor, deps = _processor(directory=directory, preselect_language=None)
+
+    processor.process(_event(content="Hello"))
+
+    assert deps["engine"].turns == []
+    assert "Which language do you prefer?" in deps["reply_sender"].calls[0]["text"]
 
 
 def test_audio_is_transcribed_before_engine_turn():
@@ -209,7 +607,7 @@ def test_audio_is_transcribed_before_engine_turn():
         )
     )
 
-    assert deps["engine"].turns[0].message == "मला ईव्ही मॅक्स पाहिजे"
+    assert deps["engine"].turns[0].message.startswith("मला ईव्ही मॅक्स पाहिजे")
 
 
 def test_document_is_added_to_lead_and_continues_conversation():
@@ -323,3 +721,702 @@ def test_callback_retry_reuses_pending_reply_without_regenerating():
 
     assert len(deps["engine"].turns) == 1
     assert sender.calls[0]["text"] == sender.calls[1]["text"]
+
+
+def test_pincode_message_asks_nearest_dealer_confirm_once():
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune, Maharashtra, 411048",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://www.google.com/maps?q=18.52,73.85",
+        latitude=18.52,
+        longitude=73.85,
+        spoc_name="Ravi",
+        distance_km=2.5,
+    )
+    directory = FakeDealerDirectory(dealer)
+    processor, deps = _processor(dealer_directory=directory)
+    deps["engine"].reply = "Thanks, we noted your pincode."
+
+    processor.process(_event(content="My pincode is 411001"))
+    processor.process(
+        _event(message_id="incoming-2", content="Still around 411001 area")
+    )
+
+    first = deps["reply_sender"].calls[0]["text"]
+    second = deps["reply_sender"].calls[1]["text"]
+    assert "Name: Shah Auto" in first
+    assert "Address: Pune, Maharashtra, 411048" in first
+    assert "Reply Yes or No" in first
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is True
+    assert deps["state"].sessions["+918286871533"].dealer_confirmed is False
+    # While awaiting Yes/No, follow-ups re-prompt the same dealer card.
+    assert "Name: Shah Auto" in second
+    assert directory.calls == ["411001"]
+    assert deps["state"].sessions["+918286871533"].dealer_shared_for_pincode == "411001"
+
+
+def test_real_dealer_directory_with_fake_geocoder_resolves_pune():
+    dealers = [
+        {
+            "dealer_code": "11689",
+            "name": "Shah Auto",
+            "address": "Pune",
+            "pincode": "411048",
+            "phone": "9000000001",
+            "map_url": "https://maps.example/11689",
+            "latitude": 18.5204,
+            "longitude": 73.8567,
+        },
+        {
+            "dealer_code": "10824",
+            "name": "Kanchana Motors",
+            "address": "Mangalore",
+            "pincode": "575006",
+            "phone": "7353767891",
+            "map_url": "https://maps.example/10824",
+            "latitude": 12.8708,
+            "longitude": 74.8819,
+        },
+    ]
+
+    class _Geo:
+        def geocode(self, pincode: str):
+            return {"411001": (18.53, 73.85)}.get(pincode)
+
+    directory = DealerDirectory(dealers, geocoder=_Geo())
+    processor, deps = _processor(dealer_directory=directory)
+    deps["engine"].reply = "Got it."
+
+    processor.process(_event(content="411001"))
+
+    assert "Shah Auto" in deps["reply_sender"].calls[0]["text"]
+
+
+def test_wrap_up_profile_calls_dispose_once_with_dealer_code():
+    dispose = FakeDisposeClient()
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    processor, deps = _processor(
+        dispose_client=dispose,
+        dealer_directory=FakeDealerDirectory(dealer),
+    )
+    deps["engine"].profile = {
+        "product_interest": "King Deluxe",
+        "purchase_timeline": "next month",
+        "notes": "qualified on WhatsApp",
+    }
+    deps["engine"].reply = "Thanks, dealer will contact you."
+
+    processor.process(_event(message_id="incoming-1", content="My pincode is 411001"))
+    processor.process(_event(message_id="incoming-2", content="ok"))
+
+    # Same lead snapshot twice → only one dispose (no duplicate spam)
+    assert len(dispose.calls) == 1
+    assert dispose.calls[0]["status"] == "interested"
+    assert dispose.calls[0]["pincode"] == "411001"
+    assert dispose.calls[0]["dealer_code"] == "11689"
+    assert dispose.calls[0]["product_name"] == "King Deluxe"
+    assert "preferred_language: English" in dispose.calls[0]["remark"]
+    assert deps["state"].sessions["+918286871533"].dispose_sent is True
+
+
+def test_dispose_re_fires_when_lead_fields_change():
+    dispose = FakeDisposeClient()
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    processor, deps = _processor(
+        dispose_client=dispose,
+        dealer_directory=FakeDealerDirectory(dealer),
+    )
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        product_enquired="TVS KING PASSENGER DELUXE",
+    )
+    deps["engine"].profile = {
+        "product_interest": "King Deluxe",
+        "purchase_timeline": "15/08/2026",
+    }
+    deps["engine"].reply = "Noted."
+
+    processor.process(_event(message_id="d1", content="My pincode is 411001"))
+    assert len(dispose.calls) == 1
+    assert dispose.calls[0]["dealer_code"] == "11689"
+    assert dispose.calls[0]["pincode"] == "411001"
+
+    deps["engine"].reply = "Thanks for confirming."
+    processor.process(_event(message_id="d1b", content="Yes"))
+    assert deps["state"].sessions["+918286871533"].dealer_confirmed is True
+
+    deps["engine"].profile = {
+        "product_interest": "King Deluxe",
+        "purchase_timeline": "20/09/2026",
+        "notes": "changed date",
+    }
+    processor.process(_event(message_id="d2", content="actually 20/09/2026"))
+    assert len(dispose.calls) == 2
+    assert dispose.calls[1]["expected_purchased_date"] == "20/09/2026"
+
+
+def test_typed_date_survives_llm_unknown_timeline():
+    dispose = FakeDisposeClient()
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    processor, deps = _processor(
+        dispose_client=dispose,
+        dealer_directory=FakeDealerDirectory(dealer),
+    )
+    deps["engine"].reply = "Noted."
+    deps["engine"].profile = {
+        "product_interest": "King Deluxe",
+        "purchase_timeline": "12-12-26",
+        "pincode": "411001",
+    }
+
+    processor.process(_event(message_id="d1", content="12-12-26"))
+    assert dispose.calls
+    assert dispose.calls[-1]["expected_purchased_date"] == "12/12/2026"
+
+    # A later turn where the LLM says "unknown" must not clobber the real date.
+    deps["engine"].profile = {
+        "product_interest": "King Deluxe",
+        "purchase_timeline": "unknown",
+        "notes": "wrap up",
+        "pincode": "411001",
+    }
+    processor.process(_event(message_id="d2", content="Ok"))
+    assert dispose.calls[-1]["expected_purchased_date"] == "12/12/2026"
+    session = deps["state"].sessions["+918286871533"]
+    stored = resolve_purchase_date(session.lead_profile["purchase_timeline"])
+    assert stored.value == "12/12/2026"
+
+
+def test_location_sets_dealer_and_syncs_dispose():
+    dispose = FakeDisposeClient()
+    nearest = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    processor, deps = _processor(
+        dispose_client=dispose,
+        dealer_directory=FakeDealerDirectory(nearest),
+    )
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        product_enquired="TVS KING EV MAX",
+    )
+
+    processor.process(
+        _event(
+            message_id="loc-d1",
+            type="location",
+            content="18.52,73.85",
+            latitude=18.52,
+            longitude=73.85,
+        )
+    )
+
+    assert deps["engine"].turns == []
+    assert len(dispose.calls) == 1
+    assert dispose.calls[0]["dealer_code"] == "11689"
+    assert dispose.calls[0]["pincode"] == "411048"
+    assert dispose.calls[0]["product_name"] == "King EV MAX"
+
+
+def test_crm_dealer_confirm_yes_sets_last_dealer_code_and_skips_nearest():
+    crm_dealer = Dealer(
+        dealer_code="11982",
+        name="Sarthak Auto",
+        address="Chinchwad, Pune, 411019",
+        pincode="411019",
+        phone="9623457273",
+        map_url="https://maps.example/11982",
+        latitude=18.65,
+        longitude=73.81,
+        spoc_name="Ashwini",
+    )
+    nearest = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    directory = FakeDealerDirectory(nearest, by_code={"11982": crm_dealer})
+    processor, deps = _processor(dealer_directory=directory)
+    deps["directory"].customer = Customer(
+        "307569",
+        "Ajit",
+        "Marathi",
+        product_enquired="TVS KING PASSENGER DELUXE",
+        dealership_id="11982",
+        dealership_name="Sarthak Auto",
+        city="Pune",
+        state="MAHARASHTRA",
+    )
+    deps["engine"].reply = "Please share your pincode."
+
+    processor.process(_event(message_id="m1", content="I live at pin 41 10 35"))
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_confirm is True
+    reply0 = deps["reply_sender"].calls[0]["text"]
+    assert "Sarthak Auto" in reply0
+    assert "Chinchwad" in reply0
+    # Marathi CRM preferred language → localized dealer card.
+    assert "नाव:" in reply0 or "Name:" in reply0
+    assert "पत्ता:" in reply0 or "Address:" in reply0
+    assert "होय किंवा नाही" in reply0 or "Reply Yes or No" in reply0
+    assert directory.calls == []  # nearest not used yet
+
+    deps["engine"].reply = "Great, continuing."
+    processor.process(_event(message_id="m2", content="होय"))
+    session = deps["state"].sessions["+918286871533"]
+    assert session.dealer_confirmed is True
+    assert session.last_dealer_code == "11982"
+    assert directory.calls == []
+
+
+def test_city_name_redirects_to_pincode_or_location_only(monkeypatch):
+    monkeypatch.setattr(
+        "client_media_assets.media_base_url",
+        lambda: "https://example.com/media",
+    )
+    directory = FakeDealerDirectory(
+        Dealer(
+            dealer_code="11689",
+            name="Shah Auto",
+            address="Pune",
+            pincode="411048",
+            phone="9000000001",
+            map_url="https://maps.example/11689",
+            latitude=18.52,
+            longitude=73.85,
+        )
+    )
+    processor, deps = _processor(dealer_directory=directory)
+    deps["engine"].reply = "should not be used"
+
+    processor.process(_event(message_id="m1", content="Parbhani"))
+
+    assert deps["engine"].turns == []
+    assert directory.place_calls == []
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "6-digit pincode" in reply
+    assert "current WhatsApp location" in reply
+    assert "city/area" in reply.lower() or "do not use city" in reply.lower()
+    assert "Jagdamba" not in reply
+    assert "Shah Auto" not in reply
+    assert deps["reply_sender"].image_calls
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is False
+
+
+def test_unknown_pincode_sends_share_location_how_to_image(monkeypatch):
+    monkeypatch.setattr(
+        "client_media_assets.media_base_url",
+        lambda: "https://example.com/media",
+    )
+    processor, deps = _processor()
+    deps["engine"].reply = "Please share your current location."
+
+    processor.process(_event(message_id="m1", content="I don't know my pincode"))
+
+    assert deps["engine"].turns == []
+    assert deps["reply_sender"].image_calls
+    image = deps["reply_sender"].image_calls[0]
+    assert image["link"].endswith("/share_location/how_to.jpg")
+    assert image["caption"] == ""
+    assert "location" in deps["reply_sender"].calls[-1]["text"].lower()
+    assert deps["state"].sessions["+918286871533"].share_location_guide_sent is True
+
+
+def test_crm_dealer_name_without_id_resolves_address_from_directory():
+    """CRM often sends only the dealership name; resolve the card by name."""
+    dealer = Dealer(
+        dealer_code="15140",
+        name="Gk Motors",
+        address="Bangalore, Karnataka",
+        pincode="560001",
+        phone="9000000005",
+        map_url="https://maps.example/15140",
+        latitude=12.97,
+        longitude=77.59,
+    )
+
+    class NameDirectory(FakeDealerDirectory):
+        def get_by_name(self, name: str) -> Dealer | None:
+            return dealer if name.lower() == "gk motors" else None
+
+    directory = NameDirectory(None)
+    processor, deps = _processor(dealer_directory=directory)
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        dealership_name="Gk Motors",
+    )
+
+    processor.process(_event(message_id="m1", content="Hi"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Name: Gk Motors" in reply
+    assert "Bangalore, Karnataka" in reply
+    session = deps["state"].sessions["+918286871533"]
+    assert session.last_dealer_code == "15140"
+
+
+def test_question_during_dealer_confirm_is_answered_then_card_reattached():
+    directory = FakeDealerDirectory(None)
+    processor, deps = _processor(dealer_directory=directory)
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        dealership_id="11982",
+        dealership_name="Sarthak Auto",
+        city="Pune",
+    )
+    processor.process(_event(message_id="m1", content="Hi"))
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
+
+    deps["engine"].reply = "The dealership will share downpayment details."
+    processor.process(_event(message_id="m2", content="What is the downpayment?"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    # The question is answered, and the pending card is re-attached after it.
+    assert reply.startswith("The dealership will share downpayment details.")
+    assert "Reply Yes or No" in reply
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is True
+
+
+def test_pincode_during_dealer_confirm_redoes_nearest_lookup():
+    nearest = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    directory = FakeDealerDirectory(nearest)
+    processor, deps = _processor(dealer_directory=directory)
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        dealership_id="11982",
+        dealership_name="Sarthak Auto",
+        city="Pune",
+    )
+    processor.process(_event(message_id="m1", content="Hi"))
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
+
+    deps["engine"].reply = "Let me check."
+    processor.process(_event(message_id="m2", content="411048"))
+
+    assert directory.calls == ["411048"]
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Shah Auto" in reply
+    session = deps["state"].sessions["+918286871533"]
+    assert session.last_dealer_code == "11689"
+    assert session.awaiting_dealer_confirm is True
+
+
+def test_crm_dealer_confirm_no_then_nearest_from_spaced_pincode():
+    nearest = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    directory = FakeDealerDirectory(nearest)
+    processor, deps = _processor(dealer_directory=directory)
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "Marathi",
+        dealership_id="11982",
+        dealership_name="Sarthak Auto",
+        city="Pune",
+    )
+    deps["engine"].reply = "Share your area pin please."
+
+    processor.process(_event(message_id="m1", content="hello"))
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
+
+    deps["engine"].reply = "Please share pincode."
+    processor.process(_event(message_id="m2", content="नाही"))
+    assert deps["state"].sessions["+918286871533"].dealer_confirmed is False
+    assert deps["reply_sender"].image_calls
+    image = deps["reply_sender"].image_calls[0]
+    assert image["link"].endswith("/share_location/how_to.jpg")
+    assert image["caption"] == ""
+    no_reply = deps["reply_sender"].calls[-1]["text"]
+    assert "location" in no_reply.lower() or "लोकेशन" in no_reply
+    # Dealer-no uses static ask — engine should not run a second turn for "नाही"
+    assert len(deps["engine"].turns) == 1
+
+    deps["engine"].reply = "Noted."
+    processor.process(_event(message_id="m3", content="41 10 35"))
+    assert directory.calls == ["411035"]
+    assert "Shah Auto" in deps["reply_sender"].calls[-1]["text"]
+    assert deps["state"].sessions["+918286871533"].last_dealer_code == "11689"
+
+
+def test_product_hint_passed_to_engine_from_crm_product_enquired():
+    processor, deps = _processor()
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        product_enquired="TVS KING EV MAX",
+    )
+    processor.process(_event(content="Hi"))
+    assert deps["engine"].turns[0].product_hint == "King EV MAX"
+
+
+def test_call_me_disposes_interested_with_callback_using_crm_fields():
+    dispose = FakeDisposeClient()
+    processor, deps = _processor(dispose_client=dispose)
+    deps["directory"].customer = Customer(
+        "307569",
+        "Ajit",
+        "Marathi",
+        product_enquired="TVS KING PASSENGER DELUXE",
+        dealership_id="11982",
+        dealership_name="Sarthak Auto",
+        city="Pune",
+    )
+    deps["engine"].reply = "ठीक आहे, डीलरशिप लवकरच कॉल करेल."
+    # JAM dispose v1.1 requires pincode on every call
+    session = deps["state"].load_or_start("+918286871533")
+    session.dealer_shared_for_pincode = "411019"
+    deps["state"].save(session)
+
+    processor.process(_event(content="Please call me"))
+
+    assert len(dispose.calls) == 1
+    assert dispose.calls[0]["status"] == "interested"
+    assert dispose.calls[0]["pincode"] == "411019"
+    assert dispose.calls[0]["dealer_code"] == "11982"
+    assert dispose.calls[0]["product_name"] == "King Deluxe"
+    assert "callback" in dispose.calls[0]["remark"].lower()
+    assert deps["state"].sessions["+918286871533"].dispose_sent is True
+    assert "call them soon" in deps["engine"].turns[0].message.lower()
+
+
+def test_welcome_back_uses_crm_remarks_on_fresh_session():
+    processor, deps = _processor(
+        preselect_language="English",
+        skip_still_interested=False,
+    )
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        product_enquired="TVS KING EV MAX",
+        last_remark="Interested in EV MAX, asked price",
+        last_status="Interested",
+    )
+
+    processor.process(_event(content="Hi"))
+
+    ask = deps["reply_sender"].calls[-1]["text"]
+    assert "Asha." in ask
+    assert "King EV MAX" in ask
+    assert "still planning to purchase" in ask.lower()
+    assert "Press 1 for Yes" in ask
+    assert deps["engine"].turns == []
+    assert deps["state"].sessions["+918286871533"].awaiting_still_interested is True
+    assert deps["state"].sessions["+918286871533"].welcome_back_sent is True
+
+
+def test_still_interested_yes_continues_qualification():
+    processor, deps = _processor(
+        preselect_language="Hindi",
+        skip_still_interested=False,
+    )
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "Hindi",
+        product_enquired="King Deluxe",
+        last_status="Interested",
+    )
+    deps["engine"].reply = "आगे बढ़ते हैं।"
+
+    processor.process(_event(message_id="m1", content="Hi"))
+    ask = deps["reply_sender"].calls[-1]["text"]
+    assert "Asha." in ask
+    assert "King Deluxe" in ask
+    assert "1 दबाएँ" in ask or "1" in ask
+
+    processor.process(_event(message_id="m2", content="1"))
+    assert deps["engine"].turns
+    assert "still interested" in deps["engine"].turns[0].message.lower()
+    assert deps["state"].sessions["+918286871533"].awaiting_still_interested is False
+
+
+def test_still_interested_accepts_free_text_no():
+    dispose = FakeDisposeClient()
+    processor, deps = _processor(
+        preselect_language="English",
+        skip_still_interested=False,
+        dispose_client=dispose,
+    )
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        product_enquired="King EV MAX",
+        last_status="Interested",
+    )
+    session = deps["state"].load_or_start("+918286871533")
+    session.dealer_shared_for_pincode = "411001"
+    deps["state"].save(session)
+
+    processor.process(_event(message_id="m1", content="Hi"))
+    processor.process(
+        _event(message_id="m2", content="no i dont want to buy this vehicle")
+    )
+
+    thanks = deps["reply_sender"].calls[-1]["text"]
+    assert "Thank you" in thanks
+    assert dispose.calls[-1]["status"] == "not_interested"
+
+
+def test_still_interested_no_thanks_in_selected_language():
+    dispose = FakeDisposeClient()
+    processor, deps = _processor(
+        preselect_language="Marathi",
+        skip_still_interested=False,
+        dispose_client=dispose,
+    )
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "Marathi",
+        product_enquired="King EV MAX",
+        last_status="Interested",
+    )
+    session = deps["state"].load_or_start("+918286871533")
+    session.dealer_shared_for_pincode = "411001"
+    deps["state"].save(session)
+
+    processor.process(_event(message_id="m1", content="Hi"))
+    processor.process(_event(message_id="m2", content="2"))
+
+    thanks = deps["reply_sender"].calls[-1]["text"]
+    assert "धन्यवाद" in thanks
+    assert deps["engine"].turns == []
+    assert deps["state"].sessions["+918286871533"].awaiting_still_interested is False
+    assert dispose.calls
+    assert dispose.calls[-1]["status"] == "not_interested"
+
+
+def test_first_message_context_includes_preferred_language_without_remarks():
+    processor, deps = _processor(preselect_language="Marathi")
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "Marathi",
+        last_status="No Response",
+    )
+    deps["engine"].reply = "नमस्कार!"
+
+    processor.process(_event(content="Hi"))
+
+    turn_message = deps["engine"].turns[0].message
+    assert "preferred language: Marathi" in turn_message
+    assert deps["state"].sessions["+918286871533"].welcome_back_sent is True
+
+
+def test_location_event_sets_nearest_dealer_without_llm():
+    nearest = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    directory = FakeDealerDirectory(nearest)
+    processor, deps = _processor(dealer_directory=directory)
+
+    processor.process(
+        _event(
+            message_id="loc-1",
+            type="location",
+            content="",
+            latitude=18.5204,
+            longitude=73.8567,
+        )
+    )
+
+    assert deps["engine"].turns == []
+    assert directory.coord_calls == [(18.5204, 73.8567)]
+    session = deps["state"].sessions["+918286871533"]
+    assert session.last_dealer_code == "11689"
+    assert session.dealer_confirmed is False
+    assert session.awaiting_dealer_confirm is True
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Name: Shah Auto" in reply
+    assert "Address:" in reply
+    assert "Reply Yes or No" in reply
+
+
+def test_location_event_without_coords_asks_for_pincode():
+    processor, deps = _processor(dealer_directory=FakeDealerDirectory(None))
+
+    processor.process(
+        _event(message_id="loc-2", type="location", content="")
+    )
+
+    assert deps["engine"].turns == []
+    assert "pincode" in deps["reply_sender"].calls[-1]["text"].lower()

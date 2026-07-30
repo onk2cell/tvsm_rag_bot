@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lesson 0001 — Why three processes</title>
+  <link rel="stylesheet" href="../assets/lesson.css" />
+</head>
+<body>
+  <article class="page">
+    <header class="lesson-header">
+      <p class="eyebrow">Lesson 0001 · Ship safely</p>
+      <h1>Why this bot needs three processes</h1>
+      <p class="lede">
+        One win: when you read AI-generated webhook code, you can tell whether slow work is in the right process — and which Compose services must be up.
+      </p>
+    </header>
+
+    <h2>The shipping risk</h2>
+    <p>
+      An inbound message can take seconds: CRM lookup, Gemini, dealer geocode, dispose, WhatsApp send.
+      If that all happened inside the HTTP handler, the caller (JAM) would time out, retry, and you would get duplicate leads or silent drops.
+      This repo’s answer: <strong>accept fast, work later</strong>.
+    </p>
+
+    <div class="flow" aria-label="Message path">
+      <div class="flow-step">
+        <span class="n">1</span>
+        <div>
+          <strong>client-webhook</strong> — validate, dedupe, enqueue, return <code>202</code>.
+          File: <code>client_webhook.py</code>.
+        </div>
+      </div>
+      <div class="flow-step">
+        <span class="n">2</span>
+        <div>
+          <strong>redis</strong> — holds the RQ job (and sessions, rate limits, locks).
+          Hostname inside Compose: <code>redis</code>.
+        </div>
+      </div>
+      <div class="flow-step">
+        <span class="n">3</span>
+        <div>
+          <strong>client-worker</strong> — RQ worker runs <code>client_tasks.handle_client_message</code>
+          (LLM, CRM, dispose, reply).
+        </div>
+      </div>
+    </div>
+
+    <h2>What Redis is here</h2>
+    <p>
+      Redis is an <em>in-memory data structure store</em> — fast key/value with TTLs, counters, locks.
+      In this bot it is both the <strong>job broker</strong> for <a href="https://python-rq.org/">RQ</a>
+      and the place for short-lived ops state (seen message ids, rate limits, sessions).
+      It is <em>not</em> your CRM and not Gemini.
+      <span class="cite">Source: <a href="https://redis.io/tutorials/what-is-redis/">What is Redis?</a></span>
+    </p>
+
+    <h2>What Compose is doing</h2>
+    <p>
+      <code>compose.yaml</code> declares those three as separate <em>services</em> (containers).
+      On Compose’s default network, the webhook reaches Redis at
+      <code>redis://redis:6379</code> because <strong>the service name is the DNS name</strong>.
+      <span class="cite">Source: <a href="https://docs.docker.com/compose/how-tos/networking">Networking in Compose</a></span>
+    </p>
+    <pre>client-webhook  →  REDIS_URL=redis://redis:6379  →  enqueue job
+client-worker   →  same REDIS_URL + CLIENT_QUEUE_NAME  →  run job</pre>
+    <div class="callout warn">
+      If webhook and worker disagree on <code>CLIENT_QUEUE_NAME</code>, jobs enqueue into a queue nobody listens to.
+      Symptoms look like “bot accepts but never replies.” That is a deploy/config bug, not an LLM bug.
+    </div>
+
+    <h2>What RQ adds</h2>
+    <p>
+      RQ stores a pointer to a Python callable + arguments in Redis.
+      The webhook enqueues <code>client_tasks.handle_client_message</code>;
+      the worker process pops and executes it — with retries configured on enqueue.
+      <span class="cite">Source: <a href="https://python-rq.org/docs/">RQ docs</a></span>
+    </p>
+
+    <h2>Practice (retrieve, don’t re-read)</h2>
+
+    <div
+      class="quiz"
+      data-answer="0"
+      data-ok="Yes — accept now, process later. That is the whole point of the split."
+      data-bad="Remember: the HTTP process must stay fast. Heavy work belongs after enqueue."
+    >
+      <h3>1. Why return 202 before the customer gets a reply?</h3>
+      <div class="options">
+        <button type="button" class="option" data-choice="0">Accept now; process later in a worker</button>
+        <button type="button" class="option" data-choice="1">Cache replies; skip the worker always</button>
+        <button type="button" class="option" data-choice="2">Reject work; force CRM to call Gemini</button>
+      </div>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div
+      class="quiz"
+      data-answer="0"
+      data-ok="Correct — Compose DNS makes the service name resolvable on the app network."
+      data-bad="Think about how containers find each other: not host /etc/hosts, Compose networking."
+    >
+      <h3>2. Why does <code>redis://redis:6379</code> work inside Compose?</h3>
+      <div class="options">
+        <button type="button" class="option" data-choice="0">Compose DNS resolves the redis service name</button>
+        <button type="button" class="option" data-choice="1">Redis always listens only as hostname redis</button>
+        <button type="button" class="option" data-choice="2">Uvicorn rewrites redis URLs at process start</button>
+      </div>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <div
+      class="quiz"
+      data-answer="1"
+      data-ok="Right — the RQ worker process runs handle_client_message, not the webhook."
+      data-bad="Trace the enqueue string in client_webhook → who executes that callable?"
+    >
+      <h3>3. Who runs <code>handle_client_message</code>?</h3>
+      <div class="options">
+        <button type="button" class="option" data-choice="0">client-webhook after the HTTP accept path</button>
+        <button type="button" class="option" data-choice="1">client-worker after RQ dequeues the job</button>
+        <button type="button" class="option" data-choice="2">redis itself after storing the job key</button>
+      </div>
+      <p class="feedback" hidden></p>
+    </div>
+
+    <h2>Do this in the repo (2 minutes)</h2>
+    <ol>
+      <li>Open <code>compose.yaml</code> and find <code>client-webhook</code>, <code>client-worker</code>, and <code>redis</code>.</li>
+      <li>Confirm both app services set <code>REDIS_URL: redis://redis:6379</code>.</li>
+      <li>In <code>client_webhook.py</code>, find <code>RqEventPublisher.publish</code> — note the string it enqueues.</li>
+      <li>In <code>client_worker.py</code>, see that it starts <code>rq worker</code> on <code>CLIENT_QUEUE_NAME</code>.</li>
+    </ol>
+
+    <h2>Primary source (read next)</h2>
+    <p>
+      <a href="https://docs.docker.com/compose/intro/compose-application-model/">Docker Compose application model</a>
+      — services, networks, volumes. Then skim
+      <a href="https://python-rq.org/">RQ’s overview</a> (Queue / Job / Worker).
+    </p>
+
+    <div class="callout">
+      Ask follow-up questions here anytime — unclear term, “what if Redis dies?”, “where do sessions live?”.
+      I am your teacher for this codebase.
+    </div>
+
+    <footer class="lesson-footer">
+      <p>Links</p>
+      <ul class="links">
+        <li><a href="../reference/0001-glossary-ops.html">Glossary: ops seams</a></li>
+        <li><a href="../MISSION.md">Mission</a></li>
+        <li><a href="../RESOURCES.md">Resources</a></li>
+        <li><a href="../docs/CLIENT_API_AND_WEBHOOK_GUIDE.md">Client API guide</a></li>
+      </ul>
+    </footer>
+  </article>
+  <script src="../assets/quiz.js"></script>
+</body>
+</html>

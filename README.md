@@ -1,127 +1,85 @@
-# WhatsApp RAG Bot — full version
+# TVS WhatsApp qualification bot (JAM CRM)
 
-Managed RAG over one document (Gemini File Search) + WhatsApp Cloud API.
+WhatsApp bot for TVS passenger 3W lead qualification. Production traffic is
+**JAM CRM webhook → Redis queue → client worker → JAM send + dispose**.
 
-## What this adds over the basic walkthrough
-- **Conversation memory** — follow-up questions work ("what about the 125cc one?").
-- **Citations** — source titles the answer was grounded on (logged; you can also send them).
-- **Webhook signature verification** — rejects forged POSTs (set `APP_SECRET`).
-- **Duplicate handling** — Meta sometimes redelivers; we dedupe by message id.
-- **Per-user rate limiting** — caps messages/user/minute.
-- **Retries** on both the Gemini call and the WhatsApp send.
-- **`test_rag.py`** — validate retrieval from the terminal before touching WhatsApp.
-
-## Files
-- `config.py` — all settings, read from `.env`
-- `index_document.py` — one-time PDF indexing
-- `rag.py` — `ask(question, history)` -> `(answer, citations)`
-- `memory.py` — history, dedup, rate limit (Redis)
-- `whatsapp.py` — send / mark-read / signature verify
-- `tasks.py` — the background job
-- `app.py` — FastAPI webhook
-- `test_rag.py` — terminal RAG tester
-
-## Setup
-1. `python3 -m venv venv && source venv/bin/activate`
-2. `pip install -r requirements.txt`
-3. `cp .env.example .env` and fill in your keys.
-4. `python index_document.py manual.pdf` — copy the printed `FILE_SEARCH_STORE=...` into `.env`.
-5. `python test_rag.py` — confirm answers look right.
-
-## Run (three processes)
-```
-redis-server
-rq worker
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
-Expose port 8000 over HTTPS (domain + Nginx/Caddy, or `ngrok http 8000` for testing),
-then set the webhook URL + verify token in Meta and subscribe to the `messages` field.
-
-## Notes
-- Citation field paths in the Gemini SDK can change between versions; `rag.py` reads them
-  defensively and simply returns fewer/none if the shape differs.
-- Free-form replies only work within 24h of the user's last message; outside that window,
-  WhatsApp requires a pre-approved template.
-
-## Interaction history and load tests
-
-Web and WhatsApp turns are stored in `data/interactions.db` for 90 days. Open
-`/admin` to filter, export, and review failed interactions.
-
-Synthetic traffic is kept in `data/load_test_interactions.db`. Set a secret in
-`.env` before running Locust:
+## Production services
 
 ```bash
-LOAD_TEST_TOKEN=replace_with_a_long_random_value
+docker compose --profile client up -d --build
 ```
 
-Load the environment and run ten users:
+- `client-webhook` — `POST /client/webhook/messages` (ports 8002 / 8004)
+- `client-worker` — RQ worker (`CLIENT_QUEUE_NAME=client`)
+- `redis` — queue + 4h session TTL
+
+Configure `.env` with Gemini, `CLIENT_*` JAM URLs/API key, dealers data under `data/`.
+
+Contracts: [`docs/CLIENT_API_AND_WEBHOOK_GUIDE.md`](docs/CLIENT_API_AND_WEBHOOK_GUIDE.md).
+
+## Local lab (verify before deploy)
+
+Runs the **same** webhook → worker path against a mock CRM + reply sink, with a
+browser chat where you choose **mobile** and **CRM JSON**.
 
 ```bash
-set -a; source .env; set +a
-locust -f locustfile.py --host http://127.0.0.1:8000 \
-  --headless -u 10 -r 2 -t 1m
+# Needs GEMINI_API_KEY + FILE_SEARCH_STORE in .env for real answers;
+# .env.mock sets CLIENT_TEST_MODE=true (deterministic mock LLM) by default.
+docker compose --profile lab up -d --build
 ```
 
-## Client CRM webhook and mock stack
+Open **http://localhost:8003/mock/chat**
 
-Client-facing API contracts (inbound webhook, customer lookup, reply callback)
-are documented in [`docs/CLIENT_API_AND_WEBHOOK_GUIDE.md`](docs/CLIENT_API_AND_WEBHOOK_GUIDE.md).
+1. Pick a **preset** (returning EV MAX, unknown number, …) or edit CRM JSON  
+2. Click **Save CRM for this mobile**  
+3. Optionally **Reset session** (clears Redis `client:session:+91…` + replies)  
+4. Chat — messages go through `lab-webhook` → `lab-worker` → mock replies  
 
-The client-app channel is separate from WhatsApp. It accepts Basic-Auth events at
-`POST /client/webhook/messages`, performs the CRM customer lookup asynchronously,
-uses the qualification engine, and posts text replies to one configured callback URL.
+```text
+browser lab → lab-webhook → Redis → lab-worker
+            → mock CRM lookup + mock replies → browser
+```
 
-Run the isolated deployment-like smoke test:
+Stop lab:
+
+```bash
+docker compose --profile lab down
+```
+
+Smoke (optional):
 
 ```bash
 bash test_mock_stack.sh
 ```
 
-This builds and starts Redis, the client webhook, a dedicated RQ worker, and a mock
-CRM/callback service under a separate Compose project. It sends a real HTTP event,
-waits for the correlated callback, and removes the isolated stack afterward.
+## Core modules
 
-To inspect the services manually:
+| Module | Role |
+|--------|------|
+| `client_webhook.py` | Inbound JAM events |
+| `client_worker.py` / `client_tasks.py` | Queue consumer |
+| `client_processing.py` | Turn orchestration |
+| `client_adapters.py` | CRM / send / dispose / Redis session |
+| `conversation_engine.py` | Qualification + Gemini |
+| `dealers.py` / `dispose.py` | Nearest dealer + CRM dispose |
+| `mock_client.py` | Local CRM lab UI + fixtures |
 
-```bash
-docker compose -p tvsm-rag-mock --profile mock up \
-  --build redis mock-client client-webhook-mock mock-worker
-```
-
-The local webhook is then available on port `8004`, and mock CRM inspection is on
-port `8003`. Values in `.env.mock` are test-only and must not be used in production.
-
-### Interactive chat with real Gemini
-
-To test a continuous conversation through the real webhook and Gemini without
-calling the client's APIs, first set `GEMINI_API_KEY` and `FILE_SEARCH_STORE` in
-`.env`, then run:
+## Setup (dev)
 
 ```bash
-bash real_chat_test.sh up
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # fill Gemini + JAM keys for prod-like runs
 ```
 
-Open `http://localhost:8003/mock/chat`. Each message gets a unique webhook
-`message_id`, while the fixed mobile number keeps all turns in one server-side
-conversation. The flow is:
-
-```text
-browser chat → client webhook → Redis queue → real Gemini
-             → mock CRM/callback → browser chat
-```
-
-Useful commands:
+Unit tests:
 
 ```bash
-bash real_chat_test.sh logs
-bash real_chat_test.sh down
+.venv/bin/python -m pytest tests/ -q
 ```
 
-This profile uses the mock customer record and callback, but sets
-`CLIENT_TEST_MODE=false`, so model answers come from Gemini. It is a local test
-profile and must not be exposed publicly.
+## Notes
 
-For production, fill the `CLIENT_*` settings in `.env`, then start the dedicated
-client profile with `docker compose --profile client up -d`. Keep `client-worker`
-at one replica: its dedicated FIFO queue is what preserves webhook arrival order.
+- Session idle expiry is **4 hours** (`CLIENT_HISTORY_TTL_SEC`); fresh session always shows the language menu.
+- Keep a **single** `client-worker` replica so webhook order is preserved per queue.
+- Lab values in `.env.mock` are test-only — never use them in production.

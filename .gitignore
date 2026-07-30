@@ -4,7 +4,20 @@
 *.key
 
 # Runtime admin config (seeded on first run)
-data/
+data/*
+!data/dealers.json
+!data/media/
+!data/media/**
+!data/media/**/
+data/media/**/*.jpg
+data/media/**/*.jpeg
+data/media/**/*.png
+data/media/**/*.webp
+data/media/**/*.gif
+data/media/**/*.pdf
+!data/media/**/.gitkeep
+!data/media/**/README.md
+!data/media/README.md
 
 # Python
 venv/

@@ -6,20 +6,22 @@ import time
 from datetime import datetime, timezone
 from typing import Protocol
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from client_media import ALLOWED_AUDIO_MIME_TYPES, ALLOWED_IMAGE_MIME_TYPES
 
 
-SUPPORTED_MESSAGE_TYPES = frozenset({"text", "image", "audio"})
+SUPPORTED_MESSAGE_TYPES = frozenset({"text", "image", "audio", "location"})
 INDIAN_E164_PATTERN = r"^\+91[6-9][0-9]{9}$"
 
 
 class InboundMessage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     message_id: str = Field(min_length=1, max_length=128)
     type: str = Field(min_length=1, max_length=32)
     mobile: str = Field(pattern=INDIAN_E164_PATTERN)
@@ -27,6 +29,10 @@ class InboundMessage(BaseModel):
     content: str | None = Field(default=None, max_length=4096)
     media_url: str | None = Field(default=None, max_length=2048)
     mime_type: str | None = Field(default=None, max_length=128)
+    latitude: float | None = None
+    longitude: float | None = None
+    lat: float | None = None
+    lng: float | None = None
 
     @field_validator("type")
     @classmethod
@@ -124,6 +130,30 @@ def _payload_errors(event: InboundMessage) -> list[dict[str, str]]:
                         "message": f"mime_type is not supported for {event.type}",
                     }
                 )
+    # Location: accept even without coords (JAM may omit them); processor asks for pincode.
+    if event.type == "location":
+        for field_name in ("latitude", "longitude", "lat", "lng"):
+            value = getattr(event, field_name, None)
+            if value is None:
+                continue
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                errors.append(
+                    {"field": field_name, "message": f"{field_name} must be a number"}
+                )
+                continue
+            if field_name in {"latitude", "lat"} and not (-90.0 <= number <= 90.0):
+                errors.append(
+                    {"field": field_name, "message": "latitude must be between -90 and 90"}
+                )
+            if field_name in {"longitude", "lng"} and not (-180.0 <= number <= 180.0):
+                errors.append(
+                    {
+                        "field": field_name,
+                        "message": "longitude must be between -180 and 180",
+                    }
+                )
     return errors
 
 
@@ -152,7 +182,42 @@ def create_app(
             )
 
     @app.exception_handler(RequestValidationError)
-    async def invalid_payload(_, error: RequestValidationError):
+    async def invalid_payload(request: Request, error: RequestValidationError):
+        # #region agent log
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+
+            raw_body = await request.body()
+            preview = raw_body[:2000].decode("utf-8", errors="replace")
+            _payload = {
+                "sessionId": "dealers-grill",
+                "location": "client_webhook.py:validation_error",
+                "message": "inbound validation failed",
+                "data": {
+                    "errors": [
+                        {
+                            "field": ".".join(str(p) for p in item.get("loc", ())),
+                            "msg": item.get("msg"),
+                        }
+                        for item in error.errors()[:12]
+                    ],
+                    "body_preview": preview,
+                },
+            }
+            for _p in (
+                _Path("data/debug-inbound-location.log"),
+                _Path("/app/data/debug-inbound-location.log"),
+            ):
+                try:
+                    _p.parent.mkdir(parents=True, exist_ok=True)
+                    with _p.open("a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps(_payload, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # #endregion
         errors = []
         for item in error.errors():
             location = [str(part) for part in item.get("loc", ()) if part != "body"]
@@ -176,6 +241,47 @@ def create_app(
         event: InboundMessage,
         _: None = Depends(authenticate),
     ):
+        # #region agent log
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+
+            dumped = event.model_dump(exclude_none=False)
+            safe = {
+                k: (
+                    "<redacted>"
+                    if k in {"mobile", "content"} and dumped.get(k)
+                    else dumped.get(k)
+                )
+                for k in dumped
+            }
+            # keep mobile last4 for correlation only
+            mobile = str(dumped.get("mobile") or "")
+            safe["mobile_suffix"] = mobile[-4:] if mobile else ""
+            _payload = {
+                "sessionId": "dealers-grill",
+                "location": "client_webhook.py:receive_message",
+                "message": "inbound webhook event",
+                "data": {
+                    "type": dumped.get("type"),
+                    "keys": sorted(dumped.keys()),
+                    "supported": dumped.get("type") in SUPPORTED_MESSAGE_TYPES,
+                    "payload": safe,
+                },
+            }
+            for _p in (
+                _Path("data/debug-inbound-location.log"),
+                _Path("/app/data/debug-inbound-location.log"),
+            ):
+                try:
+                    _p.parent.mkdir(parents=True, exist_ok=True)
+                    with _p.open("a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps(_payload, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # #endregion
         if event.type not in SUPPORTED_MESSAGE_TYPES:
             return {
                 "status": "ignored",

@@ -13,6 +13,6 @@ RUN pip install --upgrade pip \
 COPY . .
 RUN mkdir -p /app/data
 
-EXPOSE 8000
+EXPOSE 8002
 
-CMD ["uvicorn", "web:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "client_webhook:app", "--host", "0.0.0.0", "--port", "8002"]
