@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Callable, Protocol, TypeVar
 
 import config
-from bot.graph import classify_still_interested_reply
+from bot.graph import classify_dealer_confirm_reply, classify_still_interested_reply
 from client_language import (
     LANGUAGE_PROMPT,
     SUPPORTED_LANGUAGES,
@@ -1158,7 +1158,8 @@ class ClientMessageProcessor:
         if not session.awaiting_dealer_confirm:
             return None
         customer = session.customer
-        if _is_affirmative(message):
+        confirm_result = classify_dealer_confirm_reply(message)
+        if confirm_result == "yes":
             session.awaiting_dealer_confirm = False
             session.dealer_confirmed = True
             if not session.last_dealer_code and customer and customer.dealership_id:
@@ -1177,7 +1178,7 @@ class ClientMessageProcessor:
                 "Do not ask for a pincode.)"
             )
             return enriched, None
-        if _is_negative(message):
+        if confirm_result == "no":
             session.awaiting_dealer_confirm = False
             session.dealer_confirmed = False
             session.last_dealer_code = ""
@@ -1186,7 +1187,7 @@ class ClientMessageProcessor:
             self._send_share_location_guide(session, with_caption=False)
             ask = share_location_ask(self._session_language(session))
             return message, ask
-        # Not a clear Yes/No: don't drown the customer's actual message.
+        # Unclear: don't drown the customer's actual message.
         pincode = extract_pincode(message)
         if pincode and pincode != session.dealer_shared_for_pincode:
             # A fresh pincode wins — drop the pending dealer and redo the lookup.

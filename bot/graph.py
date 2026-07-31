@@ -19,7 +19,7 @@ Compiled with no checkpointer: RQ workers are stateless per job, and
 session persistence already lives in RedisClientState (see bot/state.py).
 """
 import logging
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
@@ -132,3 +132,80 @@ def classify_still_interested_reply(user_message: str) -> bool:
     genuinely ambiguous."""
     result = still_interested_graph.invoke({"user_message": user_message})
     return result["declining"]
+
+
+class DealerConfirmState(TypedDict):
+    user_message: str
+    result: str  # "yes" | "no" | "unclear"
+
+
+class DealerConfirmClassification(BaseModel):
+    result: Literal["yes", "no", "unclear"] = Field(
+        description=(
+            "'yes' if the customer is confirming/accepting the suggested "
+            "dealership (even loosely phrased, e.g. 'haan ye mera dealer hai', "
+            "'yes I have this one', 'ha ye dealership mere pass hai'). 'no' if "
+            "they're rejecting/correcting it (e.g. 'nahi ye galat hai', 'not "
+            "this one'). 'unclear' if the reply doesn't address the dealership "
+            "at all (a question, an unrelated message, a fresh pincode) — do "
+            "not guess in that case."
+        )
+    )
+
+
+def _route_dealer_confirm_reply(state: DealerConfirmState) -> str:
+    # Deferred import: circular with client_processing, same reason as
+    # _route_still_interested_reply above.
+    from client_processing import _is_affirmative, _is_negative
+
+    if _is_negative(state["user_message"]):
+        return "no"
+    if _is_affirmative(state["user_message"]):
+        return "yes"
+    return "classify"
+
+
+def _dealer_confirm_yes(state: DealerConfirmState) -> dict:
+    return {"result": "yes"}
+
+
+def _dealer_confirm_no(state: DealerConfirmState) -> dict:
+    return {"result": "no"}
+
+
+def _classify_dealer_confirm(state: DealerConfirmState) -> dict:
+    # Any classifier failure defaults to "unclear" — same safe fallback the
+    # existing code already has for a reply that doesn't resolve cleanly
+    # (re-attach the card, answer the customer's message, ask again).
+    try:
+        classifier = get_llm("fast").with_structured_output(DealerConfirmClassification)
+        result = classifier.invoke(
+            "The customer was shown a suggested dealership and asked to "
+            "confirm whether it's OK / near them (Yes or No). They replied: "
+            f"{state['user_message']!r}. Classify their reply."
+        )
+        return {"result": result.result}
+    except Exception:
+        log.exception("dealer-confirm classifier call failed; defaulting to unclear")
+        return {"result": "unclear"}
+
+
+dealer_confirm_builder = StateGraph(DealerConfirmState)
+dealer_confirm_builder.add_node("yes", _dealer_confirm_yes)
+dealer_confirm_builder.add_node("no", _dealer_confirm_no)
+dealer_confirm_builder.add_node("classify", _classify_dealer_confirm)
+dealer_confirm_builder.add_conditional_edges(
+    START, _route_dealer_confirm_reply, ["yes", "no", "classify"]
+)
+dealer_confirm_builder.add_edge("yes", END)
+dealer_confirm_builder.add_edge("no", END)
+dealer_confirm_builder.add_edge("classify", END)
+
+dealer_confirm_graph = dealer_confirm_builder.compile()
+
+
+def classify_dealer_confirm_reply(user_message: str) -> str:
+    """Returns "yes" | "no" | "unclear" — regex fast path first, LLM
+    fallback only when genuinely ambiguous."""
+    result = dealer_confirm_graph.invoke({"user_message": user_message})
+    return result["result"]

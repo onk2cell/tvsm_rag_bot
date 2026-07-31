@@ -1199,6 +1199,59 @@ def test_crm_dealer_confirm_yes_sets_last_dealer_code_and_skips_nearest():
     assert directory.calls == []
 
 
+def test_dealer_confirm_natural_phrasing_resolves_via_classifier(monkeypatch):
+    """Regression for the reported bug: "ha ye dealrshime mere pass hai"
+    (Hinglish "yes, I have this dealership") doesn't match the strict
+    single-word _is_affirmative regex, so it used to re-attach the same
+    dealer card forever instead of resolving as a confirmation."""
+    from bot.graph import DealerConfirmClassification
+
+    class _FakeYesLLM:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, prompt):
+            return DealerConfirmClassification(result="yes")
+
+    monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": _FakeYesLLM())
+
+    crm_dealer = Dealer(
+        dealer_code="15188",
+        name="A G Malwade Wheels",
+        address="Vapi, Valsad",
+        pincode="396191",
+        phone="9213008340",
+        map_url="https://maps.example/15188",
+        latitude=18.41,
+        longitude=76.54,
+    )
+    directory = FakeDealerDirectory(None, by_code={"15188": crm_dealer})
+    processor, deps = _processor(dealer_directory=directory)
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "Hindi",
+        dealership_id="15188",
+        dealership_name="A G Malwade Wheels",
+    )
+    deps["engine"].reply = "Please share your pincode."
+    processor.process(_event(message_id="m1", content="431401"))
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_confirm is True
+
+    deps["engine"].reply = "Great, continuing."
+    processor.process(
+        _event(message_id="m2", content="ha ye dealrshime mere pass hai")
+    )
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.dealer_confirmed is True
+    assert session.awaiting_dealer_confirm is False
+    # Doesn't loop — the dealer card isn't re-attached to this reply.
+    last_reply = deps["reply_sender"].calls[-1]["text"]
+    assert "A G Malwade" not in last_reply
+
+
 def test_city_name_redirects_to_pincode_or_location_only(monkeypatch):
     monkeypatch.setattr(
         "client_media_assets.media_base_url",
