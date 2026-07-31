@@ -945,7 +945,6 @@ def test_pincode_message_asks_nearest_dealer_confirm_once():
     assert deps["state"].sessions["+918286871533"].dealer_shared_for_pincode == "411001"
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is False
     assert deps["state"].sessions["+918286871533"].dealer_confirm_deferred is True
-    assert deps["state"].sessions["+918286871533"].dealer_confirm_deferred is True
 
 
 def test_real_dealer_directory_with_fake_geocoder_resolves_pune():
