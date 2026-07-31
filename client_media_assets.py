@@ -87,8 +87,9 @@ PRODUCT_BROCHURE_SLUG = {
 # answer and an offer to send the brochure instead, not an automatic send.
 PRODUCT_DOCUMENT_ASK_RE = re.compile(
     r"(?i)("
-    r"\b(brochure|pdf|catalogue|catalog|pamphlet|leaflet|"
-    r"send\s+(me\s+)?(the\s+)?(pdf|brochure))\b|"
+    r"\b(brochure|brocher|brochar|borcher|broucher|broshar|broshure|"
+    r"pdf|catalogue|catalog|pamphlet|leaflet|"
+    r"send\s+(me\s+)?(the\s+)?(pdf|brochure|brocher|brochar|borcher))\b|"
     r"ब्रोशर|पीडीएफ|कैटलॉग|"
     r"ब्रॉशर|कॅटलॉग"
     r")"

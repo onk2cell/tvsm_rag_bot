@@ -56,6 +56,17 @@ def test_wants_product_brochure_detects_literal_document_requests():
     assert not wants_product_brochure("411048")
 
 
+def test_wants_product_brochure_detects_romanized_spelling_variants():
+    """Regression: real WhatsApp typing romanizes "brochure" phonetically
+    (Hindi/Marathi speakers typing in Latin script) — these must still
+    trigger the real document send, not silently fall through while the
+    LLM assumes it worked."""
+    assert wants_product_brochure("adhi brocher send kra")
+    assert wants_product_brochure("brocher send krta ka")
+    assert wants_product_brochure("borcher kahi ahy aka")
+    assert wants_product_brochure("brochar please")
+
+
 def test_wants_product_info_detects_general_questions():
     assert wants_product_info("EV MAX details please")
     assert wants_product_info("can you give me info about ev king max")

@@ -164,6 +164,9 @@ def test_brochure_rule_tells_llm_system_handles_delivery(stores):
     assert "never attach files yourself" in system.lower()
     assert "never say you can't send a brochure" in system.lower()
     assert "never say the dealership will provide one" in system.lower()
+    # Must not assert a completed send as fact — only the deterministic
+    # sender (gated on a regex the LLM has no visibility into) knows that.
+    assert "never claim in past tense" in system.lower()
 
 
 def test_delivery_location_in_profile_keys(stores):
