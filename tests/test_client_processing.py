@@ -1278,7 +1278,9 @@ def test_crm_dealer_name_without_id_resolves_address_from_directory():
         dealership_name="Gk Motors",
     )
 
-    processor.process(_event(message_id="m1", content="Hi"))
+    # Dealer-confirm never stacks onto the very first reply — warm up first.
+    processor.process(_event(message_id="m0", content="Hi"))
+    processor.process(_event(message_id="m1", content="King EV MAX"))
 
     reply = deps["reply_sender"].calls[-1]["text"]
     assert "Name: Gk Motors" in reply
@@ -1298,7 +1300,9 @@ def test_question_during_dealer_confirm_is_answered_then_card_reattached():
         dealership_name="Sarthak Auto",
         city="Pune",
     )
-    processor.process(_event(message_id="m1", content="Hi"))
+    # Dealer-confirm never stacks onto the very first reply — warm up first.
+    processor.process(_event(message_id="m0", content="Hi"))
+    processor.process(_event(message_id="m1", content="King EV MAX"))
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
 
     deps["engine"].reply = "The dealership will share downpayment details."
@@ -1332,7 +1336,9 @@ def test_pincode_during_dealer_confirm_redoes_nearest_lookup():
         dealership_name="Sarthak Auto",
         city="Pune",
     )
-    processor.process(_event(message_id="m1", content="Hi"))
+    # Dealer-confirm never stacks onto the very first reply — warm up first.
+    processor.process(_event(message_id="m0", content="Hi"))
+    processor.process(_event(message_id="m1", content="King EV MAX"))
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
 
     deps["engine"].reply = "Let me check."
@@ -1369,7 +1375,9 @@ def test_crm_dealer_confirm_no_then_nearest_from_spaced_pincode():
     )
     deps["engine"].reply = "Share your area pin please."
 
-    processor.process(_event(message_id="m1", content="hello"))
+    # Dealer-confirm never stacks onto the very first reply — warm up first.
+    processor.process(_event(message_id="m0", content="hello"))
+    processor.process(_event(message_id="m1", content="King EV MAX"))
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
 
     deps["engine"].reply = "Please share pincode."
@@ -1381,8 +1389,9 @@ def test_crm_dealer_confirm_no_then_nearest_from_spaced_pincode():
     assert image["caption"] == ""
     no_reply = deps["reply_sender"].calls[-1]["text"]
     assert "location" in no_reply.lower() or "लोकेशन" in no_reply
-    # Dealer-no uses static ask — engine should not run a second turn for "नाही"
-    assert len(deps["engine"].turns) == 1
+    # Dealer-no uses static ask — engine should not run an extra turn for "नाही"
+    # (2 turns so far: the m0 warm-up and m1's "King EV MAX", nothing for m2).
+    assert len(deps["engine"].turns) == 2
 
     deps["engine"].reply = "Noted."
     processor.process(_event(message_id="m3", content="41 10 35"))
@@ -1431,6 +1440,45 @@ def test_call_me_disposes_interested_with_callback_using_crm_fields():
     assert "callback" in dispose.calls[0]["remark"].lower()
     assert deps["state"].sessions["+918286871533"].dispose_sent is True
     assert "call them soon" in deps["engine"].turns[0].message.lower()
+
+
+def test_dealer_confirm_not_stacked_on_organic_second_reply():
+    """Regression: a customer with a CRM-assigned dealer but no known
+    product doesn't get the static still-interested gate (it needs a known
+    product) — instead _maybe_welcome_back seeds LLM context and the model
+    generates its own natural greeting/question as the first REAL engine
+    reply. The customer's answer to THAT triggers a second engine reply,
+    which is where the dealer-confirm card used to silently stack onto
+    whatever the model asked next. The system message enrichment must
+    suppress the model's own question on that second turn instead."""
+    processor, deps = _processor(
+        preselect_language="Marathi",
+        skip_still_interested=False,
+    )
+    deps["directory"].customer = Customer(
+        "1",
+        "Neha",
+        "Marathi",
+        dealership_id="11982",
+        dealership_name="Rhythm Auto",
+    )
+    deps["engine"].reply = "छान! तुम्ही अजूनही स्वारस्य दाखवत आहात का?"
+
+    processor.process(_event(message_id="m1", content="Hi"))
+    first_reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Rhythm Auto" not in first_reply  # not stacked on the first reply
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is False
+    assert "Do NOT ask any question" not in deps["engine"].turns[-1].message
+
+    deps["engine"].reply = "उत्तम! तुम्हाला कोणत्या मॉडेलमध्ये स्वारस्य आहे?"
+    processor.process(_event(message_id="m2", content="होय"))
+
+    # The model was told not to ask its own question this turn...
+    assert "Do NOT ask any question" in deps["engine"].turns[-1].message
+    # ...and the dealer-confirm ask is the one question actually sent.
+    second_reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Rhythm Auto" in second_reply
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is True
 
 
 def test_welcome_back_uses_crm_remarks_on_fresh_session():

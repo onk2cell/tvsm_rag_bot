@@ -542,6 +542,9 @@ class RedisClientState:
                 pending_brochure_product=str(
                     data.get("pending_brochure_product") or ""
                 ),
+                qualification_started=bool(
+                    data.get("qualification_started") or False
+                ),
             )
         return ClientSession(
             conversation_id=self._id_factory(),
@@ -575,6 +578,7 @@ class RedisClientState:
             "still_interested_asked": session.still_interested_asked,
             "awaiting_brochure_offer": session.awaiting_brochure_offer,
             "pending_brochure_product": session.pending_brochure_product,
+            "qualification_started": session.qualification_started,
         }
         self._redis.set(
             self._key(session.mobile),

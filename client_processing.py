@@ -210,6 +210,7 @@ class ClientSession:
     still_interested_asked: bool = False
     awaiting_brochure_offer: bool = False
     pending_brochure_product: str = ""
+    qualification_started: bool = False
 
 
 @dataclass(frozen=True)
@@ -643,6 +644,25 @@ class ClientMessageProcessor:
             and not session.dealer_confirmed
             and not session.crm_dealer_offered
         )
+        is_first_qualification_reply = not session.qualification_started
+        # _maybe_offer_crm_dealer (post-reply) will attach a mandatory
+        # dealer-confirm question under these same conditions, except it
+        # additionally defers on a bare first reply (see its docstring —
+        # that keeps natural flow order on turn 1). Whenever it WILL attach
+        # this turn, tell the LLM up front not to ask its own question —
+        # otherwise its reply plus the deterministic dealer-confirm ask
+        # stack two questions in one message, regardless of which
+        # qualification step the LLM happens to be on.
+        dealer_card_will_attach = confirm_crm and (
+            not is_first_qualification_reply or bool(extract_pincode(raw_user_text))
+        )
+        if dealer_card_will_attach:
+            message = (
+                f"{message}\n\n(Do NOT ask any question of your own in this "
+                "reply — just briefly acknowledge/transition. The system "
+                "will attach a mandatory dealership confirmation question "
+                "after your reply.)"
+            )
         turn = TurnInput(
             session_id=session.conversation_id,
             language=language,
@@ -655,6 +675,7 @@ class ClientMessageProcessor:
         )
         try:
             output = self._attempt(lambda: self._engine.handle_turn(turn))
+            session.qualification_started = True
         except Exception as error:
             self._reply_and_record(
                 event,
@@ -674,8 +695,9 @@ class ClientMessageProcessor:
             return
         reply_text = self._maybe_offer_crm_dealer(
             session,
-            user_message=message,
+            user_message=raw_user_text,
             reply=output.reply_text,
+            is_first_reply=is_first_qualification_reply,
         )
         reply_text = self._attach_nearest_dealer(
             session,
@@ -1252,8 +1274,22 @@ class ClientMessageProcessor:
         *,
         user_message: str,
         reply: str,
+        is_first_reply: bool = False,
     ) -> str:
-        del user_message  # offer is mandatory once CRM has a dealer
+        # offer is mandatory once CRM has a dealer, but never stack it onto
+        # the very first REAL qualification reply (from the engine) unless
+        # the customer's own message already signals they're at the
+        # location step (e.g. they led with a pincode). That first reply is
+        # otherwise always the model_interest question — its own question,
+        # with no "don't ask anything yourself" guidance like the location
+        # step gets — so appending the dealer-confirm ask there stacks two
+        # questions in one message. Checking session.history isn't enough:
+        # a returning customer's still-interested exchange already writes
+        # to history before the engine is ever called, so "first reply"
+        # must track actual engine calls (session.qualification_started),
+        # not turn count.
+        if is_first_reply and not extract_pincode(user_message):
+            return reply
         if session.crm_dealer_offered or session.dealer_confirmed:
             return reply
         if session.awaiting_dealer_confirm:
