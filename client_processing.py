@@ -10,6 +10,7 @@ from time import perf_counter
 from typing import Callable, Protocol, TypeVar
 
 import config
+from bot.graph import classify_still_interested_reply
 from client_language import (
     LANGUAGE_PROMPT,
     SUPPORTED_LANGUAGES,
@@ -82,7 +83,8 @@ def _is_negative(text: str | None) -> bool:
 
 _STILL_YES_FREE_RE = re.compile(
     r"(?i)("
-    r"\b(yes|yeah|yep|sure)\b|"
+    r"\b(yes|yeah|yep)\b|"
+    r"(?<!not\s)(?<!not)\bsure\b|"
     r"\bstill\s+(want|interested|planning|looking)\b|"
     r"\b(want|planning)\s+to\s+(buy|purchase)\b|"
     r"\binterested\b|"
@@ -822,7 +824,18 @@ class ClientMessageProcessor:
         user_message: str,
         language: str,
     ) -> tuple[str, str | None] | None:
-        """Handle Yes/No while awaiting the still-interested confirm."""
+        """Handle the reply while awaiting the still-interested confirm.
+
+        A clear Yes/No is resolved by regex without any LLM call. Anything
+        else (undecided, asking about another product, an unrelated
+        question, off-topic — including cases where a customer's decline
+        doesn't match the regex) is classified by
+        bot.graph.classify_still_interested_reply: a confident decline
+        still closes the lead, but everything else hands off to normal
+        qualification instead of re-asking the same static question
+        forever — the qualification engine already knows how to handle a
+        product switch, a mid-flow question, or an off-topic message.
+        """
         if not session.awaiting_still_interested:
             return None
         lang = language or self._session_language(session)
@@ -831,28 +844,28 @@ class ClientMessageProcessor:
             or self._returning_product(session.customer)
             or "TVS King"
         )
-        if _is_still_interested_yes(user_message):
+        if not classify_still_interested_reply(user_message):
             session.awaiting_still_interested = False
+            if _is_still_interested_yes(user_message):
+                note = f"Customer confirmed they are still interested in {product}."
+            else:
+                note = (
+                    f"The customer's continued interest in {product} is not "
+                    "confirmed, but they did not decline either. Do not claim "
+                    "they confirmed interest."
+                )
             enriched = (
-                f"{user_message}\n\n(Customer confirmed they are still interested in "
-                f"{product}. Acknowledge briefly in {lang} and continue the next "
-                "qualification step. Do not re-ask the still-interested question.)"
+                f"{user_message}\n\n({note} Address anything they asked/said, in "
+                f"{lang}, then continue toward the next qualification step. Do "
+                "not re-ask whether they are still interested.)"
             )
             return enriched, None
-        if _is_still_interested_no(user_message):
-            session.awaiting_still_interested = False
-            session.lead_profile["disposition"] = "not_interested"
-            session.lead_profile["notes"] = "not interested on welcome-back"
-            session.lead_profile.setdefault("product_interest", product)
-            self._maybe_dispose(session, profile=session.lead_profile)
-            return user_message, still_interested_no_thanks(lang)
-        # Unclear — re-ask once, stay pending.
-        ask = welcome_back_still_interested(
-            name=self._display_customer_name(session.customer),
-            product=product,
-            language=lang,
-        )
-        return user_message, ask
+        session.awaiting_still_interested = False
+        session.lead_profile["disposition"] = "not_interested"
+        session.lead_profile["notes"] = "not interested on welcome-back"
+        session.lead_profile.setdefault("product_interest", product)
+        self._maybe_dispose(session, profile=session.lead_profile)
+        return user_message, still_interested_no_thanks(lang)
 
     def _maybe_welcome_back(self, session: ClientSession, message: str) -> str:
         """Seed the first turn with CRM context when still-interested ask was skipped.

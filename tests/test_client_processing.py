@@ -1413,6 +1413,85 @@ def test_still_interested_no_thanks_in_selected_language():
     assert dispose.calls[-1]["status"] == "not_interested"
 
 
+class _FakeClassifierLLM:
+    """Stands in for bot.llm.get_llm("fast") in the still-interested classifier."""
+
+    def __init__(self, declining: bool):
+        self._declining = declining
+
+    def with_structured_output(self, schema):
+        return self
+
+    def invoke(self, prompt: str):
+        from bot.graph import StillInterestedClassification
+
+        return StillInterestedClassification(declining=self._declining)
+
+
+def test_still_interested_ambiguous_reply_proceeds_to_qualification(monkeypatch):
+    """Neither yes nor no ("not sure, tell me about the Duramax") should hand
+    off to qualification instead of re-asking the same static question."""
+    monkeypatch.setattr(
+        "bot.graph.get_llm", lambda tier="smart": _FakeClassifierLLM(declining=False)
+    )
+    processor, deps = _processor(preselect_language="English", skip_still_interested=False)
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        product_enquired="King EV MAX",
+        last_status="Interested",
+    )
+    deps["engine"].reply = "Sure, here's a bit about the Duramax Plus."
+
+    processor.process(_event(message_id="m1", content="Hi"))
+    processor.process(
+        _event(message_id="m2", content="not sure, tell me about the Duramax")
+    )
+
+    assert deps["engine"].turns
+    message = deps["engine"].turns[-1].message
+    assert "not confirmed" in message.lower()
+    assert "did not decline" in message.lower()
+    assert deps["state"].sessions["+918286871533"].awaiting_still_interested is False
+    assert deps["state"].sessions["+918286871533"].lead_profile.get("disposition") != "not_interested"
+
+
+def test_still_interested_ambiguous_reply_llm_classifies_as_declining(monkeypatch):
+    """A loosely-phrased decline the regex would miss should still close the lead."""
+    monkeypatch.setattr(
+        "bot.graph.get_llm", lambda tier="smart": _FakeClassifierLLM(declining=True)
+    )
+    dispose = FakeDisposeClient()
+    processor, deps = _processor(
+        preselect_language="English",
+        skip_still_interested=False,
+        dispose_client=dispose,
+    )
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        product_enquired="King EV MAX",
+        last_status="Interested",
+    )
+    session = deps["state"].load_or_start("+918286871533")
+    session.dealer_shared_for_pincode = "411001"
+    deps["state"].save(session)
+
+    processor.process(_event(message_id="m1", content="Hi"))
+    processor.process(
+        _event(message_id="m2", content="nah, already got a different bike")
+    )
+
+    thanks = deps["reply_sender"].calls[-1]["text"]
+    assert "Thank you" in thanks
+    assert deps["engine"].turns == []
+    assert deps["state"].sessions["+918286871533"].awaiting_still_interested is False
+    assert dispose.calls
+    assert dispose.calls[-1]["status"] == "not_interested"
+
+
 def test_first_message_context_includes_preferred_language_without_remarks():
     processor, deps = _processor(preselect_language="Marathi")
     deps["directory"].customer = Customer(
