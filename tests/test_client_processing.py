@@ -311,6 +311,28 @@ def test_explicit_brochure_request_sends_pdf_once(monkeypatch):
     assert len(deps["reply_sender"].document_calls) == 3
 
 
+def test_brochure_request_resolves_product_from_earlier_history(monkeypatch):
+    """"Send me the brochure for this" doesn't repeat the product name — it
+    must be resolved from what the customer said a few turns earlier, since
+    lead_profile.product_interest isn't captured until LLM wrap-up."""
+    del monkeypatch  # CDN URLs are absolute; no media-base stub needed
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+    assert deps["reply_sender"].document_calls == []  # no product-name-only send
+
+    deps["engine"].reply = "Sure, here's more info."
+    processor.process(
+        _event(message_id="m2", content="send me the brochure for this")
+    )
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert links == [
+        "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
+    ]
+
+
 def test_brochure_not_sent_without_product(monkeypatch):
     monkeypatch.setattr(
         "client_media_assets.media_base_url",

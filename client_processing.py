@@ -727,11 +727,21 @@ class ClientMessageProcessor:
         """
         if not wants_product_brochure(user_message):
             return
+        # The customer's brochure request often doesn't repeat the product
+        # name ("send me the brochure for this") — product_interest is only
+        # captured in lead_profile at LLM wrap-up, so fall back to scanning
+        # recent conversation turns (most recent first) for a named model.
+        history_hints = tuple(
+            str(turn.get("text") or "")
+            for turn in reversed(session.history)
+            if turn.get("role") != "model"
+        )
         hints = (
             user_message,
             str((profile or {}).get("product_interest") or ""),
             str(session.lead_profile.get("product_interest") or ""),
             _product_hint_for(session.customer),
+            *history_hints,
         )
         product = brochure_product_from_text(*hints)
         if not product or product in session.brochures_sent:
