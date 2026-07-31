@@ -446,6 +446,32 @@ def test_brochure_offer_accepted_sends_pack(monkeypatch):
     assert "has been sent" in enriched
 
 
+def test_brochure_offer_accepted_with_bhejo_sends_pack(monkeypatch):
+    """Hindi/Hinglish 'bhejo' must accept the brochure offer (not place routing)."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King EV MAX."
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+    deps["engine"].reply = "It has a 100km range."
+    processor.process(
+        _event(message_id="m2", content="What are the features of this?")
+    )
+    assert deps["state"].sessions["+918286871533"].awaiting_brochure_offer is True
+
+    deps["engine"].reply = "Sending it now."
+    processor.process(_event(message_id="m3", content="bhejo"))
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert links == [
+        "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
+    ]
+    # Must not have fallen into the share-location place-name path.
+    texts = " ".join(c.get("text") or "" for c in deps["reply_sender"].calls)
+    assert "pincode" not in texts.lower()
+    assert "लोकेशन" not in texts and "location" not in texts.lower()
+
+
 def test_brochure_offer_declined_does_not_send(monkeypatch):
     del monkeypatch
     processor, deps = _processor()

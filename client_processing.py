@@ -85,6 +85,34 @@ def _is_negative(text: str | None) -> bool:
     return bool(_NEGATIVE_RE.match((text or "").strip()))
 
 
+# Accepts for a pending "shall I send the brochure?" offer — includes
+# Hinglish/Hindi send verbs that are NOT general yes (so dealer-confirm
+# stays on _is_affirmative only).
+_BROCHURE_OFFER_ACCEPT_RE = re.compile(
+    r"(?i)^\s*"
+    r"(?:(?:ha[an]?|haan|ji|yes|ok|okay|sure|हो|हाँ|हां|जी)\s*[,\-]?\s*)?"
+    r"(?:"
+    r"bhejo|bhej\s*do|bhej\s*dena|bhej\s*dijiye|bhej\s*diye|"
+    r"send(?:\s+it)?|"
+    r"send\s+(?:me\s+)?(?:the\s+)?(?:brochure|brocher|pdf)|"
+    r"भेजो|भेज\s*दो|भेज\s*दीजिए|"
+    r"पाठवा|पाठवून?\s*द्या|हो\s*भेजो|जी\s*भेजो"
+    r")"
+    r"\s*[!.।]*\s*$"
+)
+
+
+def _is_brochure_offer_accept(text: str | None) -> bool:
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if _is_affirmative(raw):
+        return True
+    if wants_product_brochure(raw):
+        return True
+    return bool(_BROCHURE_OFFER_ACCEPT_RE.match(raw))
+
+
 _STILL_YES_FREE_RE = re.compile(
     r"(?i)("
     r"\b(yes|yeah|yep)\b|"
@@ -958,7 +986,7 @@ class ClientMessageProcessor:
         session.awaiting_brochure_offer = False
         product = session.pending_brochure_product
         session.pending_brochure_product = ""
-        if _is_affirmative(message):
+        if _is_brochure_offer_accept(message):
             _, hints = self._resolve_brochure_product(session, message)
             sent = self._send_brochure_pack(session, product, hints)
             if sent:
@@ -1414,7 +1442,13 @@ class ClientMessageProcessor:
             return None
         if wants_callback(user_message):
             return None
-        if wants_product_brochure(user_message) or wants_product_info(user_message):
+        if (
+            session.awaiting_brochure_offer
+            or session.awaiting_brochure_product_choice
+            or wants_product_brochure(user_message)
+            or wants_product_info(user_message)
+            or _is_brochure_offer_accept(user_message)
+        ):
             return None
         if doesnt_know_pincode(user_message) or is_bare_dont_know(user_message):
             return None

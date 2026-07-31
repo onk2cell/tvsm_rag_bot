@@ -20,6 +20,7 @@ _PLACE_BLOCKLIST_RE = re.compile(
     r"(?i)\b("
     r"king|deluxe|duramax|ev\s*max|price|gadi|"
     r"brochure|brocher|brochar|borcher|broucher|broshar|broshure|pdf|info|details|"
+    r"bhejo|bhej|भेजो|पाठवा|send|"
     r"pincode|pin\s*code|location|callback|yes|no|ok|okay|hi|hello|hey|"
     r"nahi|nahin|don't|dont|know|mahit|परवड|किंमत|"
     # Common chat words that must never be mistaken for a city/area name.
