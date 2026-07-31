@@ -10,7 +10,12 @@ from time import perf_counter
 from typing import Callable, Protocol, TypeVar
 
 import config
-from bot.graph import classify_dealer_confirm_reply, classify_still_interested_reply
+from bot.graph import (
+    classify_brochure_offer_reply,
+    classify_brochure_request,
+    classify_dealer_confirm_reply,
+    classify_still_interested_reply,
+)
 from client_language import (
     LANGUAGE_PROMPT,
     SUPPORTED_LANGUAGES,
@@ -669,8 +674,12 @@ class ClientMessageProcessor:
         message, brochure_offer_product = self._prepare_brochure_info_context(
             session, message, user_message=raw_user_text
         )
+        brochure_requested = classify_brochure_request(raw_user_text)
         message, brochure_needs_product = self._prepare_brochure_request_context(
-            session, message, user_message=raw_user_text
+            session,
+            message,
+            user_message=raw_user_text,
+            requested=brochure_requested,
         )
 
         confirm_was_pending = session.awaiting_dealer_confirm
@@ -777,6 +786,7 @@ class ClientMessageProcessor:
             session,
             user_message=raw_user_text,
             profile=output.profile,
+            requested=brochure_requested,
         )
         self._capture_purchase_date(session, user_message=raw_user_text)
         self._capture_lead_name(session, user_message=raw_user_text)
@@ -872,13 +882,15 @@ class ClientMessageProcessor:
         message: str,
         *,
         user_message: str,
+        requested: bool,
     ) -> tuple[str, bool]:
         """Steer the LLM when the customer asks for a brochure/PDF.
 
         Returns ``(message, needs_product_ask)``. When no product is known yet,
         the caller should append a deterministic which-model ask after the reply.
+        ``requested`` is precomputed once per turn (regex + optional LLM).
         """
-        if not wants_product_brochure(user_message):
+        if not requested:
             return message, False
         product, _ = self._resolve_brochure_product(session, user_message)
         if product:
@@ -901,6 +913,7 @@ class ClientMessageProcessor:
         *,
         user_message: str,
         profile: dict | None = None,
+        requested: bool = False,
     ) -> None:
         """Send brochure + warranty/PMS PDFs once the customer explicitly asks
         for the document itself (e.g. "send brochure", "share the pdf",
@@ -913,11 +926,15 @@ class ClientMessageProcessor:
 
         If they asked earlier without naming a product, naming a model on a
         later turn completes the pending request and sends the pack.
+
+        Detection: regex fast path, then soft-signal + LLM so any-language
+        phrasing still works (``requested`` is precomputed once per turn).
         """
         product, hints = self._resolve_brochure_product(
             session, user_message, profile
         )
-        if wants_product_brochure(user_message):
+        asked = requested
+        if asked:
             if not product:
                 session.awaiting_brochure_product_choice = True
                 return
@@ -979,14 +996,19 @@ class ClientMessageProcessor:
         message: str,
     ) -> tuple[str, str | None] | None:
         """Handle the reply to a pending brochure offer. Always hands off
-        to the LLM (never an immediate canned reply) — a "no" or an
-        unrelated reply just continues qualification normally."""
+        to the chat LLM (never an immediate canned reply) — a "no" or an
+        unrelated reply just continues qualification normally.
+
+        Accept/decline uses regex fast path + LLM classifier so customers
+        can reply in any language/phrasing.
+        """
         if not session.awaiting_brochure_offer:
             return None
         session.awaiting_brochure_offer = False
         product = session.pending_brochure_product
         session.pending_brochure_product = ""
-        if _is_brochure_offer_accept(message):
+        decision = classify_brochure_offer_reply(message)
+        if decision == "yes":
             _, hints = self._resolve_brochure_product(session, message)
             sent = self._send_brochure_pack(session, product, hints)
             if sent:
@@ -997,7 +1019,7 @@ class ClientMessageProcessor:
                 )
                 return enriched, None
             return message, None
-        if _is_negative(message):
+        if decision == "no":
             enriched = (
                 f"{message}\n\n(Customer did not want the brochure sent. "
                 "Acknowledge briefly, then continue with the next "

@@ -496,7 +496,10 @@ def test_brochure_offer_ambiguous_reply_passes_through_unchanged(monkeypatch):
     """Neither yes nor no just continues qualification normally — no loop,
     no forced interpretation, matching the still-interested classifier's
     "don't force a rigid gate" principle."""
-    del monkeypatch
+    monkeypatch.setattr(
+        "client_processing.classify_brochure_offer_reply",
+        lambda _msg: "unclear",
+    )
     processor, deps = _processor()
     deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
     processor.process(_event(message_id="m1", content="King EV MAX"))
@@ -513,6 +516,29 @@ def test_brochure_offer_ambiguous_reply_passes_through_unchanged(monkeypatch):
     assert session.awaiting_brochure_offer is False
     enriched = deps["engine"].turns[-1].message
     assert enriched == "ok noted"
+
+
+def test_brochure_offer_llm_accept_in_any_language_sends_pack(monkeypatch):
+    """Ambiguous any-language accept is classified by LLM → PDF sent."""
+    monkeypatch.setattr(
+        "client_processing.classify_brochure_offer_reply",
+        lambda _msg: "yes",
+    )
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King EV MAX."
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+    deps["engine"].reply = "It has a 100km range."
+    processor.process(
+        _event(message_id="m2", content="What are the features of this?")
+    )
+
+    deps["engine"].reply = "Sending now."
+    processor.process(
+        _event(message_id="m3", content="हो नक्की पाठवा ना")
+    )
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf" in links
 
 
 def test_brochure_not_sent_without_product(monkeypatch):

@@ -5,8 +5,12 @@ from __future__ import annotations
 import pytest
 
 from bot.graph import (
+    BrochureOfferClassification,
+    BrochureRequestClassification,
     DealerConfirmClassification,
     StillInterestedClassification,
+    classify_brochure_offer_reply,
+    classify_brochure_request,
     classify_dealer_confirm_reply,
     classify_still_interested_reply,
 )
@@ -147,3 +151,64 @@ def test_dealer_confirm_classifier_failure_defaults_to_unclear(monkeypatch):
     )
 
     assert classify_dealer_confirm_reply("something ambiguous") == "unclear"
+
+
+class _FakeBrochureOfferLLM:
+    def __init__(self, result: str):
+        self._result = result
+        self.prompts: list[str] = []
+
+    def with_structured_output(self, schema):
+        assert schema is BrochureOfferClassification
+        return self
+
+    def invoke(self, prompt: str):
+        self.prompts.append(prompt)
+        return BrochureOfferClassification(result=self._result)
+
+
+def test_brochure_offer_clear_bhejo_uses_regex_fast_path(monkeypatch):
+    _forbid_llm(monkeypatch)
+    assert classify_brochure_offer_reply("bhejo") == "yes"
+    assert classify_brochure_offer_reply("no") == "no"
+
+
+def test_brochure_offer_natural_phrasing_uses_llm(monkeypatch):
+    fake = _FakeBrochureOfferLLM(result="yes")
+    monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": fake)
+    assert classify_brochure_offer_reply("हो नक्की पाठवा ना") == "yes"
+    assert fake.prompts
+
+
+def test_brochure_offer_llm_unclear_for_unrelated(monkeypatch):
+    fake = _FakeBrochureOfferLLM(result="unclear")
+    monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": fake)
+    assert classify_brochure_offer_reply("what is the price?") == "unclear"
+
+
+class _FakeBrochureRequestLLM:
+    def __init__(self, wants: bool):
+        self._wants = wants
+        self.prompts: list[str] = []
+
+    def with_structured_output(self, schema):
+        assert schema is BrochureRequestClassification
+        return self
+
+    def invoke(self, prompt: str):
+        self.prompts.append(prompt)
+        return BrochureRequestClassification(wants_brochure=self._wants)
+
+
+def test_brochure_request_regex_fast_path_no_llm(monkeypatch):
+    _forbid_llm(monkeypatch)
+    assert classify_brochure_request("send me the brochure") is True
+    assert classify_brochure_request("hello") is False
+
+
+def test_brochure_request_soft_signal_uses_llm(monkeypatch):
+    fake = _FakeBrochureRequestLLM(wants=True)
+    monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": fake)
+    # Soft signal "bhej"/"file" but not the hard brochure/pdf regex.
+    assert classify_brochure_request("woh file bhej dena please") is True
+    assert fake.prompts
