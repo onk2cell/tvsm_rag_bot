@@ -1584,6 +1584,36 @@ def test_still_interested_yes_continues_qualification():
     assert deps["engine"].turns
     assert "still interested" in deps["engine"].turns[0].message.lower()
     assert deps["state"].sessions["+918286871533"].awaiting_still_interested is False
+    # Regression: "1" here means "yes" (still-interested's own numbered
+    # prompt), not "switch to English" (1 = English in the language menu).
+    assert deps["state"].sessions["+918286871533"].language == "Hindi"
+
+
+def test_still_interested_digit_reply_does_not_flip_language_choice():
+    """Reported bug: fresh customer picks Marathi via the language menu
+    ("3"), confirms still-interested with "1" (its own "Press 1 for Yes"),
+    and the reply comes back in English — because bare "1" also means
+    "English" in the language menu's own numbering."""
+    processor, deps = _processor(preselect_language=None, skip_still_interested=False)
+    deps["directory"].customer = Customer(
+        "lead-9876543210",
+        "Ravi Kumar",
+        "",
+        product_enquired="King Deluxe",
+        last_status="No Response",
+    )
+    deps["engine"].reply = "पुढे चालू ठेवूया."
+
+    processor.process(_event(message_id="m1", content="Hi"))  # language menu
+    processor.process(_event(message_id="m2", content="3"))  # picks Marathi
+    session = deps["state"].sessions["+918286871533"]
+    assert session.language == "Marathi"
+    assert session.awaiting_still_interested is True
+
+    processor.process(_event(message_id="m3", content="1"))  # "yes" to still-interested
+    session = deps["state"].sessions["+918286871533"]
+    assert session.language == "Marathi"
+    assert session.awaiting_still_interested is False
 
 
 def test_still_interested_accepts_free_text_no():

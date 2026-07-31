@@ -1674,7 +1674,12 @@ class ClientMessageProcessor:
 
         if session.language in SUPPORTED_LANGUAGES:
             # Mid-chat switch via explicit language name / number / script label.
-            if event.get("type") == "text":
+            # Skip while the still-interested prompt is pending — its "Press 1
+            # for Yes / Press 2 for No" reuses the same digits 1-7 that
+            # _NAME_TO_LANGUAGE maps to language-menu choices, so a bare "1"
+            # meant as "yes" would otherwise get misread as "switch to
+            # English" (1 = English in the language menu).
+            if event.get("type") == "text" and not session.awaiting_still_interested:
                 switched = parse_language_choice(content)
                 if (
                     switched
