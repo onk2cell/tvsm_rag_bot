@@ -273,6 +273,55 @@ def test_naming_product_alone_does_not_send_brochure(monkeypatch):
     assert deps["state"].sessions["+918286871533"].brochures_sent == []
 
 
+def test_brochure_ask_without_product_asks_which_model(monkeypatch):
+    """Brochure ask with no known product must not send a PDF or claim one."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Sure — which model do you want?"
+
+    processor.process(
+        _event(message_id="m1", content="Kya muje brocher meliega")
+    )
+
+    assert deps["reply_sender"].document_calls == []
+    session = deps["state"].sessions["+918286871533"]
+    assert session.brochures_sent == []
+    assert session.awaiting_brochure_product_choice is True
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "King EV MAX" in reply
+    assert "King Deluxe" in reply
+    # LLM prompt must forbid a false "I'm sending it" claim
+    assert any(
+        "Do NOT say you are sending" in turn.message
+        for turn in deps["engine"].turns
+    )
+
+
+def test_brochure_ask_then_product_name_sends_pdf(monkeypatch):
+    """After a product-less brochure ask, naming a model sends the pack."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Which model?"
+    processor.process(
+        _event(message_id="m1", content="Kya muje brocher meliega")
+    )
+    assert deps["reply_sender"].document_calls == []
+
+    deps["engine"].reply = "Great — King EV MAX."
+    processor.process(
+        _event(message_id="m2", content="TVS EV KING MAX MAI")
+    )
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert links == [
+        "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
+    ]
+    session = deps["state"].sessions["+918286871533"]
+    assert session.brochures_sent == ["King EV MAX"]
+    assert session.awaiting_brochure_product_choice is False
+
+
 def test_explicit_brochure_request_sends_pdf_once(monkeypatch):
     """An explicit "send brochure" request sends the full pack once."""
     del monkeypatch  # CDN URLs are absolute; no media-base stub needed

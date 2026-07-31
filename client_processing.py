@@ -46,6 +46,7 @@ from client_media_assets import (
 )
 from client_static_messages import (
     brochure_offer_ask,
+    brochure_which_product_ask,
     invalid_pincode_ask,
     invalid_pincode_location_fallback,
     location_need_pincode,
@@ -212,6 +213,8 @@ class ClientSession:
     still_interested_asked: bool = False
     awaiting_brochure_offer: bool = False
     pending_brochure_product: str = ""
+    # True after customer asked for a brochure/PDF but no product was known yet.
+    awaiting_brochure_product_choice: bool = False
     qualification_started: bool = False
 
 
@@ -638,6 +641,9 @@ class ClientMessageProcessor:
         message, brochure_offer_product = self._prepare_brochure_info_context(
             session, message, user_message=raw_user_text
         )
+        message, brochure_needs_product = self._prepare_brochure_request_context(
+            session, message, user_message=raw_user_text
+        )
 
         confirm_was_pending = session.awaiting_dealer_confirm
         product_hint = _product_hint_for(customer)
@@ -711,6 +717,11 @@ class ClientMessageProcessor:
             reply=reply_text,
             product=brochure_offer_product,
         )
+        if brochure_needs_product:
+            ask = brochure_which_product_ask(self._session_language(session))
+            reply_text = "\n\n".join(
+                part for part in (reply_text.rstrip(), ask) if part
+            )
         if (
             output.profile is not None
             and session.dealer_confirm_deferred
@@ -827,6 +838,35 @@ class ClientMessageProcessor:
             session.lead_profile.setdefault("product_interest", product)
         return sent_any
 
+    def _prepare_brochure_request_context(
+        self,
+        session: ClientSession,
+        message: str,
+        *,
+        user_message: str,
+    ) -> tuple[str, bool]:
+        """Steer the LLM when the customer asks for a brochure/PDF.
+
+        Returns ``(message, needs_product_ask)``. When no product is known yet,
+        the caller should append a deterministic which-model ask after the reply.
+        """
+        if not wants_product_brochure(user_message):
+            return message, False
+        product, _ = self._resolve_brochure_product(session, user_message)
+        if product:
+            return (
+                f"{message}\n\n(Customer asked for a brochure/PDF. The system "
+                "will send the document(s) separately after your reply. "
+                "Acknowledge briefly that you are sending it. "
+                "Do not invent download links.)"
+            ), False
+        session.awaiting_brochure_product_choice = True
+        return (
+            f"{message}\n\n(Customer asked for a brochure/PDF but no product "
+            "is known yet. Do NOT say you are sending or have sent a brochure. "
+            "Do NOT ask any other question — the system will ask which model.)"
+        ), True
+
     def _maybe_send_product_brochure(
         self,
         session: ClientSession,
@@ -842,11 +882,23 @@ class ClientMessageProcessor:
         and a general info question ("tell me about X") gets an offer
         instead of an automatic send — see _prepare_brochure_info_context /
         _maybe_offer_brochure / _apply_brochure_offer.
+
+        If they asked earlier without naming a product, naming a model on a
+        later turn completes the pending request and sends the pack.
         """
-        if not wants_product_brochure(user_message):
+        product, hints = self._resolve_brochure_product(
+            session, user_message, profile
+        )
+        if wants_product_brochure(user_message):
+            if not product:
+                session.awaiting_brochure_product_choice = True
+                return
+            if self._send_brochure_pack(session, product, hints):
+                session.awaiting_brochure_product_choice = False
             return
-        product, hints = self._resolve_brochure_product(session, user_message, profile)
-        self._send_brochure_pack(session, product, hints)
+        if session.awaiting_brochure_product_choice and product:
+            if self._send_brochure_pack(session, product, hints):
+                session.awaiting_brochure_product_choice = False
 
     def _prepare_brochure_info_context(
         self,
@@ -1361,6 +1413,8 @@ class ClientMessageProcessor:
         if session.dealer_confirmed or session.awaiting_dealer_confirm:
             return None
         if wants_callback(user_message):
+            return None
+        if wants_product_brochure(user_message) or wants_product_info(user_message):
             return None
         if doesnt_know_pincode(user_message) or is_bare_dont_know(user_message):
             return None

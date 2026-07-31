@@ -545,6 +545,9 @@ class RedisClientState:
                 pending_brochure_product=str(
                     data.get("pending_brochure_product") or ""
                 ),
+                awaiting_brochure_product_choice=bool(
+                    data.get("awaiting_brochure_product_choice") or False
+                ),
                 qualification_started=bool(
                     data.get("qualification_started") or False
                 ),
@@ -582,6 +585,9 @@ class RedisClientState:
             "still_interested_asked": session.still_interested_asked,
             "awaiting_brochure_offer": session.awaiting_brochure_offer,
             "pending_brochure_product": session.pending_brochure_product,
+            "awaiting_brochure_product_choice": (
+                session.awaiting_brochure_product_choice
+            ),
             "qualification_started": session.qualification_started,
         }
         self._redis.set(

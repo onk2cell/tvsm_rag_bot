@@ -233,6 +233,21 @@ _BROCHURE_OFFER_ASK = {
     "Marathi": "अधिक माहितीसाठी मी तुम्हाला ब्रोशर पाठवू का?",
 }
 
+_BROCHURE_WHICH_PRODUCT_ASK = {
+    "English": (
+        "Which model's brochure should I send — "
+        "King EV MAX, King Deluxe, or King Duramax Plus?"
+    ),
+    "Hindi": (
+        "किस मॉडल का ब्रोशर भेजूं — "
+        "King EV MAX, King Deluxe, या King Duramax Plus?"
+    ),
+    "Marathi": (
+        "कोणत्या मॉडेलचा ब्रोशर पाठवावा — "
+        "King EV MAX, King Deluxe, किंवा King Duramax Plus?"
+    ),
+}
+
 _WARRANTY_CAPTION = {
     "English": "{product} warranty policy",
     "Hindi": "{product} वारंटी पॉलिसी",
@@ -347,6 +362,10 @@ def still_interested_no_thanks(language: str = "English") -> str:
 
 def brochure_offer_ask(language: str = "English") -> str:
     return _BROCHURE_OFFER_ASK[_lang(language)]
+
+
+def brochure_which_product_ask(language: str = "English") -> str:
+    return _BROCHURE_WHICH_PRODUCT_ASK[_lang(language)]
 
 
 def product_doc_caption(
