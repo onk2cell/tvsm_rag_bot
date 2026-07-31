@@ -17,6 +17,12 @@ _DEALER_ASK = {
     "Marathi": "ही डीलरशिप तुमच्या जवळ आहे का / ठीक आहे का? होय किंवा नाही उत्तर द्या.",
 }
 
+_WRAP_UP_DEALER_CONFIRM_INTRO = {
+    "English": "It was great chatting with you! Just one more thing before we wrap up:",
+    "Hindi": "आपसे बात करके अच्छा लगा! खत्म करने से पहले बस एक आखिरी बात:",
+    "Marathi": "तुमच्याशी बोलून छान वाटलं! संपवण्याआधी फक्त एक शेवटची गोष्ट:",
+}
+
 _LABELS = {
     "English": {
         "name": "Name",
@@ -275,6 +281,10 @@ def dealer_confirm_ask(
         lines.append(f"{labels['map']}: {map_url}")
     lines.extend(["", _DEALER_ASK[lang]])
     return "\n".join(lines)
+
+
+def wrap_up_dealer_confirm_intro(language: str = "English") -> str:
+    return _WRAP_UP_DEALER_CONFIRM_INTRO[_lang(language)]
 
 
 def place_redirect_message(language: str = "English") -> str:

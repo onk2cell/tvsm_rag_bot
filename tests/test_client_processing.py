@@ -925,21 +925,27 @@ def test_pincode_message_asks_nearest_dealer_confirm_once():
     deps["engine"].reply = "Thanks, we noted your pincode."
 
     processor.process(_event(content="My pincode is 411001"))
-    processor.process(
-        _event(message_id="incoming-2", content="Still around 411001 area")
-    )
 
     first = deps["reply_sender"].calls[0]["text"]
-    second = deps["reply_sender"].calls[1]["text"]
     assert "Name: Shah Auto" in first
     assert "Address: Pune, Maharashtra, 411048" in first
     assert "Reply Yes or No" in first
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is True
     assert deps["state"].sessions["+918286871533"].dealer_confirmed is False
-    # While awaiting Yes/No, follow-ups re-prompt the same dealer card.
-    assert "Name: Shah Auto" in second
+
+    processor.process(
+        _event(message_id="incoming-2", content="Still around 411001 area")
+    )
+
+    # An unclear follow-up isn't nagged with the card again — it's deferred
+    # to a single ask at wrap-up instead.
+    second = deps["reply_sender"].calls[1]["text"]
+    assert "Name: Shah Auto" not in second
     assert directory.calls == ["411001"]
     assert deps["state"].sessions["+918286871533"].dealer_shared_for_pincode == "411001"
+    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is False
+    assert deps["state"].sessions["+918286871533"].dealer_confirm_deferred is True
+    assert deps["state"].sessions["+918286871533"].dealer_confirm_deferred is True
 
 
 def test_real_dealer_directory_with_fake_geocoder_resolves_pune():
@@ -1342,7 +1348,7 @@ def test_crm_dealer_name_without_id_resolves_address_from_directory():
     assert session.last_dealer_code == "15140"
 
 
-def test_question_during_dealer_confirm_is_answered_then_card_reattached():
+def test_unclear_reply_during_dealer_confirm_answers_without_reattaching_card():
     directory = FakeDealerDirectory(None)
     processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
@@ -1362,10 +1368,81 @@ def test_question_during_dealer_confirm_is_answered_then_card_reattached():
     processor.process(_event(message_id="m2", content="What is the downpayment?"))
 
     reply = deps["reply_sender"].calls[-1]["text"]
-    # The question is answered, and the pending card is re-attached after it.
-    assert reply.startswith("The dealership will share downpayment details.")
+    # The question is answered plainly — no card nagged back onto the reply.
+    assert reply.strip() == "The dealership will share downpayment details."
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_confirm is False
+    assert session.dealer_confirm_deferred is True
+
+    # Conversation keeps flowing normally; the card stays gone on later turns too.
+    deps["engine"].reply = "Sure, I can help with that."
+    processor.process(_event(message_id="m3", content="What documents do I need?"))
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert reply.strip() == "Sure, I can help with that."
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_confirm is False
+    assert session.dealer_confirm_deferred is True
+
+
+def test_wrap_up_nudges_deferred_dealer_confirm_once():
+    directory = FakeDealerDirectory(None)
+    processor, deps = _processor(dealer_directory=directory)
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        dealership_id="11982",
+        dealership_name="Sarthak Auto",
+        city="Pune",
+    )
+    processor.process(_event(message_id="m0", content="Hi"))
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+    deps["engine"].reply = "Noted, thanks."
+    processor.process(_event(message_id="m2", content="What is the downpayment?"))
+    session = deps["state"].sessions["+918286871533"]
+    assert session.dealer_confirm_deferred is True
+    assert session.awaiting_dealer_confirm is False
+
+    deps["engine"].reply = "Thanks for your time!"
+    deps["engine"].profile = {"product_interest": "King EV MAX"}
+    processor.process(_event(message_id="m3", content="Ok bye"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert reply.startswith("Thanks for your time!")
+    assert "one more thing" in reply
     assert "Reply Yes or No" in reply
+    session = deps["state"].sessions["+918286871533"]
+    assert session.dealer_confirm_deferred is False
+    assert session.awaiting_dealer_confirm is True
+
+
+def test_wrap_up_dealer_confirm_nudge_resolves_on_yes():
+    directory = FakeDealerDirectory(None)
+    processor, deps = _processor(dealer_directory=directory)
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "English",
+        dealership_id="11982",
+        dealership_name="Sarthak Auto",
+        city="Pune",
+    )
+    processor.process(_event(message_id="m0", content="Hi"))
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+    deps["engine"].reply = "Noted, thanks."
+    processor.process(_event(message_id="m2", content="What is the downpayment?"))
+    deps["engine"].reply = "Thanks for your time!"
+    deps["engine"].profile = {"product_interest": "King EV MAX"}
+    processor.process(_event(message_id="m3", content="Ok bye"))
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is True
+
+    deps["engine"].profile = None
+    deps["engine"].reply = "Great, thank you!"
+    processor.process(_event(message_id="m4", content="Yes"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.dealer_confirmed is True
+    assert session.awaiting_dealer_confirm is False
 
 
 def test_pincode_during_dealer_confirm_redoes_nearest_lookup():

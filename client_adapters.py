@@ -526,6 +526,9 @@ class RedisClientState:
                 awaiting_dealer_confirm=bool(
                     data.get("awaiting_dealer_confirm") or False
                 ),
+                dealer_confirm_deferred=bool(
+                    data.get("dealer_confirm_deferred") or False
+                ),
                 crm_dealer_offered=bool(data.get("crm_dealer_offered") or False),
                 dealer_confirmed=bool(data.get("dealer_confirmed") or False),
                 callback_requested=bool(data.get("callback_requested") or False),
@@ -570,6 +573,7 @@ class RedisClientState:
             "share_location_guide_sent": session.share_location_guide_sent,
             "invalid_pincode_attempts": session.invalid_pincode_attempts,
             "awaiting_dealer_confirm": session.awaiting_dealer_confirm,
+            "dealer_confirm_deferred": session.dealer_confirm_deferred,
             "crm_dealer_offered": session.crm_dealer_offered,
             "dealer_confirmed": session.dealer_confirmed,
             "callback_requested": session.callback_requested,

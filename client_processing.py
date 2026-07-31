@@ -57,6 +57,7 @@ from client_static_messages import (
     share_location_ask,
     still_interested_no_thanks,
     welcome_back_still_interested,
+    wrap_up_dealer_confirm_intro,
 )
 
 log = logging.getLogger(__name__)
@@ -202,6 +203,7 @@ class ClientSession:
     share_location_guide_sent: bool = False
     invalid_pincode_attempts: int = 0
     awaiting_dealer_confirm: bool = False
+    dealer_confirm_deferred: bool = False
     crm_dealer_offered: bool = False
     dealer_confirmed: bool = False
     callback_requested: bool = False
@@ -709,6 +711,18 @@ class ClientMessageProcessor:
             reply=reply_text,
             product=brochure_offer_product,
         )
+        if (
+            output.profile is not None
+            and session.dealer_confirm_deferred
+            and not session.dealer_confirmed
+        ):
+            session.dealer_confirm_deferred = False
+            session.awaiting_dealer_confirm = True
+            intro = wrap_up_dealer_confirm_intro(self._session_language(session))
+            nudge = self._dealer_confirm_ask_for_session(session)
+            reply_text = "\n\n".join(
+                part for part in (reply_text.rstrip(), intro, nudge) if part
+            )
         history_reply = reply_text
         if confirm_was_pending and session.awaiting_dealer_confirm:
             # Re-attach the pending dealer card after answering the customer,
@@ -1197,14 +1211,11 @@ class ClientMessageProcessor:
             session.dealer_shared_for_pincode = ""
             session.invalid_pincode_attempts = 0
             return message, None
-        enriched = (
-            f"{message}\n\n(A dealership confirmation is pending. Answer the "
-            "customer's message briefly first; the dealership card will be "
-            "re-sent automatically after your reply, so do not repeat dealership "
-            "details yourself. Finish by asking them to reply Yes or No to the "
-            "dealership.)"
-        )
-        return enriched, None
+        # Truly unclear — don't nag every turn. Remember it's unresolved and
+        # defer to a single ask at wrap-up instead of re-attaching the card here.
+        session.awaiting_dealer_confirm = False
+        session.dealer_confirm_deferred = True
+        return message, None
 
     def _maybe_handle_invalid_pincode(
         self,
