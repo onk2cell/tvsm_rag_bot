@@ -40,6 +40,7 @@ from client_media_assets import (
     product_document_pack,
     share_location_caption,
     share_location_image_url,
+    wants_product_brochure,
 )
 from client_static_messages import (
     invalid_pincode_ask,
@@ -716,11 +717,14 @@ class ClientMessageProcessor:
         user_message: str,
         profile: dict | None = None,
     ) -> None:
-        """Send brochure + warranty/PMS PDFs once when product interest is known.
+        """Send brochure + warranty/PMS PDFs once the customer explicitly asks
+        for one (e.g. "send brochure", "show product image", "share catalog").
 
-        Customers should not need to ask for a brochure/PDF explicitly — naming
-        a model (any language) or capturing product_interest is enough.
+        We never push PDFs/images just because a model name was mentioned —
+        only an explicit request for info/brochure/specs triggers a send.
         """
+        if not wants_product_brochure(user_message):
+            return
         hints = (
             user_message,
             str((profile or {}).get("product_interest") or ""),

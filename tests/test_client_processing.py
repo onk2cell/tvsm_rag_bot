@@ -261,13 +261,27 @@ def test_customer_lookup_is_cached_for_the_conversation():
     assert len(deps["engine"].turns[1].history) == 2
 
 
-def test_naming_product_sends_brochure_pdf_once(monkeypatch):
-    """When the customer picks a model, send that brochure once (no explicit ask)."""
+def test_naming_product_alone_does_not_send_brochure(monkeypatch):
+    """Naming a model is not enough — the customer must explicitly ask."""
     del monkeypatch  # CDN URLs are absolute; no media-base stub needed
     processor, deps = _processor()
     deps["engine"].reply = "Great choice — King Deluxe."
 
     processor.process(_event(message_id="m1", content="King deluxe"))
+
+    assert deps["reply_sender"].document_calls == []
+    assert deps["state"].sessions["+918286871533"].brochures_sent == []
+
+
+def test_explicit_brochure_request_sends_pdf_once(monkeypatch):
+    """An explicit "send brochure" request sends the full pack once."""
+    del monkeypatch  # CDN URLs are absolute; no media-base stub needed
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King Deluxe."
+
+    processor.process(
+        _event(message_id="m1", content="Please send me the King Deluxe brochure")
+    )
 
     assert deps["reply_sender"].document_calls == [
         {
@@ -290,7 +304,9 @@ def test_naming_product_sends_brochure_pdf_once(monkeypatch):
 
     deps["engine"].reply = "Noted."
     processor.process(_event(message_id="m2", content="Ok"))
-    processor.process(_event(message_id="m3", content="King deluxe again"))
+    processor.process(
+        _event(message_id="m3", content="Send me the King Deluxe brochure again")
+    )
     # Pack is sent once per product per session (brochure + PMS + warranty).
     assert len(deps["reply_sender"].document_calls) == 3
 
@@ -306,13 +322,25 @@ def test_brochure_not_sent_without_product(monkeypatch):
     assert deps["reply_sender"].document_calls == []
 
 
-def test_engine_profile_product_sends_brochure(monkeypatch):
+def test_engine_profile_product_without_request_does_not_send_brochure(monkeypatch):
+    """Even once the engine captures product_interest, wait for an explicit ask."""
     del monkeypatch
     processor, deps = _processor()
     deps["engine"].reply = "EV MAX is a good fit."
     deps["engine"].profile = {"product_interest": "King EV MAX"}
 
     processor.process(_event(message_id="m1", content="मुझे इलेक्ट्रिक वाली चाहिए"))
+
+    assert deps["reply_sender"].document_calls == []
+
+
+def test_engine_profile_product_sends_brochure_when_requested(monkeypatch):
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "EV MAX is a good fit."
+    deps["engine"].profile = {"product_interest": "King EV MAX"}
+
+    processor.process(_event(message_id="m1", content="मुझे ब्रोशर भेजो"))
 
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
@@ -321,8 +349,8 @@ def test_engine_profile_product_sends_brochure(monkeypatch):
     ]
 
 
-def test_crm_product_enquired_sends_brochure_on_first_message(monkeypatch):
-    """CRM already knows the product — send the PDF without any ask."""
+def test_crm_product_enquired_without_request_does_not_send_brochure(monkeypatch):
+    """CRM already knows the product, but a plain "Hi" is not an explicit ask."""
     del monkeypatch
     processor, deps = _processor()
     deps["directory"].customer = Customer(
@@ -334,6 +362,21 @@ def test_crm_product_enquired_sends_brochure_on_first_message(monkeypatch):
 
     processor.process(_event(message_id="m1", content="Hi"))
 
+    assert deps["reply_sender"].document_calls == []
+
+
+def test_crm_product_enquired_sends_brochure_when_requested(monkeypatch):
+    del monkeypatch
+    processor, deps = _processor()
+    deps["directory"].customer = Customer(
+        "1",
+        "Asha",
+        "Marathi",
+        product_enquired="TVS KING EV MAX",
+    )
+
+    processor.process(_event(message_id="m1", content="Send me the brochure"))
+
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
         "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
@@ -341,12 +384,24 @@ def test_crm_product_enquired_sends_brochure_on_first_message(monkeypatch):
     ]
 
 
-def test_marathi_product_name_sends_brochure(monkeypatch):
+def test_marathi_product_name_without_request_does_not_send_brochure(monkeypatch):
     del monkeypatch
     processor, deps = _processor()
     deps["engine"].reply = "छान निवड!"
 
     processor.process(_event(message_id="m1", content="मला ईव्ही मॅक्स पाहिजे"))
+
+    assert deps["reply_sender"].document_calls == []
+
+
+def test_marathi_explicit_brochure_request_sends_pdf(monkeypatch):
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "छान निवड!"
+
+    processor.process(
+        _event(message_id="m1", content="मला ईव्ही मॅक्सची माहिती पाठवा")
+    )
 
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
