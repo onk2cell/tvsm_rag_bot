@@ -158,6 +158,14 @@ def test_off_topic_rule_in_system_prompt(stores):
     assert "off-topic" in system.lower() or "redirect" in system.lower()
 
 
+def test_brochure_rule_tells_llm_system_handles_delivery(stores):
+    config_store, _, _ = stores
+    system = build_system_instruction(config_store.get(), "English")
+    assert "never attach files yourself" in system.lower()
+    assert "never say you can't send a brochure" in system.lower()
+    assert "never say the dealership will provide one" in system.lower()
+
+
 def test_delivery_location_in_profile_keys(stores):
     config_store, _, _ = stores
     system = build_system_instruction(config_store.get(), "English")
