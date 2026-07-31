@@ -19,3 +19,11 @@ pypdf
 # --- Tests ---
 pytest==8.3.4
 httpx==0.28.1
+
+# --- LangGraph orchestration layer (bot/) ---
+langgraph>=1.2,<2
+langchain-core>=1.5,<2
+# Pin the floor at 4.0, not lower: only langchain-google-genai>=4.0 shares
+# the already-installed google-genai SDK above. Older 2.x/3.x lines pull in
+# a second, incompatible Gemini SDK (google-ai-generativelanguage).
+langchain-google-genai>=4.0,<5
