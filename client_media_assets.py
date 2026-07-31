@@ -82,15 +82,29 @@ PRODUCT_BROCHURE_SLUG = {
     "King Duramax Plus": "King_Duramax_Plus_Petrol-English",
 }
 
+# Literal document requests only — these get the PDF/document sent
+# immediately. General info questions (PRODUCT_INFO_ASK_RE below) get a text
+# answer and an offer to send the brochure instead, not an automatic send.
+PRODUCT_DOCUMENT_ASK_RE = re.compile(
+    r"(?i)("
+    r"\b(brochure|pdf|catalogue|catalog|pamphlet|leaflet|"
+    r"send\s+(me\s+)?(the\s+)?(pdf|brochure))\b|"
+    r"ब्रोशर|पीडीएफ|कैटलॉग|"
+    r"ब्रॉशर|कॅटलॉग"
+    r")"
+)
+
+# General product-info questions — answered in text, then the customer is
+# asked (separately, deterministically) whether they'd like the brochure
+# too. Not gated to an automatic document send.
 PRODUCT_INFO_ASK_RE = re.compile(
     r"(?i)("
-    r"\b(brochure|pdf|catalogue|catalog|pamphlet|leaflet|specs?|features?|"
-    r"specification|details?|full\s+details|"
+    r"\b(specs?|features?|specification|details?|full\s+details|"
     r"info(?:rmation)?|"
     r"tell\s+me\s+about|give\s+me\s+(info|information|details)|"
-    r"send\s+(me\s+)?(the\s+)?(pdf|brochure|details|info(?:rmation)?))\b|"
-    r"जानकारी|विवरण|ब्रोशर|पीडीएफ|कैटलॉग|"
-    r"माहिती|तपशील|ब्रॉशर|कॅटलॉग|"
+    r"send\s+(me\s+)?(the\s+)?(details|info(?:rmation)?))\b|"
+    r"जानकारी|विवरण|"
+    r"माहिती|तपशील|"
     r"సమాచారం|వివరాలు|"
     r"விவரங்கள்|தகவல்|"
     r"ವಿವರ|ಮಾಹಿತಿ|"
@@ -161,7 +175,16 @@ def is_bare_dont_know(message: str | None) -> bool:
 
 
 def wants_product_brochure(message: str | None) -> bool:
-    """True when the customer is asking for product info / a brochure PDF."""
+    """True when the customer explicitly asks for the document itself
+    (brochure/PDF/catalog) — gates an immediate document send."""
+    return bool(PRODUCT_DOCUMENT_ASK_RE.search((message or "").strip()))
+
+
+def wants_product_info(message: str | None) -> bool:
+    """True for a general product-info question (specs/features/details/
+    "tell me about") that is NOT a literal document request — this should
+    get a text answer plus an offer to send the brochure, not an automatic
+    document send."""
     return bool(PRODUCT_INFO_ASK_RE.search((message or "").strip()))
 
 

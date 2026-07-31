@@ -10,6 +10,7 @@ from client_media_assets import (
     share_location_caption,
     share_location_image_url,
     wants_product_brochure,
+    wants_product_info,
 )
 
 
@@ -42,14 +43,28 @@ def test_doesnt_know_pincode_detects_common_phrases():
     assert not doesnt_know_pincode("Yes")
 
 
-def test_wants_product_brochure_detects_info_asks():
+def test_wants_product_brochure_detects_literal_document_requests():
     assert wants_product_brochure("Send me the brochure")
-    assert wants_product_brochure("EV MAX details please")
-    assert wants_product_brochure("can you give me info about ev king max")
-    assert wants_product_brochure("information about EV MAX")
-    assert wants_product_brochure("मुझे जानकारी चाहिए")
+    assert wants_product_brochure("send me the pdf")
+    assert wants_product_brochure("share the catalogue")
+    # General info questions are NOT a document request — see
+    # wants_product_info below; they get an offer, not an auto-send.
+    assert not wants_product_brochure("EV MAX details please")
+    assert not wants_product_brochure("information about EV MAX")
+    assert not wants_product_brochure("मुझे जानकारी चाहिए")
     assert not wants_product_brochure("yes")
     assert not wants_product_brochure("411048")
+
+
+def test_wants_product_info_detects_general_questions():
+    assert wants_product_info("EV MAX details please")
+    assert wants_product_info("can you give me info about ev king max")
+    assert wants_product_info("information about EV MAX")
+    assert wants_product_info("मुझे जानकारी चाहिए")
+    # A literal document ask is not classified as a general info question.
+    assert not wants_product_info("Send me the brochure")
+    assert not wants_product_info("yes")
+    assert not wants_product_info("411048")
 
 
 def test_product_brochure_url_and_caption():

@@ -221,6 +221,12 @@ _STILL_INTERESTED_NO_THANKS = {
     ),
 }
 
+_BROCHURE_OFFER_ASK = {
+    "English": "Would you like me to send you the brochure for more details?",
+    "Hindi": "क्या आप चाहेंगे कि मैं आपको अधिक जानकारी के लिए ब्रोशर भेजूं?",
+    "Marathi": "अधिक माहितीसाठी मी तुम्हाला ब्रोशर पाठवू का?",
+}
+
 _WARRANTY_CAPTION = {
     "English": "{product} warranty policy",
     "Hindi": "{product} वारंटी पॉलिसी",
@@ -327,6 +333,10 @@ def welcome_back_still_interested(
 
 def still_interested_no_thanks(language: str = "English") -> str:
     return _STILL_INTERESTED_NO_THANKS[_lang(language)]
+
+
+def brochure_offer_ask(language: str = "English") -> str:
+    return _BROCHURE_OFFER_ASK[_lang(language)]
 
 
 def product_doc_caption(

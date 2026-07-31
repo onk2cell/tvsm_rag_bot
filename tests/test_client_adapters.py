@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import fields
 
 import pytest
 import requests
@@ -12,6 +13,7 @@ from client_adapters import (
     RedisClientState,
     ReplyDeliveryError,
 )
+from client_processing import ClientSession
 
 
 class FakeResponse:
@@ -475,3 +477,41 @@ def test_client_state_persists_history_customer_and_four_hour_ttl():
     assert json.loads(redis.data["client:session:+918286871533"])["mobile"] == (
         "+918286871533"
     )
+
+
+def test_client_state_round_trips_every_session_field():
+    """RedisClientState hand-lists ClientSession fields in save()/
+    load_or_start() rather than a generic asdict()/fields() round-trip —
+    a new ClientSession field silently vanishes on the next load unless
+    it's added to both. Set every non-default field and confirm it comes
+    back, so a future field addition here fails loudly instead of quietly
+    resetting mid-conversation flags after the next Redis round-trip."""
+    redis = FakeRedis()
+    state = RedisClientState(redis, ttl_seconds=14400, id_factory=lambda: "conversation-1")
+    session = state.load_or_start("+918286871533")
+
+    non_default = {}
+    for f in fields(ClientSession):
+        if f.name in ("conversation_id", "mobile"):
+            continue
+        current = getattr(session, f.name)
+        if f.type == "bool":
+            value = not current
+        elif f.type == "str":
+            value = "changed"
+        elif f.type == "int":
+            value = current + 1
+        elif f.type == "list[str]":
+            value = ["changed"]
+        elif f.type == "dict":
+            value = {"changed": "yes"}
+        else:
+            continue  # customer / history / pending_replies covered elsewhere
+        setattr(session, f.name, value)
+        non_default[f.name] = value
+
+    state.save(session)
+    loaded = state.load_or_start("+918286871533")
+
+    for name, value in non_default.items():
+        assert getattr(loaded, name) == value, f"{name} did not round-trip"

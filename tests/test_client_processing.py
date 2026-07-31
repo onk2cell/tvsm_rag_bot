@@ -333,6 +333,113 @@ def test_brochure_request_resolves_product_from_earlier_history(monkeypatch):
     ]
 
 
+def test_info_question_offers_brochure_instead_of_auto_sending(monkeypatch):
+    """A general info question ("what are the features") gets a text answer
+    plus a deterministic offer — not an automatic document send."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+
+    deps["engine"].reply = "It has a 100km range and fast charging."
+    processor.process(
+        _event(message_id="m2", content="What are the features of this?")
+    )
+
+    assert deps["reply_sender"].document_calls == []
+    reply_text = deps["reply_sender"].calls[-1]["text"]
+    assert "brochure" in reply_text.lower()
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is True
+    assert session.pending_brochure_product == "King EV MAX"
+
+
+def test_info_question_tells_llm_to_answer_only(monkeypatch):
+    """The LLM is told not to ask its own follow-up this turn — the
+    brochure offer is the one question, appended deterministically."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+
+    deps["engine"].reply = "It has a 100km range."
+    processor.process(
+        _event(message_id="m2", content="What are the features of this?")
+    )
+
+    enriched = deps["engine"].turns[-1].message
+    assert "at most TWO sentences" in enriched
+    assert "Do NOT ask a qualification question" in enriched
+
+
+def test_brochure_offer_accepted_sends_pack(monkeypatch):
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+    deps["engine"].reply = "It has a 100km range."
+    processor.process(
+        _event(message_id="m2", content="What are the features of this?")
+    )
+    assert deps["reply_sender"].document_calls == []
+
+    deps["engine"].reply = "Great, noted."
+    processor.process(_event(message_id="m3", content="yes"))
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert links == [
+        "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
+    ]
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is False
+    enriched = deps["engine"].turns[-1].message
+    assert "has been sent" in enriched
+
+
+def test_brochure_offer_declined_does_not_send(monkeypatch):
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+    deps["engine"].reply = "It has a 100km range."
+    processor.process(
+        _event(message_id="m2", content="What are the features of this?")
+    )
+
+    deps["engine"].reply = "No problem, when are you looking to buy?"
+    processor.process(_event(message_id="m3", content="no"))
+
+    assert deps["reply_sender"].document_calls == []
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is False
+    enriched = deps["engine"].turns[-1].message
+    assert "did not want the brochure" in enriched
+
+
+def test_brochure_offer_ambiguous_reply_passes_through_unchanged(monkeypatch):
+    """Neither yes nor no just continues qualification normally — no loop,
+    no forced interpretation, matching the still-interested classifier's
+    "don't force a rigid gate" principle."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
+    processor.process(_event(message_id="m1", content="King EV MAX"))
+    deps["engine"].reply = "It has a 100km range."
+    processor.process(
+        _event(message_id="m2", content="What are the features of this?")
+    )
+
+    deps["engine"].reply = "Sure, when are you looking to buy?"
+    processor.process(_event(message_id="m3", content="ok noted"))
+
+    assert deps["reply_sender"].document_calls == []
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is False
+    enriched = deps["engine"].turns[-1].message
+    assert enriched == "ok noted"
+
+
 def test_brochure_not_sent_without_product(monkeypatch):
     monkeypatch.setattr(
         "client_media_assets.media_base_url",
@@ -422,7 +529,7 @@ def test_marathi_explicit_brochure_request_sends_pdf(monkeypatch):
     deps["engine"].reply = "छान निवड!"
 
     processor.process(
-        _event(message_id="m1", content="मला ईव्ही मॅक्सची माहिती पाठवा")
+        _event(message_id="m1", content="मला ईव्ही मॅक्सचा ब्रोशर पाठवा")
     )
 
     links = [call["link"] for call in deps["reply_sender"].document_calls]

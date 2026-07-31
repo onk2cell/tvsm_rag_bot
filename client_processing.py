@@ -42,8 +42,10 @@ from client_media_assets import (
     share_location_caption,
     share_location_image_url,
     wants_product_brochure,
+    wants_product_info,
 )
 from client_static_messages import (
+    brochure_offer_ask,
     invalid_pincode_ask,
     invalid_pincode_location_fallback,
     location_need_pincode,
@@ -206,6 +208,8 @@ class ClientSession:
     welcome_back_sent: bool = False
     awaiting_still_interested: bool = False
     still_interested_asked: bool = False
+    awaiting_brochure_offer: bool = False
+    pending_brochure_product: str = ""
 
 
 @dataclass(frozen=True)
@@ -616,6 +620,10 @@ class ClientMessageProcessor:
                 )
                 return
 
+        brochure_offer_applied = self._apply_brochure_offer(session, message)
+        if brochure_offer_applied is not None:
+            message, _ = brochure_offer_applied
+
         if wants_callback(message):
             session.callback_requested = True
             message = (
@@ -623,6 +631,10 @@ class ClientMessageProcessor:
                 "Reply briefly that the dealership will call them soon, "
                 "thank them, and wrap up. Do not ask more qualification questions.)"
             )
+
+        message, brochure_offer_product = self._prepare_brochure_info_context(
+            session, message, user_message=raw_user_text
+        )
 
         confirm_was_pending = session.awaiting_dealer_confirm
         product_hint = _product_hint_for(customer)
@@ -670,6 +682,11 @@ class ClientMessageProcessor:
             user_message=message,
             reply=reply_text,
         )
+        reply_text = self._maybe_offer_brochure(
+            session,
+            reply=reply_text,
+            product=brochure_offer_product,
+        )
         history_reply = reply_text
         if confirm_was_pending and session.awaiting_dealer_confirm:
             # Re-attach the pending dealer card after answering the customer,
@@ -683,7 +700,7 @@ class ClientMessageProcessor:
                 )
         self._maybe_send_product_brochure(
             session,
-            user_message=message,
+            user_message=raw_user_text,
             profile=output.profile,
         )
         self._capture_purchase_date(session, user_message=raw_user_text)
@@ -712,25 +729,19 @@ class ClientMessageProcessor:
             history_reply,
         )
 
-    def _maybe_send_product_brochure(
+    def _resolve_brochure_product(
         self,
         session: ClientSession,
-        *,
         user_message: str,
         profile: dict | None = None,
-    ) -> None:
-        """Send brochure + warranty/PMS PDFs once the customer explicitly asks
-        for one (e.g. "send brochure", "show product image", "share catalog").
+    ) -> tuple[str, tuple[str, ...]]:
+        """Resolve which product a brochure request/offer refers to.
 
-        We never push PDFs/images just because a model name was mentioned —
-        only an explicit request for info/brochure/specs triggers a send.
+        The triggering message often doesn't repeat the product name ("send
+        me the brochure for this") — product_interest is only captured in
+        lead_profile at LLM wrap-up, so fall back to scanning recent
+        conversation turns (most recent first) for a named model.
         """
-        if not wants_product_brochure(user_message):
-            return
-        # The customer's brochure request often doesn't repeat the product
-        # name ("send me the brochure for this") — product_interest is only
-        # captured in lead_profile at LLM wrap-up, so fall back to scanning
-        # recent conversation turns (most recent first) for a named model.
         history_hints = tuple(
             str(turn.get("text") or "")
             for turn in reversed(session.history)
@@ -743,12 +754,21 @@ class ClientMessageProcessor:
             _product_hint_for(session.customer),
             *history_hints,
         )
-        product = brochure_product_from_text(*hints)
+        return brochure_product_from_text(*hints), hints
+
+    def _send_brochure_pack(
+        self,
+        session: ClientSession,
+        product: str,
+        hints: tuple[str, ...] = (),
+    ) -> bool:
+        """Send the brochure + warranty/PMS pack for `product`. Returns
+        True if at least one document was sent."""
         if not product or product in session.brochures_sent:
-            return
+            return False
         pack = product_document_pack(product, *hints)
         if not pack:
-            return
+            return False
         language = self._session_language(session)
         sent_any = False
         for link, kind in pack:
@@ -769,6 +789,106 @@ class ClientMessageProcessor:
         if sent_any:
             session.brochures_sent.append(product)
             session.lead_profile.setdefault("product_interest", product)
+        return sent_any
+
+    def _maybe_send_product_brochure(
+        self,
+        session: ClientSession,
+        *,
+        user_message: str,
+        profile: dict | None = None,
+    ) -> None:
+        """Send brochure + warranty/PMS PDFs once the customer explicitly asks
+        for the document itself (e.g. "send brochure", "share the pdf",
+        "share catalog").
+
+        We never push PDFs/images just because a model name was mentioned,
+        and a general info question ("tell me about X") gets an offer
+        instead of an automatic send — see _prepare_brochure_info_context /
+        _maybe_offer_brochure / _apply_brochure_offer.
+        """
+        if not wants_product_brochure(user_message):
+            return
+        product, hints = self._resolve_brochure_product(session, user_message, profile)
+        self._send_brochure_pack(session, product, hints)
+
+    def _prepare_brochure_info_context(
+        self,
+        session: ClientSession,
+        message: str,
+        *,
+        user_message: str,
+    ) -> tuple[str, str]:
+        """If `user_message` is a general product-info question (not a
+        literal document request) and we can resolve an unsent product, tag
+        `message` so the LLM answers ONLY the question — no extra question
+        of its own — and return the product to offer the brochure for
+        afterward (post-reply, deterministically, so the offer is the one
+        question this turn, not a second one stacked on the LLM's own).
+        """
+        if session.awaiting_brochure_offer:
+            return message, ""
+        if wants_product_brochure(user_message) or not wants_product_info(user_message):
+            return message, ""
+        product, _ = self._resolve_brochure_product(session, user_message)
+        if not product or product in session.brochures_sent:
+            return message, ""
+        enriched = (
+            f"{message}\n\n(Answer this product question in at most TWO "
+            "sentences using ONLY the KNOWLEDGE BASE. Do NOT ask a "
+            "qualification question or anything else in this reply — the "
+            "system will separately ask if they want the brochure.)"
+        )
+        return enriched, product
+
+    def _maybe_offer_brochure(
+        self,
+        session: ClientSession,
+        *,
+        reply: str,
+        product: str,
+    ) -> str:
+        """Append a deterministic "want the brochure too?" ask after an
+        info-question reply, and arm _apply_brochure_offer for the next turn."""
+        if not product:
+            return reply
+        session.awaiting_brochure_offer = True
+        session.pending_brochure_product = product
+        ask = brochure_offer_ask(self._session_language(session))
+        return "\n\n".join(part for part in (reply.rstrip(), ask) if part)
+
+    def _apply_brochure_offer(
+        self,
+        session: ClientSession,
+        message: str,
+    ) -> tuple[str, str | None] | None:
+        """Handle the reply to a pending brochure offer. Always hands off
+        to the LLM (never an immediate canned reply) — a "no" or an
+        unrelated reply just continues qualification normally."""
+        if not session.awaiting_brochure_offer:
+            return None
+        session.awaiting_brochure_offer = False
+        product = session.pending_brochure_product
+        session.pending_brochure_product = ""
+        if _is_affirmative(message):
+            _, hints = self._resolve_brochure_product(session, message)
+            sent = self._send_brochure_pack(session, product, hints)
+            if sent:
+                enriched = (
+                    f"{message}\n\n(Brochure for {product} has been sent. "
+                    "Acknowledge briefly, then continue with the next "
+                    "qualification step.)"
+                )
+                return enriched, None
+            return message, None
+        if _is_negative(message):
+            enriched = (
+                f"{message}\n\n(Customer did not want the brochure sent. "
+                "Acknowledge briefly, then continue with the next "
+                "qualification step.)"
+            )
+            return enriched, None
+        return message, None
 
     def _returning_product(self, customer: Customer | None) -> str:
         """Best-known prior product for the still-interested ask."""

@@ -536,6 +536,12 @@ class RedisClientState:
                 still_interested_asked=bool(
                     data.get("still_interested_asked") or False
                 ),
+                awaiting_brochure_offer=bool(
+                    data.get("awaiting_brochure_offer") or False
+                ),
+                pending_brochure_product=str(
+                    data.get("pending_brochure_product") or ""
+                ),
             )
         return ClientSession(
             conversation_id=self._id_factory(),
@@ -567,6 +573,8 @@ class RedisClientState:
             "welcome_back_sent": session.welcome_back_sent,
             "awaiting_still_interested": session.awaiting_still_interested,
             "still_interested_asked": session.still_interested_asked,
+            "awaiting_brochure_offer": session.awaiting_brochure_offer,
+            "pending_brochure_product": session.pending_brochure_product,
         }
         self._redis.set(
             self._key(session.mobile),
