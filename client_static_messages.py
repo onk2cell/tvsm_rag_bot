@@ -227,6 +227,15 @@ _STILL_INTERESTED_NO_THANKS = {
     ),
 }
 
+# Consent gate: dealership details are never volunteered. The customer used
+# to get a full name/address/phone/map card dropped into a reply about
+# something else entirely, alongside a second question.
+_DEALER_SHARE_ASK = {
+    "English": "Would you like me to share your nearest dealership details?",
+    "Hindi": "क्या मैं आपको आपकी नज़दीकी डीलरशिप की जानकारी भेजूं?",
+    "Marathi": "मी तुम्हाला तुमच्या जवळच्या डीलरशिपची माहिती पाठवू का?",
+}
+
 # Last resort only: the model returned an empty reply twice in a row. Better
 # an open question than silence — the customer used to get nothing back and
 # had to type "hello" to restart the bot (bug 240711).
@@ -367,6 +376,10 @@ def welcome_back_still_interested(
 
 def still_interested_no_thanks(language: str = "English") -> str:
     return _STILL_INTERESTED_NO_THANKS[_lang(language)]
+
+
+def dealer_share_ask(language: str = "English") -> str:
+    return _DEALER_SHARE_ASK[_lang(language)]
 
 
 def acknowledgement_fallback(language: str = "English") -> str:

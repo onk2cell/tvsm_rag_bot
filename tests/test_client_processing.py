@@ -10,6 +10,7 @@ from client_processing import (
     Customer,
     DocumentRecognition,
 )
+from client_static_messages import dealer_share_ask
 from dealers import Dealer, DealerDirectory
 from dispose import resolve_purchase_date
 
@@ -91,14 +92,26 @@ class FailingDirectory(FakeDirectory):
 
 
 class FakeEngine:
+    """Stands in for Gemini, and — like the real prompt expects — obeys the
+    "do NOT ask any question of your own" instruction the processor injects
+    when it is about to append a dealership question. Without that, the fake
+    would ask something every turn and the processor would (correctly) keep
+    deferring its own ask forever to avoid stacking two questions."""
+
+    SUPPRESS_QUESTION = "Do NOT ask any question of your own"
+
     def __init__(self):
         self.turns = []
         self.reply = "तुम्हाला कोणते TVS मॉडेल आवडते?"
+        self.acknowledgement = "ठीक आहे."
         self.profile = None
 
     def handle_turn(self, turn):
         self.turns.append(turn)
-        return TurnOutput(reply_text=self.reply, profile=self.profile, captured=bool(self.profile))
+        reply = self.reply
+        if self.SUPPRESS_QUESTION in (turn.message or ""):
+            reply = self.acknowledgement
+        return TurnOutput(reply_text=reply, profile=self.profile, captured=bool(self.profile))
 
 
 class FakeReplySender:
@@ -1017,25 +1030,98 @@ def test_pincode_message_asks_nearest_dealer_confirm_once():
 
     processor.process(_event(content="My pincode is 411001"))
 
+    # Details are never volunteered — a pincode gets a consent question,
+    # and no name/address/phone until the customer says yes.
     first = deps["reply_sender"].calls[0]["text"]
-    assert "Name: Shah Auto" in first
-    assert "Address: Pune, Maharashtra, 411048" in first
-    assert "Reply Yes or No" in first
-    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is True
-    assert deps["state"].sessions["+918286871533"].dealer_confirmed is False
+    assert dealer_share_ask("English") in first
+    assert "Shah Auto" not in first
+    assert "9000000001" not in first
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_share_consent is True
+    assert session.awaiting_dealer_confirm is False
+    # ...but the lead is already routed to that dealer for dispose.
+    assert session.last_dealer_code == "11689"
+
+    processor.process(_event(message_id="incoming-2", content="yes please"))
+
+    card = deps["reply_sender"].calls[1]["text"]
+    assert "Name: Shah Auto" in card
+    assert "Address: Pune, Maharashtra, 411048" in card
+    assert "Reply Yes or No" in card
+    assert session.awaiting_dealer_confirm is True
+    assert session.dealer_confirmed is False
 
     processor.process(
-        _event(message_id="incoming-2", content="Still around 411001 area")
+        _event(message_id="incoming-3", content="Still around 411001 area")
     )
 
     # An unclear follow-up isn't nagged with the card again — it's deferred
     # to a single ask at wrap-up instead.
-    second = deps["reply_sender"].calls[1]["text"]
-    assert "Name: Shah Auto" not in second
+    third = deps["reply_sender"].calls[2]["text"]
+    assert "Name: Shah Auto" not in third
     assert directory.calls == ["411001"]
-    assert deps["state"].sessions["+918286871533"].dealer_shared_for_pincode == "411001"
-    assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is False
-    assert deps["state"].sessions["+918286871533"].dealer_confirm_deferred is True
+    assert session.dealer_shared_for_pincode == "411001"
+    assert session.awaiting_dealer_confirm is False
+    assert session.dealer_confirm_deferred is True
+
+
+def test_dealership_details_are_never_sent_without_consent():
+    """The 02/08 transcript: 'I want a different vehicle' came back with
+    'which model?' AND an unrequested dealer card AND 'is this OK?'."""
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Rhythm Auto",
+        address="Hinjewadi Road, 411057",
+        pincode="411057",
+        phone="9021853812",
+        map_url="https://maps.example/11689",
+        latitude=18.60,
+        longitude=73.73,
+        spoc_name="Neha Pagar",
+    )
+    processor, deps = _processor(dealer_directory=FakeDealerDirectory(dealer))
+    deps["directory"].customer = Customer(
+        "crm-1", "Asha", "English", dealership_id="11689", dealership_name="Rhythm Auto"
+    )
+    deps["engine"].reply = "We also have King Deluxe and King Duramax Plus."
+
+    processor.process(_event(message_id="m1", content="hi"))
+    processor.process(_event(message_id="m2", content="I want a different vehicle"))
+
+    for call in deps["reply_sender"].calls:
+        assert "9021853812" not in call["text"], "phone number sent unrequested"
+        assert "Hinjewadi Road" not in call["text"], "address sent unrequested"
+        assert call["text"].count("?") <= 1, f"two questions:\n{call['text']}"
+
+
+def test_consent_question_is_not_stacked_on_the_models_own_question():
+    """Belt and braces: even if the model ignores the do-not-ask
+    instruction, nothing may append a second question to its reply."""
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Rhythm Auto",
+        address="Hinjewadi",
+        pincode="411057",
+        phone="9021853812",
+        map_url="https://maps.example/11689",
+        latitude=18.60,
+        longitude=73.73,
+    )
+    processor, deps = _processor(dealer_directory=FakeDealerDirectory(dealer))
+    deps["directory"].customer = Customer(
+        "crm-1", "Asha", "English", dealership_id="11689", dealership_name="Rhythm Auto"
+    )
+    # Disobedient model: asks a question no matter what it is told.
+    deps["engine"].acknowledgement = "Which model would you like?"
+    deps["engine"].reply = "Which model would you like?"
+
+    processor.process(_event(message_id="m1", content="hi"))
+    processor.process(_event(message_id="m2", content="I want a different vehicle"))
+
+    for call in deps["reply_sender"].calls:
+        assert call["text"].count("?") <= 1, f"two questions:\n{call['text']}"
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_share_consent is False
 
 
 def test_real_dealer_directory_with_fake_geocoder_resolves_pune():
@@ -1072,7 +1158,9 @@ def test_real_dealer_directory_with_fake_geocoder_resolves_pune():
 
     processor.process(_event(content="411001"))
 
-    assert "Shah Auto" in deps["reply_sender"].calls[0]["text"]
+    assert dealer_share_ask("English") in deps["reply_sender"].calls[0]["text"]
+    processor.process(_event(message_id="incoming-2", content="yes"))
+    assert "Shah Auto" in deps["reply_sender"].calls[1]["text"]
 
 
 def test_wrap_up_profile_calls_dispose_once_with_dealer_code():
@@ -1145,7 +1233,9 @@ def test_dispose_re_fires_when_lead_fields_change():
     assert dispose.calls[0]["pincode"] == "411001"
 
     deps["engine"].reply = "Thanks for confirming."
+    # First Yes releases the details, second Yes confirms the dealership.
     processor.process(_event(message_id="d1b", content="Yes"))
+    processor.process(_event(message_id="d1c", content="Yes"))
     assert deps["state"].sessions["+918286871533"].dealer_confirmed is True
 
     deps["engine"].profile = {
@@ -1277,8 +1367,16 @@ def test_crm_dealer_confirm_yes_sets_last_dealer_code_and_skips_nearest():
 
     processor.process(_event(message_id="m1", content="I live at pin 41 10 35"))
     session = deps["state"].sessions["+918286871533"]
+    # Details are consent-gated: ask first, card only after a yes.
+    assert session.awaiting_dealer_share_consent is True
+    assert "Sarthak Auto" not in deps["reply_sender"].calls[0]["text"]
+    # The lead is routed to the CRM dealer regardless, for dispose.
+    assert session.last_dealer_code == "11982"
+
+    processor.process(_event(message_id="m1b", content="हो, दाखवा"))
+    session = deps["state"].sessions["+918286871533"]
     assert session.awaiting_dealer_confirm is True
-    reply0 = deps["reply_sender"].calls[0]["text"]
+    reply0 = deps["reply_sender"].calls[1]["text"]
     assert "Sarthak Auto" in reply0
     assert "Chinchwad" in reply0
     # Marathi CRM preferred language → localized dealer card.
@@ -1332,6 +1430,9 @@ def test_dealer_confirm_natural_phrasing_resolves_via_classifier(monkeypatch):
     )
     deps["engine"].reply = "Please share your pincode."
     processor.process(_event(message_id="m1", content="431401"))
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_share_consent is True
+    processor.process(_event(message_id="m1b", content="yes"))
     session = deps["state"].sessions["+918286871533"]
     assert session.awaiting_dealer_confirm is True
 
@@ -1434,6 +1535,8 @@ def test_crm_dealer_name_without_id_resolves_address_from_directory():
     # Dealer-confirm never stacks onto the very first reply — warm up first.
     processor.process(_event(message_id="m0", content="Hi"))
     processor.process(_event(message_id="m1", content="King EV MAX"))
+    assert dealer_share_ask("English") in deps["reply_sender"].calls[-1]["text"]
+    processor.process(_event(message_id="m1b", content="yes"))
 
     reply = deps["reply_sender"].calls[-1]["text"]
     assert "Name: Gk Motors" in reply
@@ -1456,6 +1559,7 @@ def test_unclear_reply_during_dealer_confirm_answers_without_reattaching_card():
     # Dealer-confirm never stacks onto the very first reply — warm up first.
     processor.process(_event(message_id="m0", content="Hi"))
     processor.process(_event(message_id="m1", content="King EV MAX"))
+    processor.process(_event(message_id="m1b", content="yes"))
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
 
     deps["engine"].reply = "The dealership will share downpayment details."
@@ -1491,6 +1595,7 @@ def test_wrap_up_nudges_deferred_dealer_confirm_once():
     )
     processor.process(_event(message_id="m0", content="Hi"))
     processor.process(_event(message_id="m1", content="King EV MAX"))
+    processor.process(_event(message_id="m1b", content="yes"))
     deps["engine"].reply = "Noted, thanks."
     processor.process(_event(message_id="m2", content="What is the downpayment?"))
     session = deps["state"].sessions["+918286871533"]
@@ -1523,6 +1628,7 @@ def test_wrap_up_dealer_confirm_nudge_resolves_on_yes():
     )
     processor.process(_event(message_id="m0", content="Hi"))
     processor.process(_event(message_id="m1", content="King EV MAX"))
+    processor.process(_event(message_id="m1b", content="yes"))
     deps["engine"].reply = "Noted, thanks."
     processor.process(_event(message_id="m2", content="What is the downpayment?"))
     deps["engine"].reply = "Thanks for your time!"
@@ -1563,12 +1669,17 @@ def test_pincode_during_dealer_confirm_redoes_nearest_lookup():
     # Dealer-confirm never stacks onto the very first reply — warm up first.
     processor.process(_event(message_id="m0", content="Hi"))
     processor.process(_event(message_id="m1", content="King EV MAX"))
+    processor.process(_event(message_id="m1b", content="yes"))
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
 
     deps["engine"].reply = "Let me check."
     processor.process(_event(message_id="m2", content="411048"))
 
     assert directory.calls == ["411048"]
+    # The new pincode drops the pending dealer and re-asks consent.
+    assert dealer_share_ask("English") in deps["reply_sender"].calls[-1]["text"]
+    processor.process(_event(message_id="m3", content="yes"))
+
     reply = deps["reply_sender"].calls[-1]["text"]
     assert "Shah Auto" in reply
     session = deps["state"].sessions["+918286871533"]
@@ -1602,6 +1713,7 @@ def test_crm_dealer_confirm_no_then_nearest_from_spaced_pincode():
     # Dealer-confirm never stacks onto the very first reply — warm up first.
     processor.process(_event(message_id="m0", content="hello"))
     processor.process(_event(message_id="m1", content="King EV MAX"))
+    processor.process(_event(message_id="m1b", content="हो"))
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm
 
     deps["engine"].reply = "Please share pincode."
@@ -1620,6 +1732,8 @@ def test_crm_dealer_confirm_no_then_nearest_from_spaced_pincode():
     deps["engine"].reply = "Noted."
     processor.process(_event(message_id="m3", content="41 10 35"))
     assert directory.calls == ["411035"]
+    assert dealer_share_ask("English") in deps["reply_sender"].calls[-1]["text"]
+    processor.process(_event(message_id="m4", content="हो"))
     assert "Shah Auto" in deps["reply_sender"].calls[-1]["text"]
     assert deps["state"].sessions["+918286871533"].last_dealer_code == "11689"
 
@@ -1700,6 +1814,8 @@ def test_dealer_confirm_not_stacked_on_organic_second_reply():
     # The model was told not to ask its own question this turn...
     assert "Do NOT ask any question" in deps["engine"].turns[-1].message
     # ...and the dealer-confirm ask is the one question actually sent.
+    second_reply = deps["reply_sender"].calls[-1]["text"]
+    processor.process(_event(message_id="m2b", content="yes"))
     second_reply = deps["reply_sender"].calls[-1]["text"]
     assert "Rhythm Auto" in second_reply
     assert deps["state"].sessions["+918286871533"].awaiting_dealer_confirm is True
@@ -1967,9 +2083,18 @@ def test_location_event_sets_nearest_dealer_without_llm():
     assert deps["engine"].turns == []
     assert directory.coord_calls == [(18.5204, 73.8567)]
     session = deps["state"].sessions["+918286871533"]
+    # Routed for dispose, but the contact card still needs a yes: a shared
+    # pin says WHERE they are, not that they want a phone number.
     assert session.last_dealer_code == "11689"
+    assert session.awaiting_dealer_share_consent is True
+    assert session.awaiting_dealer_confirm is False
+    assert "9000000001" not in deps["reply_sender"].calls[-1]["text"]
+
+    processor.process(_event(message_id="loc-2", content="yes"))
+    session = deps["state"].sessions["+918286871533"]
     assert session.dealer_confirmed is False
     assert session.awaiting_dealer_confirm is True
+    assert "Shah Auto" in deps["reply_sender"].calls[-1]["text"]
     reply = deps["reply_sender"].calls[-1]["text"]
     assert "Name: Shah Auto" in reply
     assert "Address:" in reply

@@ -386,6 +386,82 @@ def classify_brochure_request(user_message: str) -> bool:
     return bool(result["wants_brochure"])
 
 
+class ShareConsentState(TypedDict):
+    user_message: str
+    result: str  # "yes" | "no" | "unclear"
+
+
+class ShareConsentClassification(BaseModel):
+    result: Literal["yes", "no", "unclear"] = Field(
+        description=(
+            "The bot asked whether it may share the customer's nearest "
+            "dealership details. 'yes' if they want them (any language: "
+            "'haan', 'ok show', 'दाखवा', 'भेजो'). 'no' if they decline "
+            "('nahi', 'not now', 'later'). 'unclear' if the reply is about "
+            "something else entirely — a question, a product name, a "
+            "pincode — in which case do not assume consent."
+        )
+    )
+
+
+def _route_share_consent(state: ShareConsentState) -> str:
+    from client_processing import _is_affirmative, _is_negative
+
+    if _is_negative(state["user_message"]):
+        return "no"
+    if _is_affirmative(state["user_message"]):
+        return "yes"
+    return "classify"
+
+
+def _share_consent_yes(state: ShareConsentState) -> dict:
+    return {"result": "yes"}
+
+
+def _share_consent_no(state: ShareConsentState) -> dict:
+    return {"result": "no"}
+
+
+def _classify_share_consent(state: ShareConsentState) -> dict:
+    # Failure defaults to "unclear" — never share contact details on a guess.
+    try:
+        classifier = get_llm("fast").with_structured_output(
+            ShareConsentClassification
+        )
+        result = classifier.invoke(
+            "The bot asked the customer whether it should share their "
+            "nearest TVS dealership details. They replied (any language): "
+            f"{state['user_message']!r}. Classify their reply."
+        )
+        return {"result": result.result}
+    except Exception:
+        log.exception("share-consent classifier call failed; defaulting to unclear")
+        return {"result": "unclear"}
+
+
+share_consent_builder = StateGraph(ShareConsentState)
+share_consent_builder.add_node("yes", _share_consent_yes)
+share_consent_builder.add_node("no", _share_consent_no)
+share_consent_builder.add_node("classify", _classify_share_consent)
+share_consent_builder.add_conditional_edges(
+    START, _route_share_consent, ["yes", "no", "classify"]
+)
+share_consent_builder.add_edge("yes", END)
+share_consent_builder.add_edge("no", END)
+share_consent_builder.add_edge("classify", END)
+
+share_consent_graph = share_consent_builder.compile()
+
+
+def classify_share_consent_reply(user_message: str) -> str:
+    """Returns "yes" | "no" | "unclear" for a pending "may I share the
+    dealership details?" question — regex fast path, then LLM."""
+    result = share_consent_graph.invoke(
+        {"user_message": user_message, "result": "unclear"}
+    )
+    return result["result"]
+
+
 class LanguageSwitchState(TypedDict):
     user_message: str
     language: str  # a supported language name, or "" for no switch

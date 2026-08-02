@@ -530,6 +530,16 @@ class RedisClientState:
                     data.get("dealer_confirm_deferred") or False
                 ),
                 crm_dealer_offered=bool(data.get("crm_dealer_offered") or False),
+                awaiting_dealer_share_consent=bool(
+                    data.get("awaiting_dealer_share_consent") or False
+                ),
+                dealer_share_asked=bool(data.get("dealer_share_asked") or False),
+                dealer_share_declined=bool(
+                    data.get("dealer_share_declined") or False
+                ),
+                pending_dealer_share_code=str(
+                    data.get("pending_dealer_share_code") or ""
+                ),
                 dealer_confirmed=bool(data.get("dealer_confirmed") or False),
                 callback_requested=bool(data.get("callback_requested") or False),
                 welcome_back_sent=bool(data.get("welcome_back_sent") or False),
@@ -578,6 +588,10 @@ class RedisClientState:
             "awaiting_dealer_confirm": session.awaiting_dealer_confirm,
             "dealer_confirm_deferred": session.dealer_confirm_deferred,
             "crm_dealer_offered": session.crm_dealer_offered,
+            "awaiting_dealer_share_consent": session.awaiting_dealer_share_consent,
+            "dealer_share_asked": session.dealer_share_asked,
+            "dealer_share_declined": session.dealer_share_declined,
+            "pending_dealer_share_code": session.pending_dealer_share_code,
             "dealer_confirmed": session.dealer_confirmed,
             "callback_requested": session.callback_requested,
             "welcome_back_sent": session.welcome_back_sent,

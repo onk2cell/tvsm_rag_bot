@@ -16,6 +16,7 @@ from bot.graph import (
     classify_dealer_confirm_reply,
     classify_language_switch,
     classify_location_reply,
+    classify_share_consent_reply,
     classify_still_interested_reply,
 )
 from client_language import (
@@ -54,6 +55,7 @@ from client_static_messages import (
     acknowledgement_fallback,
     brochure_offer_ask,
     brochure_which_product_ask,
+    dealer_share_ask,
     invalid_pincode_ask,
     invalid_pincode_location_fallback,
     location_need_pincode,
@@ -242,6 +244,12 @@ class ClientSession:
     dealer_confirm_deferred: bool = False
     crm_dealer_offered: bool = False
     dealer_confirmed: bool = False
+    # Dealership details are never volunteered: we ask first, and only send
+    # the name/address/phone/map card once the customer says yes.
+    awaiting_dealer_share_consent: bool = False
+    dealer_share_asked: bool = False
+    dealer_share_declined: bool = False
+    pending_dealer_share_code: str = ""
     callback_requested: bool = False
     welcome_back_sent: bool = False
     awaiting_still_interested: bool = False
@@ -654,6 +662,23 @@ class ClientMessageProcessor:
             )
             self._state.save(session)
             return
+
+        share_consent = self._apply_dealer_share_consent(session, message)
+        if share_consent is not None:
+            message, immediate_share = share_consent
+            if immediate_share is not None:
+                self._reply_and_record(
+                    event,
+                    session=session,
+                    language=language,
+                    user_message=message,
+                    reply=immediate_share,
+                    started=started,
+                )
+                self._complete_turn(
+                    session, event["message_id"], message, immediate_share
+                )
+                return
 
         confirm_immediate = self._apply_dealer_confirm(session, message)
         if confirm_immediate is not None:
@@ -1539,6 +1564,70 @@ class ClientMessageProcessor:
         )
         return False
 
+    @staticmethod
+    def _asks_a_question(text: str) -> bool:
+        """True when the model's reply already puts a question to the customer.
+
+        Nothing deterministic may append a second question to such a reply.
+        The prompt already says "do NOT ask any question of your own" when a
+        card is coming, and the model ignores it — a customer asked "which
+        model do you want?" AND "is this dealership OK?" in one message has
+        no idea which to answer. Checking the actual output makes the stack
+        impossible instead of merely discouraged.
+        """
+        return any(mark in (text or "") for mark in ("?", "？", "﻿?"))
+
+    def _dealer_share_ask_for_session(
+        self, session: ClientSession, dealer_code: str
+    ) -> str:
+        """Arm the consent question for `dealer_code` and return its text.
+
+        ``last_dealer_code`` is set here, not on consent: which dealer the
+        lead is routed to is a CRM fact that dispose needs regardless of
+        whether the customer wanted to see the contact card. Only the
+        name/address/phone/map going out to the customer is consent-gated.
+        """
+        session.awaiting_dealer_share_consent = True
+        session.dealer_share_asked = True
+        session.pending_dealer_share_code = dealer_code
+        if dealer_code:
+            session.last_dealer_code = dealer_code
+        return dealer_share_ask(self._session_language(session))
+
+    def _apply_dealer_share_consent(
+        self,
+        session: ClientSession,
+        message: str,
+    ) -> tuple[str, str | None] | None:
+        """Handle the reply to "may I share the dealership details?".
+
+        Returns None when no consent is pending, otherwise
+        ``(engine_message, immediate_reply_or_None)``. Only a clear yes
+        releases the contact details; anything else continues the
+        conversation without them.
+        """
+        if not session.awaiting_dealer_share_consent:
+            return None
+        session.awaiting_dealer_share_consent = False
+        code = session.pending_dealer_share_code
+        session.pending_dealer_share_code = ""
+        decision = classify_share_consent_reply(message)
+        if decision == "yes":
+            session.last_dealer_code = code or session.last_dealer_code
+            session.awaiting_dealer_confirm = True
+            return message, self._dealer_confirm_ask_for_session(session)
+        if decision == "no":
+            session.dealer_share_declined = True
+            return (
+                f"{message}\n\n(Customer does not want the dealership details "
+                "right now. Acknowledge briefly, do NOT send dealership "
+                "details, and continue with the next qualification step.)"
+            ), None
+        # Unclear — they were talking about something else. Don't assume
+        # consent, and don't nag: the ask can come round again later.
+        session.dealer_share_asked = False
+        return message, None
+
     def _maybe_offer_crm_dealer(
         self,
         session: ClientSession,
@@ -1550,35 +1639,36 @@ class ClientMessageProcessor:
         # offer is mandatory once CRM has a dealer, but never stack it onto
         # the very first REAL qualification reply (from the engine) unless
         # the customer's own message already signals they're at the
-        # location step (e.g. they led with a pincode). That first reply is
-        # otherwise always the model_interest question — its own question,
-        # with no "don't ask anything yourself" guidance like the location
-        # step gets — so appending the dealer-confirm ask there stacks two
-        # questions in one message. Checking session.history isn't enough:
-        # a returning customer's still-interested exchange already writes
-        # to history before the engine is ever called, so "first reply"
-        # must track actual engine calls (session.qualification_started),
-        # not turn count.
+        # location step (e.g. they led with a pincode). Checking
+        # session.history isn't enough: a returning customer's
+        # still-interested exchange already writes to history before the
+        # engine is ever called, so "first reply" must track actual engine
+        # calls (session.qualification_started), not turn count.
         if is_first_reply and not extract_pincode(user_message):
             return reply
         if session.crm_dealer_offered or session.dealer_confirmed:
             return reply
-        if session.awaiting_dealer_confirm:
+        if session.awaiting_dealer_confirm or session.awaiting_dealer_share_consent:
+            return reply
+        if session.dealer_share_declined:
             return reply
         customer = session.customer
         if not _crm_dealer_available(customer):
             return reply
+        # The model already asked something. Appending the consent question
+        # here would put two questions in one message — the exact complaint
+        # from the 02/08 transcript. Wait for a turn we can have to ourselves.
+        if self._asks_a_question(reply):
+            return reply
         assert customer is not None
         session.crm_dealer_offered = True
-        session.awaiting_dealer_confirm = True
         resolved = self._resolve_crm_dealer(customer)
+        code = ""
         if resolved is not None and resolved.dealer_code:
-            session.last_dealer_code = resolved.dealer_code
+            code = resolved.dealer_code
         elif customer.dealership_id:
-            session.last_dealer_code = customer.dealership_id
-        ask = self._dealer_confirm_ask(
-            customer, language=self._session_language(session)
-        )
+            code = customer.dealership_id
+        ask = self._dealer_share_ask_for_session(session, code)
         return f"{reply.rstrip()}\n\n{ask}"
 
     def _retry_empty_reply(self, turn: TurnInput, output):
@@ -1631,6 +1721,8 @@ class ClientMessageProcessor:
             return None
         if session.dealer_confirmed or session.awaiting_dealer_confirm:
             return None
+        if session.awaiting_dealer_share_consent or session.dealer_share_declined:
+            return None
         pincode = extract_pincode(user_message)
         if not pincode or session.dealer_shared_for_pincode == pincode:
             return None
@@ -1651,6 +1743,14 @@ class ClientMessageProcessor:
             return reply
         if session.dealer_confirmed or session.awaiting_dealer_confirm:
             return reply
+        if session.awaiting_dealer_share_consent or session.dealer_share_declined:
+            return reply
+        # Never append to a reply that already asks something (see
+        # _asks_a_question) — the consent question must stand alone. Both
+        # checks come before the lookup: a geocode call is wasted work when
+        # we already know nothing can be appended this turn.
+        if self._asks_a_question(reply):
+            return reply
         pincode = extract_pincode(user_message)
         if not pincode or session.dealer_shared_for_pincode == pincode:
             return reply
@@ -1662,11 +1762,7 @@ class ClientMessageProcessor:
         if dealer is None:
             return reply
         session.dealer_shared_for_pincode = pincode
-        session.last_dealer_code = dealer.dealer_code
-        session.awaiting_dealer_confirm = True
-        ask = format_dealer_confirm_ask_from_dealer(
-            dealer, language=self._session_language(session)
-        )
+        ask = self._dealer_share_ask_for_session(session, dealer.dealer_code)
         return f"{reply.rstrip()}\n\n{ask}"
 
     def _maybe_handle_place_name(
@@ -1919,14 +2015,12 @@ class ClientMessageProcessor:
             self._complete_turn(session, event["message_id"], user_label, reply)
             return
 
-        session.last_dealer_code = dealer.dealer_code
         session.dealer_confirmed = False
-        session.awaiting_dealer_confirm = True
         if dealer.pincode and not session.dealer_shared_for_pincode:
             session.dealer_shared_for_pincode = dealer.pincode
-        ask = format_dealer_confirm_ask_from_dealer(
-            dealer, language=reply_language
-        )
+        # Even here the details are not volunteered: a shared pin tells us
+        # WHERE they are, not that they want a dealership's phone number.
+        ask = self._dealer_share_ask_for_session(session, dealer.dealer_code)
         reply = f"{location_thanks(reply_language)}\n\n{ask}"
         self._maybe_dispose(session, profile=None)
         self._reply_and_record(
