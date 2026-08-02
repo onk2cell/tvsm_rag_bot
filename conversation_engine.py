@@ -67,6 +67,7 @@ class TurnInput:
     history: list[dict[str, str]] = field(default_factory=list)
     product_hint: str = ""
     confirm_crm_dealer: bool = False
+    known_state: str = ""
 
 
 @dataclass
@@ -75,19 +76,35 @@ class TurnOutput:
     captured: bool = False
     profile: dict[str, Any] | None = None
     citations: list[str] = field(default_factory=list)
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 @dataclass
 class GenerateResult:
     text: str
     citations: list[str] = field(default_factory=list)
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 class LLMPort(Protocol):
     def generate(self, *, system_instruction: str, contents: list[dict]) -> GenerateResult: ...
 
 
-def build_contents(history: list[dict[str, str]], user_text: str) -> list[dict]:
+def build_contents(
+    history: list[dict[str, str]],
+    user_text: str,
+    known_state: str = "",
+) -> list[dict]:
+    """Assemble the Gemini `contents` list for one turn.
+
+    ``known_state`` is a compact snapshot of what has already been captured.
+    It rides on the CURRENT user turn rather than the system instruction so
+    the system prompt plus prior history stay byte-identical between turns —
+    that prefix is what a context cache can reuse, and moving a per-turn
+    string into it would invalidate the cache on every message.
+    """
     contents: list[dict] = []
     first_user = next(
         (index for index, turn in enumerate(history) if turn.get("role") != "model"),
@@ -96,7 +113,8 @@ def build_contents(history: list[dict[str, str]], user_text: str) -> list[dict]:
     for turn in history[first_user:]:
         role = "model" if turn.get("role") == "model" else "user"
         contents.append({"role": role, "parts": [{"text": turn["text"]}]})
-    contents.append({"role": "user", "parts": [{"text": user_text}]})
+    final = f"{known_state}\n\n{user_text}" if known_state.strip() else user_text
+    contents.append({"role": "user", "parts": [{"text": final}]})
     return contents
 
 
@@ -171,11 +189,13 @@ cannot complete it for the customer.
 8. If the user goes off-topic (not about TVS passenger three-wheelers or related info), \
 gently redirect back to qualification.
 9. When you have enough info (or the user wants to stop), WRAP UP per step above.
-10. Brochures/PDFs: you never attach files yourself. When the customer asks for one, say \
-you're sending it now (present/future tense, e.g. "Sure, sending you the brochure") — \
-NEVER claim in past tense that you already sent it or that it was delivered, since you \
-cannot see whether the system's send actually succeeded. Never say you can't send a \
-brochure, and never say the dealership will provide one.
+10. Brochures/PDFs: you never attach files yourself — the system does. Say you are \
+sending one ONLY when a system note in the message tells you it is being sent; then use \
+present/future tense ("Sure, sending you the brochure"). Without that note, do NOT say you \
+are sending, have sent, or will send any file — offer it instead ("Would you like me to \
+send the brochure?") and wait for their answer. NEVER claim in past tense that a file was \
+delivered, since you cannot see whether the send succeeded. Never say you are unable to \
+send a brochure.
 
 After the customer-facing wrap-up message ONLY (not before), output on a NEW final line a \
 single JSON object prefixed exactly with `PROFILE_JSON:` with these keys:
@@ -197,6 +217,29 @@ Do not output PROFILE_JSON until you are wrapping up.
 CAMPAIGN:
 {config["campaign_text"]}
 """
+
+
+def _extract_usage(response: Any) -> tuple[int | None, int | None]:
+    """Pull (prompt, completion) token counts off a Gemini response.
+
+    Never raise: usage is instrumentation, and a shape change in the SDK
+    must not cost the customer their reply.
+    """
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return None, None
+
+    def count(*names: str) -> int | None:
+        for name in names:
+            value = getattr(usage, name, None)
+            if isinstance(value, int):
+                return value
+        return None
+
+    return (
+        count("prompt_token_count", "input_token_count"),
+        count("candidates_token_count", "output_token_count"),
+    )
 
 
 def parse_profile_json(text: str) -> tuple[str, dict[str, Any] | None]:
@@ -240,7 +283,7 @@ class ConversationEngine:
             product_hint=turn.product_hint,
             confirm_crm_dealer=turn.confirm_crm_dealer,
         )
-        contents = build_contents(turn.history, user_text)
+        contents = build_contents(turn.history, user_text, turn.known_state)
         result = self._llm.generate(system_instruction=system, contents=contents)
 
         reply_text, profile = parse_profile_json(result.text or "")
@@ -260,6 +303,8 @@ class ConversationEngine:
             captured=captured,
             profile=profile,
             citations=list(result.citations),
+            prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
         )
 
 
@@ -284,7 +329,13 @@ class GeminiLLMAdapter:
             },
         )
         text = resp.text or ""
-        return GenerateResult(text=text, citations=_extract_citations(resp))
+        prompt_tokens, completion_tokens = _extract_usage(resp)
+        return GenerateResult(
+            text=text,
+            citations=_extract_citations(resp),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
 
 def make_engine(

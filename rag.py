@@ -1,7 +1,9 @@
 """The RAG layer: ask a question, get a grounded answer + source titles."""
 from __future__ import annotations
 
+import os
 import time
+from pathlib import Path
 
 from google import genai
 from google.genai import errors as genai_errors
@@ -9,9 +11,17 @@ from google.genai import errors as genai_errors
 import config
 
 # The Gemini client is swappable at runtime: an admin can supply a key via the
-# admin page (see web.py), which calls set_api_key() to rebuild it. We initialise
-# from GEMINI_API_KEY in the environment if it's present.
+# admin page (see web.py), which calls persist_api_key() to store and rebuild it.
+# We initialise from GEMINI_API_KEY in the environment if it's present, and a key
+# persisted to config.GEMINI_KEY_RUNTIME_PATH overrides it. Because the admin app
+# and the message worker are separate processes, the persisted key is reloaded
+# lazily whenever the file changes — see _maybe_load_runtime_key().
 _client = None
+_runtime_key_mtime: float | None = None
+
+
+def _runtime_key_path() -> Path:
+    return Path(config.GEMINI_KEY_RUNTIME_PATH)
 
 
 def set_api_key(api_key: str, validate: bool = False) -> None:
@@ -29,8 +39,68 @@ def set_api_key(api_key: str, validate: bool = False) -> None:
     _client = candidate
 
 
+def _maybe_load_runtime_key() -> None:
+    """Adopt the persisted runtime key when the file appears or changes.
+
+    Called on every get_client()/has_client() so a key set in the admin process
+    is picked up by the worker process on its next turn — no restart needed.
+    """
+    global _runtime_key_mtime
+    path = _runtime_key_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return
+    if mtime == _runtime_key_mtime:
+        return
+    key = path.read_text(encoding="utf-8").strip()
+    if key:
+        set_api_key(key)
+        _runtime_key_mtime = mtime
+
+
+def persist_api_key(api_key: str, validate: bool = True) -> None:
+    """Validate, activate, and persist an admin-supplied key to disk (0600).
+
+    Persisting under data/ lets the key survive restarts and reach the separate
+    worker process via _maybe_load_runtime_key().
+    """
+    global _runtime_key_mtime
+    if not api_key or not api_key.strip():
+        raise ValueError("API key must not be empty")
+    api_key = api_key.strip()
+    set_api_key(api_key, validate=validate)   # raises on a bad key before we save
+    path = _runtime_key_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(api_key, encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    _runtime_key_mtime = path.stat().st_mtime
+
+
+def clear_persisted_key() -> None:
+    """Remove the persisted runtime key and fall back to the env key, if any."""
+    global _client, _runtime_key_mtime
+    try:
+        _runtime_key_path().unlink()
+    except FileNotFoundError:
+        pass
+    _runtime_key_mtime = None
+    _client = None
+    if config.GEMINI_API_KEY:
+        set_api_key(config.GEMINI_API_KEY)
+
+
+def runtime_key_active() -> bool:
+    """True when a key persisted from the admin page is in effect."""
+    return _runtime_key_path().exists()
+
+
 def get_client():
     """Return the active Gemini client, or explain how to configure one."""
+    _maybe_load_runtime_key()
     if _client is None:
         raise RuntimeError(
             "Gemini API key is not configured. Set GEMINI_API_KEY in .env, "
@@ -40,11 +110,13 @@ def get_client():
 
 
 def has_client() -> bool:
+    _maybe_load_runtime_key()
     return _client is not None
 
 
 if config.GEMINI_API_KEY:
     set_api_key(config.GEMINI_API_KEY)
+_maybe_load_runtime_key()   # a persisted admin key overrides the env key
 
 SYSTEM = (
     "You are TVS Motor's helpful assistant for TVS three-wheelers. You help with their "

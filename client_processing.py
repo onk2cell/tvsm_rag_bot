@@ -5,7 +5,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Callable, Protocol, TypeVar
 
@@ -14,6 +14,8 @@ from bot.graph import (
     classify_brochure_offer_reply,
     classify_brochure_request,
     classify_dealer_confirm_reply,
+    classify_language_switch,
+    classify_location_reply,
     classify_still_interested_reply,
 )
 from client_language import (
@@ -30,8 +32,6 @@ from dealers import (
     extract_pincode,
     format_dealer_confirm_ask,
     format_dealer_confirm_ask_from_dealer,
-    looks_like_invalid_pincode,
-    looks_like_place_name,
 )
 from dispose import (
     build_dispose_payload,
@@ -48,8 +48,10 @@ from client_media_assets import (
     share_location_image_url,
     wants_product_brochure,
     wants_product_info,
+    wants_support_documents,
 )
 from client_static_messages import (
+    acknowledgement_fallback,
     brochure_offer_ask,
     brochure_which_product_ask,
     invalid_pincode_ask,
@@ -484,6 +486,12 @@ class ClientMessageProcessor:
             self._state.save(session)
             return
 
+        # A voice note is only transcribed above, so the language check has
+        # to run again here — otherwise "please speak in English" spoken
+        # aloud is never applied and the next reply reverts (bug 010802).
+        if event.get("type") == "audio" and immediate_reply is None:
+            language = self._maybe_switch_language(session, message) or language
+
         # After a pure language-menu reply, start qualification instead of
         # treating "2" / "Hindi" as the customer's product message.
         choice_text = choice_event.get("content") if choice_event is not event else event.get("content")
@@ -545,10 +553,14 @@ class ClientMessageProcessor:
 
         raw_place_text = str(event.get("content") or "").strip()
         if event.get("type") == "text" and raw_place_text:
+            # One classification per turn, shared by the pincode and
+            # place-name handlers below.
+            location_kind = self._classify_location(session, raw_place_text)
             pin_reply = self._maybe_handle_invalid_pincode(
                 session,
                 user_message=raw_place_text,
                 language=language,
+                classification=location_kind,
             )
             if pin_reply is not None:
                 self._reply_and_record(
@@ -599,6 +611,7 @@ class ClientMessageProcessor:
                 session,
                 user_message=raw_place_text,
                 language=language,
+                classification=location_kind,
             )
             if place_reply is not None:
                 self._reply_and_record(
@@ -698,9 +711,25 @@ class ClientMessageProcessor:
         # otherwise its reply plus the deterministic dealer-confirm ask
         # stack two questions in one message, regardless of which
         # qualification step the LLM happens to be on.
-        dealer_card_will_attach = confirm_crm and (
+        #
+        # The same applies to the pincode path: _attach_nearest_dealer
+        # appends a card with its own Yes/No question. Resolve that dealer
+        # up front so the guard covers it too — without this the customer
+        # got the campaign blurb, a purchase-date question AND the dealer
+        # card in one bubble (bug 010801).
+        crm_card_will_attach = confirm_crm and (
             not is_first_qualification_reply or bool(extract_pincode(raw_user_text))
         )
+        # _maybe_offer_crm_dealer runs first and sets awaiting_dealer_confirm,
+        # which short-circuits _attach_nearest_dealer — so when the CRM card
+        # wins, skip the nearest lookup entirely rather than spending a
+        # geocode on a dealer that will never be attached.
+        nearest_dealer = (
+            None
+            if crm_card_will_attach
+            else self._pending_nearest_dealer(session, raw_user_text)
+        )
+        dealer_card_will_attach = crm_card_will_attach or nearest_dealer is not None
         if dealer_card_will_attach:
             message = (
                 f"{message}\n\n(Do NOT ask any question of your own in this "
@@ -717,6 +746,7 @@ class ClientMessageProcessor:
             history=list(session.history),
             product_hint=product_hint,
             confirm_crm_dealer=confirm_crm,
+            known_state=self._known_state_block(session),
         )
         try:
             output = self._attempt(lambda: self._engine.handle_turn(turn))
@@ -738,6 +768,7 @@ class ClientMessageProcessor:
             )
             self._state.save(session)
             return
+        output = self._retry_empty_reply(turn, output)
         reply_text = self._maybe_offer_crm_dealer(
             session,
             user_message=raw_user_text,
@@ -748,6 +779,7 @@ class ClientMessageProcessor:
             session,
             user_message=message,
             reply=reply_text,
+            dealer=nearest_dealer,
         )
         reply_text = self._maybe_offer_brochure(
             session,
@@ -806,6 +838,8 @@ class ClientMessageProcessor:
             reply=reply_text,
             started=started,
             citations=output.citations,
+            prompt_tokens=output.prompt_tokens,
+            completion_tokens=output.completion_tokens,
         )
         self._complete_turn(
             session,
@@ -846,12 +880,16 @@ class ClientMessageProcessor:
         session: ClientSession,
         product: str,
         hints: tuple[str, ...] = (),
+        *,
+        include_support_docs: bool = False,
     ) -> bool:
-        """Send the brochure + warranty/PMS pack for `product`. Returns
-        True if at least one document was sent."""
+        """Send the brochure for `product` — plus the warranty/PMS PDFs only
+        when they asked about those. Returns True if anything was sent."""
         if not product or product in session.brochures_sent:
             return False
-        pack = product_document_pack(product, *hints)
+        pack = product_document_pack(
+            product, *hints, include_support_docs=include_support_docs
+        )
         if not pack:
             return False
         language = self._session_language(session)
@@ -892,8 +930,26 @@ class ClientMessageProcessor:
         """
         if not requested:
             return message, False
-        product, _ = self._resolve_brochure_product(session, user_message)
+        product, hints = self._resolve_brochure_product(session, user_message)
         if product:
+            # Decide the send BEFORE the prompt is built, so the reply can
+            # never promise a document the send path will skip. Getting this
+            # backwards is what made the bot repeat "I'm sending you the
+            # brochure" without ever sending one.
+            if product in session.brochures_sent:
+                return (
+                    f"{message}\n\n(The {product} brochure was ALREADY sent "
+                    "earlier in this chat and will NOT be sent again. Do NOT "
+                    "say you are sending it. Tell them to check the PDF sent "
+                    "earlier in this chat, then continue with the next "
+                    "qualification step.)"
+                ), False
+            if not product_document_pack(product, *hints):
+                return (
+                    f"{message}\n\n(No brochure file is available for "
+                    f"{product}. Do NOT say you are sending one. Say the "
+                    "dealership will share it, then continue.)"
+                ), False
             return (
                 f"{message}\n\n(Customer asked for a brochure/PDF. The system "
                 "will send the document(s) separately after your reply. "
@@ -915,9 +971,10 @@ class ClientMessageProcessor:
         profile: dict | None = None,
         requested: bool = False,
     ) -> None:
-        """Send brochure + warranty/PMS PDFs once the customer explicitly asks
-        for the document itself (e.g. "send brochure", "share the pdf",
-        "share catalog").
+        """Send the brochure once the customer explicitly asks for the
+        document itself (e.g. "send brochure", "share the pdf",
+        "share catalog"). The warranty/PMS PDFs ride along only when they
+        asked about warranty or servicing — one request, one file otherwise.
 
         We never push PDFs/images just because a model name was mentioned,
         and a general info question ("tell me about X") gets an offer
@@ -933,16 +990,21 @@ class ClientMessageProcessor:
         product, hints = self._resolve_brochure_product(
             session, user_message, profile
         )
+        support = wants_support_documents(user_message)
         asked = requested
         if asked:
             if not product:
                 session.awaiting_brochure_product_choice = True
                 return
-            if self._send_brochure_pack(session, product, hints):
+            if self._send_brochure_pack(
+                session, product, hints, include_support_docs=support
+            ):
                 session.awaiting_brochure_product_choice = False
             return
         if session.awaiting_brochure_product_choice and product:
-            if self._send_brochure_pack(session, product, hints):
+            if self._send_brochure_pack(
+                session, product, hints, include_support_docs=support
+            ):
                 session.awaiting_brochure_product_choice = False
 
     def _prepare_brochure_info_context(
@@ -1010,7 +1072,12 @@ class ClientMessageProcessor:
         decision = classify_brochure_offer_reply(message)
         if decision == "yes":
             _, hints = self._resolve_brochure_product(session, message)
-            sent = self._send_brochure_pack(session, product, hints)
+            sent = self._send_brochure_pack(
+                session,
+                product,
+                hints,
+                include_support_docs=wants_support_documents(message),
+            )
             if sent:
                 enriched = (
                     f"{message}\n\n(Brochure for {product} has been sent. "
@@ -1206,6 +1273,74 @@ class ClientMessageProcessor:
             "Do not re-ask facts already clear from context; only fill gaps.)"
         )
 
+    def _known_state_block(self, session: ClientSession) -> str:
+        """A one-line snapshot of everything already captured this session.
+
+        The transcript alone is not enough: even at 40 turns the model has to
+        re-derive the pincode from message four to avoid re-asking it, and it
+        does that unreliably — which is how the bot ended up asking the same
+        feature question four times in a row (bug 010805). These facts are
+        already tracked for dispose; stating them plainly costs ~40 tokens
+        and removes the guesswork.
+        """
+        profile = session.lead_profile
+        bits: list[str] = []
+
+        name = str(profile.get("lead_name") or "").strip() or self._display_customer_name(
+            session.customer
+        )
+        if name:
+            bits.append(f"name: {name}")
+
+        product = normalize_product_name(
+            str(profile.get("product_interest") or "")
+        ) or _product_hint_for(session.customer)
+        if product:
+            bits.append(f"product: {product}")
+
+        timeline = str(profile.get("purchase_timeline") or "").strip()
+        if timeline:
+            bits.append(f"purchase timeline: {timeline}")
+
+        pincode = (session.dealer_shared_for_pincode or "").strip() or str(
+            profile.get("pincode") or ""
+        ).strip()
+        if pincode:
+            bits.append(f"pincode: {pincode}")
+
+        dealer = self._pending_dealer_name(session)
+        if dealer:
+            if session.dealer_confirmed:
+                bits.append(f"dealer: {dealer} (confirmed by customer)")
+            else:
+                bits.append(f"dealer: {dealer} (not yet confirmed)")
+
+        if session.brochures_sent:
+            bits.append("brochure already sent: " + ", ".join(session.brochures_sent))
+
+        docs = [
+            label
+            for key, label in (
+                ("doc_license", "licence"),
+                ("doc_permit", "permit"),
+                ("doc_badge", "badge"),
+            )
+            if str(profile.get(key) or "").strip().lower() == "yes"
+        ]
+        if docs:
+            bits.append("documents confirmed: " + ", ".join(docs))
+
+        if session.callback_requested:
+            bits.append("callback requested")
+
+        if not bits:
+            return ""
+        return (
+            "KNOWN SO FAR — " + " · ".join(bits) + "\n"
+            "(Already captured. Do NOT ask for any of these again. "
+            "Do not repeat a question you have already asked in this chat.)"
+        )
+
     def _session_language(self, session: ClientSession) -> str:
         return (session.language or "English").strip() or "English"
 
@@ -1319,17 +1454,39 @@ class ClientMessageProcessor:
         session.dealer_confirm_deferred = True
         return message, None
 
+    def _last_bot_message(self, session: ClientSession) -> str:
+        for turn in reversed(session.history):
+            if turn.get("role") == "model":
+                return str(turn.get("text") or "")
+        return ""
+
+    def _classify_location(self, session: ClientSession, user_message: str) -> str:
+        """Decide once per turn how the customer answered about location.
+
+        Returns "place_name", "bad_pincode" or "other". The old deny-list
+        regexes decided this without knowing what the bot had just asked,
+        so chat filler ("okk", "thik hai", "hmm") was read as a city name
+        and a budget ("50000") as a malformed pin. Skip the call entirely
+        once a dealership is settled — nothing here can apply then.
+        """
+        if session.dealer_confirmed or session.awaiting_dealer_confirm:
+            return "other"
+        return classify_location_reply(
+            user_message, self._last_bot_message(session)
+        )
+
     def _maybe_handle_invalid_pincode(
         self,
         session: ClientSession,
         *,
         user_message: str,
         language: str,
+        classification: str = "",
     ) -> str | None:
         """Correct a wrong-length pin once; then fall back to live location."""
         if session.dealer_confirmed:
             return None
-        if not looks_like_invalid_pincode(user_message):
+        if classification != "bad_pincode":
             return None
         session.invalid_pincode_attempts += 1
         lang = language or self._session_language(session)
@@ -1424,12 +1581,71 @@ class ClientMessageProcessor:
         )
         return f"{reply.rstrip()}\n\n{ask}"
 
+    def _retry_empty_reply(self, turn: TurnInput, output):
+        """Ask again when the model returns nothing.
+
+        Gemini occasionally answers a closer like "ok" or "thik hai" with an
+        empty string. That used to be dropped silently, so the customer got
+        no reply at all and had to send "hello" to get the bot talking again
+        (bug 240711). Re-ask with an explicit instruction rather than sending
+        a canned line, so the reply stays in the flow of the conversation.
+        """
+        if (output.reply_text or "").strip():
+            return output
+        nudged = TurnInput(
+            session_id=turn.session_id,
+            language=turn.language,
+            message=(
+                f"{turn.message}\n\n(The customer sent a short "
+                "acknowledgement. Reply with one short line in "
+                f"{turn.language}: acknowledge them and ask the next "
+                "qualification question, or thank them and close if "
+                "everything is already captured. Never reply with nothing.)"
+            ),
+            channel=turn.channel,
+            source=turn.source,
+            history=turn.history,
+            product_hint=turn.product_hint,
+            confirm_crm_dealer=turn.confirm_crm_dealer,
+        )
+        try:
+            retried = self._engine.handle_turn(nudged)
+        except Exception:
+            log.exception("empty-reply retry failed")
+            return output
+        if (retried.reply_text or "").strip():
+            return retried
+        # Twice empty — going silent is the one thing we must not do.
+        return replace(
+            output, reply_text=acknowledgement_fallback(turn.language)
+        )
+
+    def _pending_nearest_dealer(self, session: ClientSession, user_message: str):
+        """The dealer ``_attach_nearest_dealer`` would append this turn, or None.
+
+        Resolved before the LLM call so the prompt can suppress the model's
+        own question whenever a dealer-confirm card is going to follow it.
+        Read-only — the session is mutated by _attach_nearest_dealer.
+        """
+        if self._dealer_directory is None:
+            return None
+        if session.dealer_confirmed or session.awaiting_dealer_confirm:
+            return None
+        pincode = extract_pincode(user_message)
+        if not pincode or session.dealer_shared_for_pincode == pincode:
+            return None
+        try:
+            return self._dealer_directory.find_nearest_by_pincode(pincode)
+        except Exception:
+            return None
+
     def _attach_nearest_dealer(
         self,
         session: ClientSession,
         *,
         user_message: str,
         reply: str,
+        dealer=None,
     ) -> str:
         if self._dealer_directory is None:
             return reply
@@ -1438,10 +1654,11 @@ class ClientMessageProcessor:
         pincode = extract_pincode(user_message)
         if not pincode or session.dealer_shared_for_pincode == pincode:
             return reply
-        try:
-            dealer = self._dealer_directory.find_nearest_by_pincode(pincode)
-        except Exception:
-            return reply
+        if dealer is None:
+            try:
+                dealer = self._dealer_directory.find_nearest_by_pincode(pincode)
+            except Exception:
+                return reply
         if dealer is None:
             return reply
         session.dealer_shared_for_pincode = pincode
@@ -1458,6 +1675,7 @@ class ClientMessageProcessor:
         *,
         user_message: str,
         language: str,
+        classification: str = "",
     ) -> str | None:
         """If the customer sends a city/area name, redirect to pin or live location."""
         if session.dealer_confirmed or session.awaiting_dealer_confirm:
@@ -1474,7 +1692,7 @@ class ClientMessageProcessor:
             return None
         if doesnt_know_pincode(user_message) or is_bare_dont_know(user_message):
             return None
-        if extract_pincode(user_message) or not looks_like_place_name(user_message):
+        if extract_pincode(user_message) or classification != "place_name":
             return None
         # Caption off — place_redirect_message is the single text ask.
         self._send_share_location_guide(session, with_caption=False)
@@ -1780,6 +1998,23 @@ class ClientMessageProcessor:
             None,
         )
 
+    def _maybe_switch_language(self, session: ClientSession, text: str) -> str:
+        """Apply a mid-chat language change the customer asked for.
+
+        Returns the session language after the check. Works on transcribed
+        voice notes too — a customer who said "I want to speak in English"
+        in a voice note got one English reply and then Marathi again,
+        because only typed text ever reached this path (bug 010802).
+        """
+        switched = classify_language_switch(text or "")
+        if (
+            switched
+            and switched in SUPPORTED_LANGUAGES
+            and switched != session.language
+        ):
+            session.language = switched
+        return session.language
+
     def _resolve_language(self, session: ClientSession, event: dict) -> str | None:
         """Return session language, or None when the language menu was just sent."""
         content = (event.get("content") or "").strip()
@@ -1801,13 +2036,7 @@ class ClientMessageProcessor:
             # meant as "yes" would otherwise get misread as "switch to
             # English" (1 = English in the language menu).
             if event.get("type") == "text" and not session.awaiting_still_interested:
-                switched = parse_language_choice(content)
-                if (
-                    switched
-                    and switched != session.language
-                    and is_language_only_reply(content, switched)
-                ):
-                    session.language = switched
+                self._maybe_switch_language(session, content)
             return session.language
 
         # Fresh session (including after 4h Redis TTL expiry): always show the
@@ -1829,6 +2058,8 @@ class ClientMessageProcessor:
         status: str = "ok",
         error: str = "",
         needs_review: bool = False,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
     ) -> None:
         if not reply.strip():
             # The model occasionally returns an empty reply on closers like
@@ -1854,6 +2085,8 @@ class ClientMessageProcessor:
                 model=config.MODEL,
                 citations=citations,
                 needs_review=True,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
             )
             raise
         self._interactions.record_exchange(
@@ -1869,6 +2102,8 @@ class ClientMessageProcessor:
             model=config.MODEL,
             citations=citations,
             needs_review=needs_review,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
 
     def _attempt(self, operation: Callable[[], "_T"]) -> "_T":

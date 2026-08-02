@@ -12,7 +12,8 @@ GEMINI_API_KEY = _config.GEMINI_API_KEY
 FILE_SEARCH_STORE = _config.FILE_SEARCH_STORE
 MODEL_SMART = _config.MODEL
 
-# No separate "fast" Gemini model is configured in production yet — default
-# to the same model, override via GEMINI_MODEL_FAST when one is needed
-# (e.g. a future non-grounded classifier/tool-routing call).
+# Classifier tier: small structured-output calls (location, language switch,
+# brochure intent) where the cheapest model is enough. Defaults to the same
+# model as MODEL_SMART so a single GEMINI_MODEL change moves both; set
+# GEMINI_MODEL_FAST to split the tiers.
 MODEL_FAST = os.environ.get("GEMINI_MODEL_FAST", _config.MODEL)

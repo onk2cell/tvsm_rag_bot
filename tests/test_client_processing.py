@@ -315,7 +315,6 @@ def test_brochure_ask_then_product_name_sends_pdf(monkeypatch):
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
         "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
-        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
     ]
     session = deps["state"].sessions["+918286871533"]
     assert session.brochures_sent == ["King EV MAX"]
@@ -323,7 +322,8 @@ def test_brochure_ask_then_product_name_sends_pdf(monkeypatch):
 
 
 def test_explicit_brochure_request_sends_pdf_once(monkeypatch):
-    """An explicit "send brochure" request sends the full pack once."""
+    """An explicit "send brochure" request sends the brochure once —
+    just the brochure, not the PMS/warranty pack (bug 010804)."""
     del monkeypatch  # CDN URLs are absolute; no media-base stub needed
     processor, deps = _processor()
     deps["engine"].reply = "Great choice — King Deluxe."
@@ -338,16 +338,6 @@ def test_explicit_brochure_request_sends_pdf_once(monkeypatch):
             "link": "https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf",
             "caption": "King Deluxe brochure",
         },
-        {
-            "mobile": "+918286871533",
-            "link": "https://1.jamoutsourcing.com/f/Deluxe-PMS-Schedule.pdf",
-            "caption": "King Deluxe PMS schedule",
-        },
-        {
-            "mobile": "+918286871533",
-            "link": "https://1.jamoutsourcing.com/f/Deluxe-Warranty-Policy-new.pdf",
-            "caption": "King Deluxe warranty policy",
-        },
     ]
     assert deps["state"].sessions["+918286871533"].brochures_sent == ["King Deluxe"]
 
@@ -356,8 +346,10 @@ def test_explicit_brochure_request_sends_pdf_once(monkeypatch):
     processor.process(
         _event(message_id="m3", content="Send me the King Deluxe brochure again")
     )
-    # Pack is sent once per product per session (brochure + PMS + warranty).
-    assert len(deps["reply_sender"].document_calls) == 3
+    # Sent once per product per session, and the repeat ask adds nothing.
+    assert len(deps["reply_sender"].document_calls) == 1
+    # ...and the repeat ask must not have the model claim a second send.
+    assert "ALREADY sent" in deps["engine"].turns[-1].message
 
 
 def test_brochure_request_resolves_product_from_earlier_history(monkeypatch):
@@ -378,7 +370,6 @@ def test_brochure_request_resolves_product_from_earlier_history(monkeypatch):
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
         "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
-        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
     ]
 
 
@@ -438,7 +429,6 @@ def test_brochure_offer_accepted_sends_pack(monkeypatch):
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
         "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
-        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
     ]
     session = deps["state"].sessions["+918286871533"]
     assert session.awaiting_brochure_offer is False
@@ -464,7 +454,6 @@ def test_brochure_offer_accepted_with_bhejo_sends_pack(monkeypatch):
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
         "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
-        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
     ]
     # Must not have fallen into the share-location place-name path.
     texts = " ".join(c.get("text") or "" for c in deps["reply_sender"].calls)
@@ -575,7 +564,6 @@ def test_engine_profile_product_sends_brochure_when_requested(monkeypatch):
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
         "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
-        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
     ]
 
 
@@ -610,7 +598,6 @@ def test_crm_product_enquired_sends_brochure_when_requested(monkeypatch):
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
         "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
-        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
     ]
 
 
@@ -636,7 +623,6 @@ def test_marathi_explicit_brochure_request_sends_pdf(monkeypatch):
     links = [call["link"] for call in deps["reply_sender"].document_calls]
     assert links == [
         "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
-        "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
     ]
 
 
@@ -664,6 +650,10 @@ def test_invalid_pincode_asks_once_then_offers_location(monkeypatch):
     monkeypatch.setattr(
         "client_media_assets.media_base_url",
         lambda: "https://example.com/media",
+    )
+    monkeypatch.setattr(
+        "client_processing.classify_location_reply",
+        lambda _msg, _last="": "bad_pincode",
     )
     processor, deps = _processor()
 
@@ -1362,6 +1352,10 @@ def test_city_name_redirects_to_pincode_or_location_only(monkeypatch):
     monkeypatch.setattr(
         "client_media_assets.media_base_url",
         lambda: "https://example.com/media",
+    )
+    monkeypatch.setattr(
+        "client_processing.classify_location_reply",
+        lambda _msg, _last="": "place_name",
     )
     directory = FakeDealerDirectory(
         Dealer(

@@ -40,7 +40,9 @@ def chatbot(state: BotState) -> dict:
         product_hint=state.get("product_hint", ""),
         confirm_crm_dealer=state.get("confirm_crm_dealer", False),
     )
-    contents = build_contents(state["history"], state["user_text"])
+    contents = build_contents(
+        state["history"], state["user_text"], state.get("known_state", "")
+    )
     result = get_llm("smart").generate(system_instruction=system_instruction, contents=contents)
     reply_text, profile = parse_profile_json(result.text or "")
     return {
@@ -48,6 +50,8 @@ def chatbot(state: BotState) -> dict:
         "lead_profile": profile,
         "captured": profile is not None,
         "citations": list(result.citations),
+        "prompt_tokens": result.prompt_tokens,
+        "completion_tokens": result.completion_tokens,
     }
 
 
@@ -380,3 +384,218 @@ def classify_brochure_request(user_message: str) -> bool:
     path, then soft-signal + LLM for other languages/phrasing."""
     result = brochure_request_graph.invoke({"user_message": user_message})
     return bool(result["wants_brochure"])
+
+
+class LanguageSwitchState(TypedDict):
+    user_message: str
+    language: str  # a supported language name, or "" for no switch
+
+
+class LanguageSwitchClassification(BaseModel):
+    language: Literal[
+        "English",
+        "Hindi",
+        "Marathi",
+        "Telugu",
+        "Tamil",
+        "Kannada",
+        "Malayalam",
+        "none",
+    ] = Field(
+        description=(
+            "The language the customer is ASKING TO BE REPLIED IN, if they "
+            "asked to switch at all — e.g. 'can you talk in English', "
+            "'हिंदी में बात करो', 'मराठीत बोला', 'speak english please'. "
+            "Answer 'none' if they are not requesting a language change: "
+            "merely writing in a language is NOT a request, and neither is "
+            "mentioning a language in passing."
+        )
+    )
+
+
+# Soft gate: only spend a call when the message plausibly asks for a switch.
+_LANGUAGE_SWITCH_SOFT_RE = re.compile(
+    r"(?i)("
+    r"english|hindi|marathi|telugu|tamil|kannada|malayalam|malyalam|"
+    r"हिंदी|हिन्दी|मराठी|తెలుగు|தமிழ்|ಕನ್ನಡ|മലയാളം|"
+    r"\b(speak|talk|語|language|bhasha|bhaasha)\b|"
+    r"भाषा|भाषेत|बोल|बात\s*कर"
+    r")"
+)
+
+
+def _route_language_switch(state: LanguageSwitchState) -> str:
+    from client_language import parse_language_choice
+
+    message = state["user_message"] or ""
+    # Menu-style replies ("2", "Hindi", "मराठी") are unambiguous.
+    choice = parse_language_choice(message)
+    if choice and len(message.strip()) <= 24:
+        return "explicit"
+    if not _LANGUAGE_SWITCH_SOFT_RE.search(message):
+        return "none"
+    return "classify"
+
+
+def _language_switch_explicit(state: LanguageSwitchState) -> dict:
+    from client_language import parse_language_choice
+
+    return {"language": parse_language_choice(state["user_message"] or "")}
+
+
+def _language_switch_none(state: LanguageSwitchState) -> dict:
+    return {"language": ""}
+
+
+def _classify_language_switch(state: LanguageSwitchState) -> dict:
+    # Failure means "no switch" — keep replying in the language already in
+    # use rather than guessing a new one.
+    try:
+        classifier = get_llm("fast").with_structured_output(
+            LanguageSwitchClassification
+        )
+        result = classifier.invoke(
+            "In a TVS three-wheeler sales WhatsApp chat the customer said: "
+            f"{state['user_message']!r}. Are they asking the bot to reply in "
+            "a different language, and which one?"
+        )
+        language = result.language
+        return {"language": "" if language == "none" else language}
+    except Exception:
+        log.exception("language-switch classifier call failed; defaulting to none")
+        return {"language": ""}
+
+
+language_switch_builder = StateGraph(LanguageSwitchState)
+language_switch_builder.add_node("explicit", _language_switch_explicit)
+language_switch_builder.add_node("none", _language_switch_none)
+language_switch_builder.add_node("classify", _classify_language_switch)
+language_switch_builder.add_conditional_edges(
+    START, _route_language_switch, ["explicit", "none", "classify"]
+)
+language_switch_builder.add_edge("explicit", END)
+language_switch_builder.add_edge("none", END)
+language_switch_builder.add_edge("classify", END)
+
+language_switch_graph = language_switch_builder.compile()
+
+
+def classify_language_switch(user_message: str) -> str:
+    """The language the customer asked to be answered in, or "".
+
+    The old check required the whole message to parse as a language name and
+    be under 24 characters, so "can you please speak in english" was ignored
+    — and it never ran on voice notes at all (bug 010802 / 230701).
+    """
+    result = language_switch_graph.invoke(
+        {"user_message": user_message, "language": ""}
+    )
+    return result["language"] or ""
+
+
+class LocationReplyState(TypedDict):
+    last_bot_message: str
+    user_message: str
+    result: str  # "place_name" | "bad_pincode" | "other"
+
+
+class LocationReplyClassification(BaseModel):
+    result: Literal["place_name", "bad_pincode", "other"] = Field(
+        description=(
+            "Classify ONLY how the customer answered a request for their "
+            "location. 'place_name' if they named a city, town, area, "
+            "locality or district instead of giving a pincode (e.g. "
+            "'Parbhani', 'Andheri west', 'मी नाशिकहून आहे'). "
+            "'bad_pincode' if they clearly meant to give a pincode but it "
+            "is not a valid 6-digit Indian pin (e.g. '41103', '4110355'). "
+            "'other' for EVERYTHING else — acknowledgements ('ok', 'okk', "
+            "'thik hai', 'haa', 'hmm', 'done'), thanks, questions, "
+            "product talk, a budget or a year that happens to be numeric, "
+            "or any message that is not them stating where they are. When "
+            "in doubt answer 'other' — the normal conversation handles it."
+        )
+    )
+
+
+# High-precision fast path: the customer names the field themselves, so
+# "pincode 41103" needs no LLM. A bare number does NOT qualify — "50000"
+# is a budget as often as a typo'd pin, and only the last bot message
+# tells them apart.
+_EXPLICIT_PIN_RE = re.compile(
+    r"(?i)\b(pin|pin\s*code|pincode|postal\s*code|पिनकोड|पिन\s*कोड)\b"
+)
+
+
+def _route_location_reply(state: LocationReplyState) -> str:
+    # A valid pincode needs no classification — the caller handles it.
+    from dealers import extract_pincode
+
+    message = state["user_message"] or ""
+    if extract_pincode(message):
+        return "other"
+    if not message.strip():
+        return "other"
+    if _EXPLICIT_PIN_RE.search(message) and re.search(r"\d{3,8}", message):
+        return "bad_pincode"
+    return "classify"
+
+
+def _location_reply_bad_pincode(state: LocationReplyState) -> dict:
+    return {"result": "bad_pincode"}
+
+
+def _location_reply_other(state: LocationReplyState) -> dict:
+    return {"result": "other"}
+
+
+def _classify_location_reply(state: LocationReplyState) -> dict:
+    # Failure defaults to "other" so the turn falls through to normal
+    # qualification rather than being hijacked by a canned location reply.
+    try:
+        classifier = get_llm("fast").with_structured_output(
+            LocationReplyClassification
+        )
+        result = classifier.invoke(
+            "In a TVS three-wheeler sales WhatsApp chat, the bot's last "
+            f"message was: {state['last_bot_message']!r}. The customer "
+            f"replied (any language): {state['user_message']!r}. "
+            "Did they answer with a place name, a malformed pincode, or "
+            "something else entirely?"
+        )
+        return {"result": result.result}
+    except Exception:
+        log.exception("location-reply classifier call failed; defaulting to other")
+        return {"result": "other"}
+
+
+location_reply_builder = StateGraph(LocationReplyState)
+location_reply_builder.add_node("other", _location_reply_other)
+location_reply_builder.add_node("bad_pincode", _location_reply_bad_pincode)
+location_reply_builder.add_node("classify", _classify_location_reply)
+location_reply_builder.add_conditional_edges(
+    START, _route_location_reply, ["other", "bad_pincode", "classify"]
+)
+location_reply_builder.add_edge("other", END)
+location_reply_builder.add_edge("bad_pincode", END)
+location_reply_builder.add_edge("classify", END)
+
+location_reply_graph = location_reply_builder.compile()
+
+
+def classify_location_reply(user_message: str, last_bot_message: str = "") -> str:
+    """Returns "place_name" | "bad_pincode" | "other".
+
+    Replaces the old deny-list regexes (``looks_like_place_name`` /
+    ``looks_like_invalid_pincode`` as *gates*): a deny-list treats every
+    unlisted word as a city, so ordinary chat filler ("okk", "thik hai",
+    "hmm") was answered with the share-location card. The LLM sees what the
+    bot actually just asked, so it can tell "Parbhani" from "okay".
+    """
+    result = location_reply_graph.invoke(
+        {
+            "user_message": user_message,
+            "last_bot_message": last_bot_message,
+            "result": "other",
+        }
+    )
+    return result["result"]

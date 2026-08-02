@@ -1,6 +1,8 @@
 # Secrets — NEVER commit these
 .env
 .env.local
+.env.bak*
+.env.*.bak
 *.key
 compose.override.yaml
 

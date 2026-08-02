@@ -16,25 +16,6 @@ DEFAULT_DEALERS_PATH = Path("data/dealers.json")
 DEFAULT_GEOCODE_CACHE_PATH = Path("data/pincode_geocode_cache.json")
 # Reject city/area routing when nearest listed dealer is farther than this.
 MAX_PLACE_DEALER_KM = 120.0
-_PLACE_BLOCKLIST_RE = re.compile(
-    r"(?i)\b("
-    r"king|deluxe|duramax|ev\s*max|price|gadi|"
-    r"brochure|brocher|brochar|borcher|broucher|broshar|broshure|pdf|info|details|"
-    r"bhejo|bhej|भेजो|पाठवा|send|"
-    r"pincode|pin\s*code|location|callback|yes|no|ok|okay|hi|hello|hey|"
-    r"nahi|nahin|don't|dont|know|mahit|परवड|किंमत|"
-    # Common chat words that must never be mistaken for a city/area name.
-    r"call|phone|please|plz|pls|me|my|you|thanks|thank|want|need|"
-    r"send|share|help|buy|today|tomorrow|month|week|good|morning|"
-    r"namaste|namaskar|कॉल|फोन|पाहिजे|करा|धन्यवाद|नमस्कार|नमस्ते|"
-    r"हवी|हवा|घ्यायच|खरेदी|चालेल|माहिती|माहित|नाही|नहीं|नही|पता|मालूम|"
-    r"pata|malum|maloom|mahit|idk|dunno|sure"
-    r")\b"
-)
-_PLACE_NAME_RE = re.compile(
-    r"^[\w\s.'\-]{3,40}$",
-    re.UNICODE,
-)
 
 
 @dataclass(frozen=True)
@@ -69,50 +50,12 @@ def extract_pincode(text: str | None) -> str:
     return match.group(1) if match else ""
 
 
-def looks_like_invalid_pincode(text: str | None) -> bool:
-    """True when the customer tried a pin that is not a valid 6-digit Indian pin.
-
-    Catches wrong length (<6 or >6, but not 10-digit mobiles) and pins that
-    start with 0. Valid pins return False (use ``extract_pincode`` instead).
-    """
-    if not text or extract_pincode(text):
-        return False
-    raw = " ".join(text.strip().split())
-    if not raw:
-        return False
-    collapsed = re.sub(r"[\s.\-]", "", raw)
-    if re.fullmatch(r"\d{3,5}", collapsed) or re.fullmatch(r"\d{7,8}", collapsed):
-        return True
-    if re.fullmatch(r"0\d{5}", collapsed):
-        return True
-    if re.search(r"(?i)\b(pin|pincode|postal\s*code|पिनकोड|पिन\s*कोड)\b", raw):
-        groups = re.findall(r"\d+", raw)
-        if not groups:
-            return False
-        if any(3 <= len(group) <= 8 for group in groups):
-            return True
-    if len(raw) <= 24:
-        match = re.fullmatch(
-            r"(?i)(?:pin(?:\s*code)?|pincode|postal\s*code)?\s*[:\-]?\s*(\d{3,8})\s*",
-            raw,
-        )
-        if match and not extract_pincode(match.group(1)):
-            return True
-    return False
-
-
-def looks_like_place_name(text: str | None) -> bool:
-    """True for short city/area replies like ``Parbhani`` (not product/chat filler)."""
-    raw = " ".join((text or "").strip().split())
-    if not raw or extract_pincode(raw):
-        return False
-    if len(raw.split()) > 4:
-        return False
-    if not _PLACE_NAME_RE.fullmatch(raw):
-        return False
-    if _PLACE_BLOCKLIST_RE.search(raw):
-        return False
-    return True
+# NOTE: ``looks_like_invalid_pincode`` and ``looks_like_place_name`` used to
+# live here and gated the share-location replies. Both were deny-lists, so
+# every unlisted word became a city name ("okk", "thik hai", "hmm") and every
+# short number became a typo'd pin (a budget of "50000", a year "2025") — and
+# neither knew what the bot had just asked. bot.graph.classify_location_reply
+# makes that call now, with the last bot message as context.
 
 
 def haversine_km(

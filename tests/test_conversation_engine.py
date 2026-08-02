@@ -162,10 +162,13 @@ def test_brochure_rule_tells_llm_system_handles_delivery(stores):
     config_store, _, _ = stores
     system = build_system_instruction(config_store.get(), "English")
     assert "never attach files yourself" in system.lower()
-    assert "never say you can't send a brochure" in system.lower()
-    assert "never say the dealership will provide one" in system.lower()
+    assert "never say you are unable to send a brochure" in system.lower()
+    # Claiming a send is allowed ONLY when the system said it is sending.
+    # Without that, the bot promised brochures nobody ever sent (bug 010805).
+    assert "only when a system note" in system.lower()
+    assert "offer it instead" in system.lower()
     # Must not assert a completed send as fact — only the deterministic
-    # sender (gated on a regex the LLM has no visibility into) knows that.
+    # sender knows whether the document actually went out.
     assert "never claim in past tense" in system.lower()
 
 

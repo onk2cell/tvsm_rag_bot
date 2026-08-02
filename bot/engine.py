@@ -31,12 +31,15 @@ class LangGraphEngine:
             "language": turn.language,
             "product_hint": turn.product_hint,
             "confirm_crm_dealer": turn.confirm_crm_dealer,
+            "known_state": turn.known_state,
             "history": turn.history,
             "user_text": user_text,
             "reply_text": "",
             "captured": False,
             "lead_profile": None,
             "citations": [],
+            "prompt_tokens": None,
+            "completion_tokens": None,
         }
         result = graph.invoke(state)
 
@@ -57,6 +60,8 @@ class LangGraphEngine:
             captured=captured,
             profile=profile,
             citations=list(result.get("citations") or []),
+            prompt_tokens=result.get("prompt_tokens"),
+            completion_tokens=result.get("completion_tokens"),
         )
 
 

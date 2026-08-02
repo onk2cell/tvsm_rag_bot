@@ -132,6 +132,8 @@ class InteractionStore:
         model: str = "",
         citations: list[str] | None = None,
         needs_review: bool = False,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
     ) -> tuple[int | None, int]:
         """Atomically save a user turn, when present, and its assistant response."""
         with self._connect() as connection:
@@ -161,6 +163,8 @@ class InteractionStore:
                 model=model,
                 citations=citations,
                 needs_review=needs_review,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
             )
             return user_id, int(cursor.lastrowid)
 
@@ -263,7 +267,9 @@ class InteractionStore:
                         citations TEXT NOT NULL DEFAULT '[]',
                         needs_review INTEGER NOT NULL DEFAULT 0,
                         reviewed_at TEXT,
-                        review_note TEXT NOT NULL DEFAULT ''
+                        review_note TEXT NOT NULL DEFAULT '',
+                        prompt_tokens INTEGER,
+                        completion_tokens INTEGER
                     );
                     CREATE INDEX IF NOT EXISTS idx_interactions_session
                         ON interactions(session, id);
@@ -275,8 +281,29 @@ class InteractionStore:
                         ON interactions(timestamp);
                     """
                 )
+                self._add_missing_columns(connection)
             self._initialized = True
             self.cleanup_expired()
+
+    @staticmethod
+    def _add_missing_columns(connection: sqlite3.Connection) -> None:
+        """Bring an already-created table up to the current schema.
+
+        CREATE TABLE IF NOT EXISTS is a no-op on an existing database, so
+        columns added after the first deployment need an explicit ALTER.
+        """
+        existing = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(interactions)")
+        }
+        for column, ddl in (
+            ("prompt_tokens", "INTEGER"),
+            ("completion_tokens", "INTEGER"),
+        ):
+            if column not in existing:
+                connection.execute(
+                    f"ALTER TABLE interactions ADD COLUMN {column} {ddl}"
+                )
 
     def _connect(self, *, initialize: bool = True) -> sqlite3.Connection:
         if initialize:
@@ -292,8 +319,9 @@ class InteractionStore:
             """
             INSERT INTO interactions (
                 timestamp, session, channel, source, language, role, message,
-                latency_ms, status, error, model, citations, needs_review
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                latency_ms, status, error, model, citations, needs_review,
+                prompt_tokens, completion_tokens
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 self._now(),
@@ -309,6 +337,8 @@ class InteractionStore:
                 values.get("model", ""),
                 json.dumps(values.get("citations") or [], ensure_ascii=False),
                 int(values.get("needs_review", False)),
+                values.get("prompt_tokens"),
+                values.get("completion_tokens"),
             ),
         )
 

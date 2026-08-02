@@ -227,6 +227,15 @@ _STILL_INTERESTED_NO_THANKS = {
     ),
 }
 
+# Last resort only: the model returned an empty reply twice in a row. Better
+# an open question than silence — the customer used to get nothing back and
+# had to type "hello" to restart the bot (bug 240711).
+_ACKNOWLEDGEMENT_FALLBACK = {
+    "English": "Is there anything else I can help you with?",
+    "Hindi": "क्या मैं आपकी और कोई मदद कर सकता हूँ?",
+    "Marathi": "मी तुम्हाला आणखी काही मदत करू शकतो का?",
+}
+
 _BROCHURE_OFFER_ASK = {
     "English": "Would you like me to send you the brochure for more details?",
     "Hindi": "क्या आप चाहेंगे कि मैं आपको अधिक जानकारी के लिए ब्रोशर भेजूं?",
@@ -358,6 +367,10 @@ def welcome_back_still_interested(
 
 def still_interested_no_thanks(language: str = "English") -> str:
     return _STILL_INTERESTED_NO_THANKS[_lang(language)]
+
+
+def acknowledgement_fallback(language: str = "English") -> str:
+    return _ACKNOWLEDGEMENT_FALLBACK[_lang(language)]
 
 
 def brochure_offer_ask(language: str = "English") -> str:

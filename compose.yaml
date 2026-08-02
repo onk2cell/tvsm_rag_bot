@@ -38,6 +38,26 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Admin control panel — edit live bot config + set the runtime Gemini key.
+  # Shares ./data with the worker, so saved config + key reach it on the next turn.
+  admin:
+    profiles: ["client"]
+    build: .
+    command: uvicorn web:app --host 0.0.0.0 --port 8002
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      CLIENT_ENV: production
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8006:8002"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   client-worker:
     profiles: ["client"]
     build: .

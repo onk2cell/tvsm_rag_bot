@@ -14,6 +14,7 @@ later phase, once that's been proven safe against the regression suite.
 """
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from typing import Any
 
@@ -30,8 +31,6 @@ from dealers import (
     extract_coordinates,
     extract_pincode,
     format_dealer_reply,
-    looks_like_invalid_pincode,
-    looks_like_place_name,
 )
 from dispose import DisposePayload, build_dispose_payload
 
@@ -62,16 +61,20 @@ def resolve_dealer_location(location: str, directory: DealerDirectory | None = N
             return f"I couldn't find a TVS dealer near pincode {pincode}."
         return format_dealer_reply(dealer, customer_pincode=pincode)
 
-    if looks_like_invalid_pincode(location):
+    # Unlike the webhook path, this runs only after the model decided the
+    # text IS a location, so no place-name deny-list is needed here — a
+    # bare number that isn't a valid pin is a typo, anything else is a
+    # place the directory can accept or reject on its own.
+    if re.fullmatch(r"[\d\s.\-]+", location.strip() or " "):
         return "That doesn't look like a valid 6-digit pincode. Please share your pincode."
 
-    if looks_like_place_name(location):
-        dealer = directory.find_nearest_by_place(location)
-        if dealer is None:
-            return f"I couldn't find a TVS dealer near {location}."
-        return format_dealer_reply(dealer)
-
-    return "Please share your pincode so I can find the nearest TVS dealer."
+    dealer = directory.find_nearest_by_place(location)
+    if dealer is None:
+        return (
+            "I couldn't find a TVS dealer for that. Please share your 6-digit "
+            "pincode or your WhatsApp current location."
+        )
+    return format_dealer_reply(dealer)
 
 
 @tool

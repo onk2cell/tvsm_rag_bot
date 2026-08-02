@@ -15,8 +15,14 @@ def _require(name: str) -> str:
 # --- Gemini ---
 # Optional: if empty, an admin can supply the key at runtime on the admin page.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# Where a key set on the admin page is persisted. Lives under data/ (gitignored,
+# mounted into the worker) so the runtime key survives restarts and reaches the
+# separate worker process. rag.get_client() reloads it when the file changes.
+GEMINI_KEY_RUNTIME_PATH = os.environ.get(
+    "GEMINI_KEY_RUNTIME_PATH", "data/gemini_key.txt"
+)
 FILE_SEARCH_STORE = os.environ.get("FILE_SEARCH_STORE", "")
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 GEMINI_TTS_MODEL = os.environ.get("GEMINI_TTS_MODEL", "gemini-2.5-flash-preview-tts")
 GEMINI_TTS_VOICE = os.environ.get("GEMINI_TTS_VOICE", "Kore")
 MAX_TTS_CHARS = int(os.environ.get("MAX_TTS_CHARS", "1500"))
@@ -65,7 +71,12 @@ ADMIN_CONFIG_PATH = os.environ.get("ADMIN_CONFIG_PATH", "data/admin_config.json"
 
 # --- Redis / behaviour ---
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
-MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "6"))
+# Turns kept in the prompt. 6 meant the model saw only the last 12 messages
+# and re-asked questions it had already asked. 40 is far past any real lead
+# conversation while still capping a pathological session; the KNOWN SO FAR
+# block (see client_processing._known_state_block) carries the captured
+# facts forward regardless, so truncation is no longer lossy.
+MAX_HISTORY_TURNS = int(os.environ.get("MAX_HISTORY_TURNS", "40"))
 HISTORY_TTL_SEC = int(os.environ.get("HISTORY_TTL_SEC", str(24 * 3600)))
 RATE_LIMIT_PER_MIN = int(os.environ.get("RATE_LIMIT_PER_MIN", "12"))
 MAX_AUDIO_BYTES = int(os.environ.get("MAX_AUDIO_BYTES", str(5 * 1024 * 1024)))

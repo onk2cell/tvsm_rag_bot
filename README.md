@@ -52,6 +52,23 @@ Smoke (optional):
 bash test_mock_stack.sh
 ```
 
+## Admin panel
+
+A single-page control panel (`web.py` + `assets/admin.html`) edits the **live**
+bot config — bot name, welcome/intro text per language, campaign text, voice
+policy, capture fields, flow steps, entry-source overrides — and sets the
+**runtime Gemini key**. It writes `data/admin_config.json` (which the worker
+reloads on every turn) and `data/gemini_key.txt`, so changes apply on the bot's
+next message with **no restart**.
+
+```bash
+docker compose --profile client up -d --build admin   # starts on :8006
+```
+
+Open **http://localhost:8006/admin** and unlock with `ADMIN_TOKEN` from `.env`
+(an empty `ADMIN_TOKEN` disables the panel). Auth is a bearer token sent from the
+browser; the page itself carries no secrets.
+
 ## Core modules
 
 | Module | Role |
@@ -63,6 +80,7 @@ bash test_mock_stack.sh
 | `conversation_engine.py` | Qualification + Gemini |
 | `dealers.py` / `dispose.py` | Nearest dealer + CRM dispose |
 | `mock_client.py` | Local CRM lab UI + fixtures |
+| `web.py` / `assets/admin.html` | Admin panel: live config + runtime Gemini key |
 
 ## Setup (dev)
 

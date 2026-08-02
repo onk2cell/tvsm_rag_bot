@@ -26,8 +26,12 @@ class BotState(TypedDict):
     history: list[dict[str, str]]
     user_text: str
 
+    known_state: str
+
     # populated by the chatbot node:
     reply_text: str
     captured: bool
     lead_profile: dict[str, Any] | None
     citations: list[str]
+    prompt_tokens: int | None
+    completion_tokens: int | None

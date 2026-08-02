@@ -223,10 +223,32 @@ def product_brochure_url(product: str, *hint_texts: str | None) -> str:
     return PRODUCT_BROCHURE_URLS[product]
 
 
+# Customer asked about servicing/maintenance or warranty specifically — only
+# then do the PMS schedule / warranty policy PDFs go out alongside the
+# brochure. Asking for "the brochure" must deliver one file, not three.
+SUPPORT_DOC_ASK_RE = re.compile(
+    r"(?i)("
+    r"\b(warrant\w*|guarantee|pms|service\s*schedule|servicing|maintenance)\b|"
+    r"वारंटी|वॉरंटी|सर्विस|सर्व्हिस|मेंटेनन्स|देखभाल"
+    r")"
+)
+
+
+def wants_support_documents(message: str | None) -> bool:
+    """True when the customer asked about warranty or service/maintenance,
+    which is when the PMS/warranty PDFs are worth sending too."""
+    return bool(SUPPORT_DOC_ASK_RE.search((message or "").strip()))
+
+
 def product_document_pack(
-    product: str, *hint_texts: str | None
+    product: str, *hint_texts: str | None, include_support_docs: bool = False
 ) -> list[tuple[str, str]]:
-    """Return ``(url, kind)`` docs for a product: brochure + warranty/PMS.
+    """Return ``(url, kind)`` docs for a product.
+
+    The brochure alone by default — asking for "the brochure" delivered the
+    brochure, the PMS schedule AND the warranty policy, three files for one
+    request. Pass ``include_support_docs=True`` (see ``wants_support_documents``)
+    when the customer actually asked about warranty or servicing.
 
     ``kind`` is one of ``brochure``, ``warranty``, ``pms``.
     """
@@ -234,8 +256,9 @@ def product_document_pack(
     if not brochure:
         return []
     pack: list[tuple[str, str]] = [(brochure, "brochure")]
-    for link, kind in PRODUCT_SUPPORT_DOC_URLS.get(product, ()):
-        pack.append((link, kind))
+    if include_support_docs:
+        for link, kind in PRODUCT_SUPPORT_DOC_URLS.get(product, ()):
+            pack.append((link, kind))
     return pack
 
 

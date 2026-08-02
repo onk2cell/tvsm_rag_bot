@@ -57,27 +57,37 @@ def test_extract_pincode_from_mixed_text():
     assert extract_pincode("pin 041100") == ""
 
 
-def test_looks_like_invalid_pincode_wrong_length():
-    from dealers import looks_like_invalid_pincode
+def test_explicit_pincode_word_is_classified_without_the_llm():
+    """Fast path: the customer names the field, so no LLM call is needed."""
+    from bot.graph import _route_location_reply
 
-    assert looks_like_invalid_pincode("41100")  # 5 digits
-    assert looks_like_invalid_pincode("4110011")  # 7 digits
-    assert looks_like_invalid_pincode("041100")  # leading zero
-    assert looks_like_invalid_pincode("pin 41100")
-    assert not looks_like_invalid_pincode("411001")
-    assert not looks_like_invalid_pincode("8459522206")  # mobile
-    assert not looks_like_invalid_pincode("Parbhani")
-    assert not looks_like_invalid_pincode("Yes")
+    def route(message: str) -> str:
+        return _route_location_reply(
+            {"user_message": message, "last_bot_message": "", "result": "other"}
+        )
+
+    assert route("pin 41100") == "bad_pincode"
+    assert route("my pincode is 4110011") == "bad_pincode"
+    # A valid pin is handled by extract_pincode, not the classifier.
+    assert route("411001") == "other"
+    # A 10-digit mobile has no valid pin in it, so the LLM decides whether
+    # the customer meant it as a location at all.
+    assert route("8459522206") == "classify"
 
 
-def test_looks_like_place_name():
-    from dealers import looks_like_place_name
+def test_bare_numbers_and_chat_filler_go_to_the_llm_not_a_regex():
+    """The old deny-lists guessed here and got it wrong: '50000' was read as
+    a typo'd pin, 'okk' as a city name. Both must reach the classifier so the
+    last bot message decides."""
+    from bot.graph import _route_location_reply
 
-    assert looks_like_place_name("Parbhani")
-    assert looks_like_place_name("Pune")
-    assert not looks_like_place_name("King deluxe")
-    assert not looks_like_place_name("I don't know my pincode")
-    assert not looks_like_place_name("Yes")
+    def route(message: str) -> str:
+        return _route_location_reply(
+            {"user_message": message, "last_bot_message": "", "result": "other"}
+        )
+
+    for message in ("50000", "2025", "okk", "thik hai", "hmm", "done", "Parbhani"):
+        assert route(message) == "classify", message
 
 
 def test_extract_pincode_collapses_spaced_and_dashed_digits():

@@ -105,18 +105,43 @@ def test_product_brochure_url_and_caption():
     assert brochure_product_from_text("hello", "King Deluxe") == "King Deluxe"
 
 
-def test_product_document_pack_includes_warranty_and_pms():
-    ev = product_document_pack("King EV MAX")
+def test_product_document_pack_is_the_brochure_alone_by_default():
+    """Asking for "the brochure" must deliver one file. It used to send the
+    brochure, the PMS schedule and the warranty policy (bug 010804)."""
+    assert [kind for _, kind in product_document_pack("King EV MAX")] == ["brochure"]
+    assert [kind for _, kind in product_document_pack("King Duramax Plus")] == [
+        "brochure"
+    ]
+
+    deluxe = product_document_pack("King Deluxe", "Deluxe CNG")
+    assert [kind for _, kind in deluxe] == ["brochure"]
+    assert deluxe[0][0].endswith("/King_Deluxe_CNG-English.pdf")
+
+
+def test_product_document_pack_adds_support_docs_when_asked():
+    ev = product_document_pack("King EV MAX", include_support_docs=True)
     assert [kind for _, kind in ev] == ["brochure", "warranty"]
     assert ev[1][0].endswith("/TVS_King_EV_MAX_Warranty_Policy.pdf")
 
-    deluxe = product_document_pack("King Deluxe", "Deluxe CNG")
+    deluxe = product_document_pack(
+        "King Deluxe", "Deluxe CNG", include_support_docs=True
+    )
     assert [kind for _, kind in deluxe] == ["brochure", "pms", "warranty"]
     assert deluxe[0][0].endswith("/King_Deluxe_CNG-English.pdf")
     assert deluxe[1][0].endswith("/Deluxe-PMS-Schedule.pdf")
     assert deluxe[2][0].endswith("/Deluxe-Warranty-Policy-new.pdf")
 
-    duramax = product_document_pack("King Duramax Plus")
+    duramax = product_document_pack("King Duramax Plus", include_support_docs=True)
     assert [kind for _, kind in duramax] == ["brochure", "pms", "warranty"]
     assert duramax[1][0].endswith("/Duramaxplus-PMS-Schedule.pdf")
     assert duramax[2][0].endswith("/Duramaxplus-Warranty-Policy.pdf")
+
+
+def test_wants_support_documents_detects_warranty_and_service_asks():
+    from client_media_assets import wants_support_documents
+
+    assert wants_support_documents("what is the warranty on this?")
+    assert wants_support_documents("send me the service schedule")
+    assert wants_support_documents("मला वॉरंटी माहिती हवी")
+    assert not wants_support_documents("send brochure")
+    assert not wants_support_documents("Yes send brochure")
