@@ -72,6 +72,11 @@ from client_static_messages import (
 
 log = logging.getLogger(__name__)
 
+# Written into lead_profile when a returning customer declines the vehicle
+# they enquired about last time. Matched exactly by _clear_welcome_back_decline
+# so a genuine later decline is never mistaken for this one.
+WELCOME_BACK_DECLINE_NOTE = "not interested on welcome-back"
+
 _AFFIRMATIVE_RE = re.compile(
     r"(?i)^\s*(yes|y|yeah|yep|ok|okay|sure|haan|han|ha|ji|bilkul|"
     r"howdu|haudu|avunu|sari|aama?m|athe|"
@@ -762,6 +767,9 @@ class ClientMessageProcessor:
                 "will attach a mandatory dealership confirmation question "
                 "after your reply.)"
             )
+        # Any turn that reaches the qualification engine after a
+        # welcome-back decline is the customer re-engaging.
+        self._clear_welcome_back_decline(session)
         turn = TurnInput(
             session_id=session.conversation_id,
             language=language,
@@ -1222,10 +1230,30 @@ class ClientMessageProcessor:
             return enriched, None
         session.awaiting_still_interested = False
         session.lead_profile["disposition"] = "not_interested"
-        session.lead_profile["notes"] = "not interested on welcome-back"
+        session.lead_profile["notes"] = WELCOME_BACK_DECLINE_NOTE
         session.lead_profile.setdefault("product_interest", product)
         self._maybe_dispose(session, profile=session.lead_profile)
+        # The reply now offers the rest of the range; if they take it up,
+        # _clear_welcome_back_decline reopens the lead on the next turn.
         return user_message, still_interested_no_thanks(lang)
+
+    def _clear_welcome_back_decline(self, session: ClientSession) -> None:
+        """Reopen a lead that declined on welcome-back and then kept talking.
+
+        The decline wrote disposition/notes straight into lead_profile and
+        nothing ever removed them. Dispose needs a pincode, which usually
+        arrives several turns later — by which time the customer had picked a
+        different model, yet CRM still received status not_interested and,
+        once they qualified, an "interested" record whose remark read
+        "notes: not interested on welcome-back".
+        """
+        profile = session.lead_profile
+        if profile.get("disposition") != "not_interested":
+            return
+        if str(profile.get("notes") or "") != WELCOME_BACK_DECLINE_NOTE:
+            return  # a genuine later decline — leave it alone
+        profile.pop("disposition", None)
+        profile.pop("notes", None)
 
     def _maybe_welcome_back(self, session: ClientSession, message: str) -> str:
         """Seed the first turn with CRM context when still-interested ask was skipped.

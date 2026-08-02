@@ -435,3 +435,70 @@ def test_usage_extraction_survives_a_missing_or_odd_response_shape():
 
     assert _extract_usage(Resp()) == (1200, 40)
     assert _extract_usage(object()) == (None, None)
+
+
+# --- dispose: stale decline data reaching CRM ---------------------------
+
+
+def test_welcome_back_decline_does_not_stick_to_a_reengaged_lead(monkeypatch):
+    """02/08 transcript: customer answered "Nahi" to the welcome-back
+    question, then two minutes later asked to see a different model and
+    qualified fully. Dispose needs a pincode, which only arrived later, so
+    CRM received status not_interested and then an "interested" record whose
+    remark still read "notes: not interested on welcome-back"."""
+    monkeypatch.setattr(
+        "client_processing.classify_location_reply", lambda _m, _l="": "other"
+    )
+    from client_processing import Customer
+    from tests.test_client_processing import FakeDisposeClient
+
+    dispose = FakeDisposeClient()
+    processor, deps = _processor(
+        dispose_client=dispose,
+        dealer_directory=FakeDealerDirectory(DEALER),
+        skip_still_interested=False,
+        preselect_language="English",
+    )
+    deps["directory"].customer = Customer(
+        "307569",
+        "Onkar Game",
+        "English",
+        product_enquired="King EV MAX",
+        last_status="No Response",
+    )
+
+    # Language is preselected here, so the still-interested prompt is the
+    # first thing the customer sees.
+    processor.process(_event(message_id="m1", content="Hello"))
+    assert "still planning to purchase" in deps["reply_sender"].calls[-1]["text"]
+
+    # Declines the vehicle from last time...
+    processor.process(_event(message_id="m2", content="No"))
+    offer = deps["reply_sender"].calls[-1]["text"]
+    assert "different TVS passenger model" in offer, offer
+
+    # ...then re-engages and qualifies.
+    deps["engine"].reply = "Great choice."
+    processor.process(_event(message_id="m4", content="I want to see something else"))
+    processor.process(_event(message_id="m5", content="King Deluxe"))
+    processor.process(_event(message_id="m6", content="411001"))
+
+    assert dispose.calls, "lead never reached CRM"
+    for call in dispose.calls:
+        assert call["status"] != "not_interested", call
+        assert "not interested on welcome-back" not in call.get("remark", ""), call
+
+
+def test_a_genuine_later_decline_is_still_reported(monkeypatch):
+    """The cleanup must only drop the welcome-back marker, never a real
+    not_interested the model captured during qualification."""
+    from client_processing import ClientSession
+
+    processor, _ = _processor()
+    session = ClientSession(conversation_id="c1", mobile="+910000000000")
+    session.lead_profile = {"disposition": "not_interested", "notes": "found a competitor"}
+
+    processor._clear_welcome_back_decline(session)
+
+    assert session.lead_profile["disposition"] == "not_interested"
+    assert session.lead_profile["notes"] == "found a competitor"

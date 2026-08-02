@@ -212,18 +212,22 @@ _STILL_INTERESTED_NO_NAME = {
     ),
 }
 
+# Declining the vehicle they enquired about last time does not mean they want
+# nothing — offer the rest of the range before letting the lead go. Customers
+# were being closed out and then coming back a few minutes later asking to see
+# something else.
 _STILL_INTERESTED_NO_THANKS = {
     "English": (
         "Thank you for letting us know. "
-        "If you need any help later, feel free to message us."
+        "Would you like to look at a different TVS passenger model instead?"
     ),
     "Hindi": (
         "बताने के लिए धन्यवाद। "
-        "अगर बाद में मदद चाहिए तो हमें मैसेज करें।"
+        "क्या आप कोई दूसरा TVS पैसेंजर मॉडल देखना चाहेंगे?"
     ),
     "Marathi": (
         "कळवल्याबद्दल धन्यवाद. "
-        "नंतर मदत हवी असल्यास आम्हाला मेसेज करा."
+        "तुम्हाला दुसरे TVS पॅसेंजर मॉडेल पाहायला आवडेल का?"
     ),
 }
 
