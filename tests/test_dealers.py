@@ -206,3 +206,64 @@ def test_built_dealers_keep_maharashtra_towns_in_maharashtra():
         # Maharashtra roughly 15.5–22.1N, 72.6–80.9E
         assert 15.0 <= float(item["latitude"]) <= 22.5, item
         assert 72.0 <= float(item["longitude"]) <= 81.5, item
+
+
+def test_dealer_data_has_no_addresses_glued_together():
+    """A wrapped address straddles its dealer-code line in the source PDF, so
+    dropping the blank lines that separate dealers merged each record's
+    leading lines with the previous record's trailing ones. A Latur
+    dealership advertised a Vapi, Gujarat address for weeks."""
+    import json
+    import re
+    from pathlib import Path
+
+    rows = json.loads(Path("data/dealers.json").read_text(encoding="utf-8"))
+    glued = []
+    for dealer in rows:
+        address = dealer.get("address") or ""
+        match = re.search(r"\b\d{10}\b", address)
+        # Text after the trailing "; Name - phone" contact means a second
+        # dealer's address was appended to this one.
+        if match and address[match.end():].strip(" ,;"):
+            glued.append(dealer["dealer_code"])
+    assert glued == [], f"addresses merged for dealer codes: {glued}"
+
+
+def test_dealer_data_has_no_placeholder_dealerships():
+    """Test rows ship in the CRM export with real coordinates, so nearest
+    lookup routed a Bangalore customer to "JAM Research Services, Test City"
+    and a Vijayawada customer to "Temporary Dealer"."""
+    import json
+    import re
+    from pathlib import Path
+
+    rows = json.loads(Path("data/dealers.json").read_text(encoding="utf-8"))
+    bad = [
+        d["dealer_code"]
+        for d in rows
+        if re.search(r"(?i)\b(test|temporary|dummy|sample)\b", d.get("name") or "")
+        or (d.get("town_name") or "").strip().lower() in {"null", "test city"}
+    ]
+    assert bad == [], f"placeholder dealerships still routable: {bad}"
+
+
+def test_pdf_block_parser_reassembles_a_wrapped_address():
+    """The code line sits in the MIDDLE of its address block, so the parts
+    must be joined in reading order — text above the code, then below it."""
+    import sys
+
+    sys.path.insert(0, "scripts")
+    from build_dealers import _pdf_blocks
+
+    lines = [
+        "10292         G.S.MOTORS, Delhi-Meerut Road, 201001; Saurabh - 9024773839   Open Map",
+        "",
+        "              A G MALWADE WHEELS, NEAR GANESH",
+        "15188                                                              Open Map",
+        "              SUZUKI, LATUR, MAH, 413531; Mohsin Shaikh - 9096202105",
+        "",
+    ]
+    blocks = _pdf_blocks(lines)
+    assert len(blocks) == 2, blocks
+    assert len(blocks[0]) == 1
+    assert len(blocks[1]) == 3

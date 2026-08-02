@@ -87,6 +87,38 @@ def _clean_address(text: str) -> str:
     return cleaned.strip(" ;,-")
 
 
+# Page furniture that must be dropped without breaking up a dealer block.
+_PDF_NOISE_RE = re.compile(
+    r"(Dealer Code\s+Dealer Address|Map Link|TVS CMB Dealer)", re.I
+)
+# A dealer code starts a line; the negative lookahead keeps a 10-digit phone
+# continuation line (e.g. "7353767891") from being read as a code.
+_PDF_CODE_RE = re.compile(r"^(\d{4,6})(?!\d)\s*(.*)$")
+
+
+def _pdf_blocks(lines: list[str]) -> list[list[str]]:
+    """Split the layout text into one block per dealer.
+
+    Blank lines are the ONLY reliable dealer separator in this PDF: a long
+    address wraps around its code line, so part of it sits above the code
+    and part below. Treating blank lines as noise (the previous behaviour)
+    merged each dealer's leading lines with the previous dealer's trailing
+    ones, which is how a Latur dealership ended up advertising a Vapi,
+    Gujarat address to customers.
+    """
+    blocks: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if line.strip():
+            current.append(line)
+        elif current:
+            blocks.append(current)
+            current = []
+    if current:
+        blocks.append(current)
+    return blocks
+
+
 def pdf_dealers(path: Path) -> list[dict]:
     text = subprocess.check_output(
         ["pdftotext", "-layout", str(path), "-"],
@@ -95,52 +127,78 @@ def pdf_dealers(path: Path) -> list[dict]:
     )
     lines = [line.rstrip() for line in text.splitlines()]
     dealers: list[dict] = []
-    buffer: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped or "Dealer Code" in stripped or "Map Link" in stripped:
+    for block in _pdf_blocks(lines):
+        code = ""
+        parts: list[str] = []
+        for line in block:
+            stripped = _PDF_NOISE_RE.sub("", line).replace("Open Map", "").strip()
+            if not stripped:
+                continue
+            match = _PDF_CODE_RE.match(stripped)
+            if match and not code:
+                code = match.group(1)
+                stripped = match.group(2).strip()
+                if not stripped:
+                    continue
+            # Reading order is what reassembles a wrapped address: the text
+            # above the code line, then the remainder of the code line, then
+            # the text below it — a phrase split as "GANESH" / "SUZUKI"
+            # across the wrap only rejoins correctly this way.
+            parts.append(stripped)
+        if not code:
             continue
-        match = re.match(r"^(\d{4,6})(?:\s+(.*))?$", stripped)
-        if match:
-            code = match.group(1)
-            rest = (match.group(2) or "").replace("Open Map", "").strip()
-            if rest and len(rest) > 24:
-                parts = [rest]
-            else:
-                parts = list(buffer)
-                if rest:
-                    parts.append(rest)
-            buffer = []
-            address = _clean_address(" ".join(parts))
-            pins = PIN_RE.findall(address)
-            phone_match = PHONE_RE.search(address)
-            name = address.split(",")[0].strip() if address else ""
-            dealers.append(
-                {
-                    "dealer_code": code,
-                    "address": address,
-                    "pincode": pins[-1] if pins else "",
-                    "pdf_phone": phone_match.group(1) if phone_match else "",
-                    "pdf_name": name,
-                }
-            )
-            continue
-        if "Open Map" in stripped:
-            cleaned = stripped.replace("Open Map", "").strip()
-            if cleaned:
-                buffer.append(cleaned)
-            continue
-        buffer.append(stripped)
+        address = _clean_address(" ".join(parts))
+        pins = PIN_RE.findall(address)
+        phone_match = PHONE_RE.search(address)
+        name = address.split(",")[0].strip() if address else ""
+        dealers.append(
+            {
+                "dealer_code": code,
+                "address": address,
+                "pincode": pins[-1] if pins else "",
+                "pdf_phone": phone_match.group(1) if phone_match else "",
+                "pdf_name": name,
+            }
+        )
     return dealers
+
+
+# Placeholder rows that ship in the CRM export with flg_is_deleted=0 and real
+# coordinates, so nearest-dealer routing happily hands them to customers: a
+# Bangalore lead was being sent to "JAM Research Services, Test City" and a
+# Vijayawada lead to "Temporary Dealer" with SPOC "Temporary Spoc".
+_PLACEHOLDER_NAME_RE = re.compile(
+    r"(?i)\b(test|temporary|dummy|sample|jam\s+research)\b"
+)
+_PLACEHOLDER_VALUES = {"", "null", "none", "n/a", "test city", "test state"}
+
+
+def is_placeholder_row(row: dict) -> bool:
+    """True for a non-real dealership that must never be routed to."""
+    name = (row.get("dealer_name") or "").strip()
+    town = (row.get("town_name") or "").strip().lower()
+    state = (row.get("state_name") or "").strip().lower()
+    if _PLACEHOLDER_NAME_RE.search(name):
+        return True
+    if (row.get("spoc_name") or "").strip().lower().startswith("temporary"):
+        return True
+    return town in _PLACEHOLDER_VALUES and state in _PLACEHOLDER_VALUES
 
 
 def load_csv(path: Path) -> dict[str, dict]:
     by_code: dict[str, dict] = {}
+    skipped: list[str] = []
     with path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             code = (row.get("dealer_code") or "").strip()
-            if code:
-                by_code[code] = row
+            if not code:
+                continue
+            if is_placeholder_row(row):
+                skipped.append(f"{code} ({(row.get('dealer_name') or '').strip()})")
+                continue
+            by_code[code] = row
+    if skipped:
+        print(f"Skipped {len(skipped)} placeholder dealer(s): {', '.join(skipped)}")
     return by_code
 
 
