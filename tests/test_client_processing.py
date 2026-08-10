@@ -474,6 +474,61 @@ def test_brochure_offer_accepted_with_bhejo_sends_pack(monkeypatch):
     assert "लोकेशन" not in texts and "location" not in texts.lower()
 
 
+def test_product_switch_wins_over_earlier_named_model(monkeypatch):
+    """A vague brochure request after a product switch must resolve the
+    NEW model. Persisting the first resolved product into lead_profile
+    makes it sticky — and since the lead_profile hint outranks history,
+    the customer would get the brochure for the model they moved off.
+    """
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice."
+    processor.process(_event(message_id="m1", content="I want King EV MAX"))
+    deps["engine"].reply = "Sure, noted."
+    processor.process(
+        _event(message_id="m2", content="actually I want King Deluxe instead")
+    )
+
+    session = deps["state"].sessions["+918286871533"]
+    product, _ = processor._resolve_brochure_product(session, "send me the brochure")
+    assert product == "King Deluxe"
+
+
+def test_romanized_hindi_info_request_offers_and_sends_brochure(monkeypatch):
+    """Real transcript: 'muje aur jankari chaiye' (Romanized Hindi) never
+    matched PRODUCT_INFO_ASK_RE (Devanagari/English only), so the
+    deterministic offer never armed — the LLM was left to freelance and,
+    on a later "ha", claimed to send a brochure it never actually sent
+    (brochures_sent stayed empty, no send in the logs). The classifier is
+    LLM-backed now; the fast regex path is bypassed here via monkeypatch
+    to keep the test deterministic and offline, but the soft-signal gate
+    (jankari/jaankari) that routes to the classifier is exercised for real.
+    """
+    monkeypatch.setattr(
+        "client_processing.classify_product_info_request",
+        lambda msg: "jankari" in (msg or "").lower(),
+    )
+    processor, deps = _processor(preselect_language="Hindi")
+    deps["engine"].reply = "बढ़िया चुनाव — King EV MAX."
+    processor.process(_event(message_id="m1", content="TVS King EV max"))
+
+    deps["engine"].reply = "इसमें 179 km की रेंज मिलती है।"
+    processor.process(_event(message_id="m2", content="muje aur jankari chaiye"))
+
+    reply_text = deps["reply_sender"].calls[-1]["text"]
+    assert "brochure" in reply_text.lower() or "ब्रोशर" in reply_text
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is True
+    assert deps["reply_sender"].document_calls == []  # not sent yet, only offered
+
+    deps["engine"].reply = "ठीक है।"
+    processor.process(_event(message_id="m3", content="ha"))
+
+    links = [call["link"] for call in deps["reply_sender"].document_calls]
+    assert links == ["https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf"]
+    assert session.brochures_sent == ["King EV MAX"]
+
+
 def test_brochure_offer_declined_does_not_send(monkeypatch):
     del monkeypatch
     processor, deps = _processor()
@@ -740,7 +795,7 @@ def test_missing_language_menu_then_choice_starts_qualification():
 
 
 def test_crm_preferred_language_still_shows_menu_on_fresh_session():
-    """After 4h TTL / new session, always ask language even if CRM has one."""
+    """After the idle TTL / new session, always ask language even if CRM has one."""
     directory = FakeDirectory()
     directory.customer = Customer("crm-1", "Asha", "Tamil")
     processor, deps = _processor(directory=directory, preselect_language=None)
@@ -1065,6 +1120,72 @@ def test_pincode_message_asks_nearest_dealer_confirm_once():
     assert session.dealer_confirm_deferred is True
 
 
+def test_new_customer_dealer_ask_survives_deferred_turns():
+    """Real transcript (unknown/new number, Hindi): customer gives pincode
+    161226, but the engine's next two replies each end in their own
+    question ("do you know the features?", "do you have a licence?"), so
+    the dealer consent ask gets deferred both times. Before the fix, the
+    resolved dealer was dropped the instant the first turn was deferred —
+    the pincode never reappears in a later message, so nothing could ever
+    retry it, and the customer reached wrap-up with no dealer ask at all.
+    """
+
+    class ScriptedEngine:
+        def __init__(self, replies):
+            self.replies = list(replies)
+            self.turns = []
+            self.profile = None
+
+        def handle_turn(self, turn):
+            self.turns.append(turn)
+            return TurnOutput(
+                reply_text=self.replies.pop(0),
+                profile=self.profile,
+                captured=bool(self.profile),
+            )
+
+    dealer = Dealer(
+        dealer_code="99001",
+        name="Test TVS Dealership",
+        address="Sirsa Road, 161226",
+        pincode="161226",
+        phone="9000000002",
+        map_url="https://maps.example/99001",
+        latitude=29.9,
+        longitude=75.8,
+        spoc_name="Ramesh",
+    )
+    directory = FakeDealerDirectory(dealer)
+    engine = ScriptedEngine(
+        [
+            "पिनकोड 161226 के लिए धन्यवाद! क्या आप फीचर्स के बारे में जानते हैं?",
+            "ठीक है! फीचर्स ये हैं... क्या आपके पास लाइसेंस उपलब्ध है?",
+            "बहुत बढ़िया! हमने आपकी जानकारी दर्ज कर ली है, डीलरशिप जल्द संपर्क करेगी।",
+        ]
+    )
+    processor, deps = _processor(
+        dealer_directory=directory, engine=engine, preselect_language="Hindi"
+    )
+    deps["directory"].customer = Customer(
+        customer_id="unknown-8286871533",
+        name="Customer 8286871533",
+        preferred_language="Hindi",
+    )
+
+    processor.process(_event(message_id="m1", content="161226"))
+    processor.process(_event(message_id="m2", content="nahi"))
+    processor.process(_event(message_id="m3", content="hai"))
+
+    replies = [call["text"] for call in deps["reply_sender"].calls]
+    assert any(dealer_share_ask("Hindi") in text for text in replies), (
+        "dealer consent ask was never sent — new customer got no dealer "
+        f"info after sharing a pincode: {replies}"
+    )
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_share_consent is True
+    assert session.pending_nearest_dealer_code == ""
+
+
 def test_dealership_details_are_never_sent_without_consent():
     """The 02/08 transcript: 'I want a different vehicle' came back with
     'which model?' AND an unrequested dealer card AND 'is this OK?'."""
@@ -1161,6 +1282,50 @@ def test_real_dealer_directory_with_fake_geocoder_resolves_pune():
     assert dealer_share_ask("English") in deps["reply_sender"].calls[0]["text"]
     processor.process(_event(message_id="incoming-2", content="yes"))
     assert "Shah Auto" in deps["reply_sender"].calls[1]["text"]
+
+
+def test_pincode_triggers_dispose_even_when_llm_asks_a_question():
+    """Option A: pin must sync to JAM even if dealer consent is deferred."""
+    dispose = FakeDisposeClient()
+    dealer = Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address="Pune",
+        pincode="411048",
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+    processor, deps = _processor(
+        dispose_client=dispose,
+        dealer_directory=FakeDealerDirectory(dealer),
+    )
+    session = deps["state"].sessions["+918286871533"]
+    session.lead_profile = {
+        "lead_name": "Vijay Dhaware",
+        "purchase_timeline": "20/08/2026",
+        "preferred_language": "English",
+    }
+    deps["state"].save(session)
+    # Disobedient model: asks a question even when told not to → consent deferred.
+    deps["engine"].acknowledgement = (
+        "Do you already know the key features of the TVS King Deluxe?"
+    )
+    deps["engine"].reply = (
+        "Do you already know the key features of the TVS King Deluxe?"
+    )
+
+    processor.process(_event(message_id="pin-1", content="400102"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.lead_profile.get("pincode") == "400102"
+    assert dispose.calls, "dispose must fire as soon as pincode is known"
+    assert dispose.calls[0]["pincode"] == "400102"
+    assert dispose.calls[0]["status"] == "not_enquired"
+    assert dispose.calls[0]["customername"] == "Vijay Dhaware"
+    # Dealer consent must not stack onto the model's own question.
+    assert dealer_share_ask("English") not in deps["reply_sender"].calls[0]["text"]
 
 
 def test_wrap_up_profile_calls_dispose_once_with_dealer_code():

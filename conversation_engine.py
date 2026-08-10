@@ -9,7 +9,22 @@ from typing import Any, Protocol
 from admin_config import AdminConfigStore
 from leads import LeadWriter
 
-PROFILE_JSON_RE = re.compile(r"PROFILE_JSON:\s*(\{.*\})", re.DOTALL)
+PROFILE_JSON_RE = re.compile(
+    r"PROFILE_JSON:\s*(?:```(?:json)?\s*)?(\{.*\})", re.DOTALL
+)
+
+# Fallback: the model has been observed on production dropping the
+# PROFILE_JSON: prefix entirely and just fencing the object instead —
+# silently leaking the raw lead profile (product, pincode, documents,
+# lead_quality...) straight into a WhatsApp reply, since the pattern above
+# never matched without the literal prefix.
+_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})", re.DOTALL)
+
+# Last-resort cleanup: the model has also been observed opening a code
+# fence around ordinary reply text with no JSON inside, sometimes never
+# closing it. WhatsApp does not render markdown fences, so raw ``` markers
+# must never reach the customer even when nothing above matched.
+_STRAY_FENCE_RE = re.compile(r"```(?:json)?")
 
 LANGUAGE_SELECTED_TRIGGER = (
     "(The customer has selected their language. Greet briefly and ask the "
@@ -197,8 +212,13 @@ send the brochure?") and wait for their answer. NEVER claim in past tense that a
 delivered, since you cannot see whether the send succeeded. Never say you are unable to \
 send a brochure.
 
+Never use markdown code fences (```) anywhere in your reply — WhatsApp shows the raw \
+backtick characters to the customer, it does not render them. This applies to every reply, \
+not only the wrap-up.
+
 After the customer-facing wrap-up message ONLY (not before), output on a NEW final line a \
-single JSON object prefixed exactly with `PROFILE_JSON:` with these keys:
+single JSON object prefixed exactly with `PROFILE_JSON:` with these keys, no code fence, no \
+extra text after it:
 {json.dumps(profile_keys)}
 Field formats:
 - timeline_bucket: one of immediate, <=30d, 30-90d, exploring.
@@ -243,11 +263,19 @@ def _extract_usage(response: Any) -> tuple[int | None, int | None]:
 
 
 def parse_profile_json(text: str) -> tuple[str, dict[str, Any] | None]:
-    """Strip PROFILE_JSON line from customer-visible text; return profile if valid."""
-    match = PROFILE_JSON_RE.search(text)
-    if not match:
-        return text, None
-    customer_text = text[: match.start()].strip()
+    """Strip any PROFILE_JSON payload from customer-visible text.
+
+    Stripping always wins over parsing: once a JSON-shaped tail is
+    detected (with or without the PROFILE_JSON: prefix, fenced or not),
+    it is removed from what the customer sees even if it fails to parse —
+    a malformed payload is still never customer-facing content. See the
+    module-level regex comments for the two production-observed formats
+    this now catches that a strict prefix-only match missed.
+    """
+    match = PROFILE_JSON_RE.search(text) or _FENCED_JSON_RE.search(text)
+    if match is None:
+        return _STRAY_FENCE_RE.sub("", text).strip(), None
+    customer_text = _STRAY_FENCE_RE.sub("", text[: match.start()]).strip()
     try:
         profile = json.loads(match.group(1))
     except json.JSONDecodeError:

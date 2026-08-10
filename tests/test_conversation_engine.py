@@ -76,6 +76,67 @@ def test_profile_json_stripped_from_customer_reply(stores):
     assert parsed == profile
 
 
+def test_profile_json_with_trailing_text_is_still_stripped(stores):
+    """The model sometimes adds a sign-off AFTER the PROFILE_JSON block.
+    Anchoring the pattern to end-of-string makes that whole block leak to
+    the customer, so the payload match must not require it.
+    """
+    profile = {"product_interest": "King EV MAX", "lead_quality": "HOT"}
+    raw = f"Thanks!\nPROFILE_JSON:{json.dumps(profile)}\nBye!"
+    text, parsed = parse_profile_json(raw)
+    assert "PROFILE_JSON" not in text
+    assert "lead_quality" not in text
+    assert text == "Thanks!"
+    assert parsed == profile
+
+
+def test_profile_json_fenced_with_prefix_is_stripped(stores):
+    """The prompt allows PROFILE_JSON: to be present even if the model
+    wraps it in a code fence — still stripped and parsed."""
+    profile = {"product_interest": "King Deluxe", "lead_quality": "HOT"}
+    raw = f"Thanks!\nPROFILE_JSON:\n```json\n{json.dumps(profile)}\n```"
+    text, parsed = parse_profile_json(raw)
+    assert text == "Thanks!"
+    assert parsed == profile
+
+
+def test_bare_fenced_json_without_prefix_is_stripped_and_parsed(stores):
+    """Real production leak: the model dropped the PROFILE_JSON: prefix
+    entirely and just fenced the object. The strict prefix-only regex
+    missed this, so the raw profile (product, pincode, doc status,
+    lead_quality...) went straight into a WhatsApp reply to the customer.
+    """
+    profile = {
+        "product_interest": "King Duramax Plus",
+        "pincode": "431401",
+        "doc_license": "yes",
+        "lead_quality": "HOT",
+    }
+    raw = (
+        "छान, डीलरशिपची माहिती योग्य आहे! धन्यवाद!\n\n"
+        f"```json\n{json.dumps(profile, ensure_ascii=False)}\n```"
+    )
+    text, parsed = parse_profile_json(raw)
+    assert "```" not in text
+    assert "{" not in text
+    assert text == "छान, डीलरशिपची माहिती योग्य आहे! धन्यवाद!"
+    assert parsed == profile
+
+
+def test_stray_unclosed_fence_around_plain_reply_is_cleaned_not_dropped(stores):
+    """Real production leak: the model opened a ```json fence around an
+    ordinary (non-JSON) reply and never closed it. No JSON payload exists
+    to extract, so the fix must strip only the stray backtick markers —
+    dropping the whole block would silently swallow a real reply the
+    customer needed to see (in the observed case, a dealer-confirm ask).
+    """
+    raw = "```json\n\nकृपया ही डीलरशिप तपशील तपासा: होय किंवा नाही उत्तर द्या."
+    text, parsed = parse_profile_json(raw)
+    assert "```" not in text
+    assert "कृपया ही डीलरशिप तपशील तपासा" in text
+    assert parsed is None
+
+
 def test_profile_json_saved_to_csv(stores):
     config_store, lead_writer, leads_path = stores
     profile = {

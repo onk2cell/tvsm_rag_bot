@@ -44,7 +44,7 @@ CLIENT_STUB_CUSTOMER = os.environ.get("CLIENT_STUB_CUSTOMER", "").lower() in {
 }
 CLIENT_HTTP_TIMEOUT_SEC = float(os.environ.get("CLIENT_HTTP_TIMEOUT_SEC", "30"))
 CLIENT_RETRY_WAIT_SEC = float(os.environ.get("CLIENT_RETRY_WAIT_SEC", "30"))
-CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "14400"))
+CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "3600"))
 CLIENT_DEDUP_TTL_SEC = int(os.environ.get("CLIENT_DEDUP_TTL_SEC", str(7 * 24 * 3600)))
 CLIENT_MAX_MEDIA_BYTES = int(
     os.environ.get("CLIENT_MAX_MEDIA_BYTES", str(10 * 1024 * 1024))

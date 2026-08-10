@@ -60,6 +60,12 @@ class HttpCustomerDirectory:
                     auth=self._auth,
                     timeout=self._timeout,
                 )
+                # Same contract as JamCustomerDirectory: 404 means "not in CRM"
+                # yet — return a stub so the new-number qualification path can
+                # run (lab mock CRM does this; raising here showed customers
+                # "service temporarily unavailable").
+                if response.status_code == 404:
+                    return _stub_customer(mobile, preferred_language="")
                 if 200 <= response.status_code < 300:
                     return _customer_from_response(response.json())
                 last_error = f"customer API returned HTTP {response.status_code}"
@@ -474,7 +480,7 @@ class RedisClientState:
         self,
         redis,
         *,
-        ttl_seconds: int = 14400,
+        ttl_seconds: int = 3600,
         id_factory: Callable[[], str] | None = None,
     ):
         self._redis = redis
@@ -540,6 +546,12 @@ class RedisClientState:
                 pending_dealer_share_code=str(
                     data.get("pending_dealer_share_code") or ""
                 ),
+                pending_nearest_dealer_code=str(
+                    data.get("pending_nearest_dealer_code") or ""
+                ),
+                pending_nearest_dealer_pincode=str(
+                    data.get("pending_nearest_dealer_pincode") or ""
+                ),
                 dealer_confirmed=bool(data.get("dealer_confirmed") or False),
                 callback_requested=bool(data.get("callback_requested") or False),
                 welcome_back_sent=bool(data.get("welcome_back_sent") or False),
@@ -592,6 +604,8 @@ class RedisClientState:
             "dealer_share_asked": session.dealer_share_asked,
             "dealer_share_declined": session.dealer_share_declined,
             "pending_dealer_share_code": session.pending_dealer_share_code,
+            "pending_nearest_dealer_code": session.pending_nearest_dealer_code,
+            "pending_nearest_dealer_pincode": session.pending_nearest_dealer_pincode,
             "dealer_confirmed": session.dealer_confirmed,
             "callback_requested": session.callback_requested,
             "welcome_back_sent": session.welcome_back_sent,

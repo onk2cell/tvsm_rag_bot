@@ -16,6 +16,7 @@ from bot.graph import (
     classify_dealer_confirm_reply,
     classify_language_switch,
     classify_location_reply,
+    classify_product_info_request,
     classify_share_consent_reply,
     classify_still_interested_reply,
 )
@@ -255,6 +256,13 @@ class ClientSession:
     dealer_share_asked: bool = False
     dealer_share_declined: bool = False
     pending_dealer_share_code: str = ""
+    # A dealer resolved from a pincode but not yet offered, because the
+    # model's reply that turn asked its own question. Unlike the CRM-dealer
+    # offer (which re-checks a durable CRM fact every turn), a pincode only
+    # ever appears once in the message stream, so the resolved dealer must
+    # be remembered here to retry on a later, question-free turn.
+    pending_nearest_dealer_code: str = ""
+    pending_nearest_dealer_pincode: str = ""
     callback_requested: bool = False
     welcome_back_sent: bool = False
     awaiting_still_interested: bool = False
@@ -855,6 +863,7 @@ class ClientMessageProcessor:
         )
         self._capture_purchase_date(session, user_message=raw_user_text)
         self._capture_lead_name(session, user_message=raw_user_text)
+        self._capture_pincode(session, user_message=raw_user_text)
         self._maybe_dispose(session, profile=output.profile)
         session.pending_replies[event["message_id"]] = {
             "language": language,
@@ -893,6 +902,14 @@ class ClientMessageProcessor:
         me the brochure for this") — product_interest is only captured in
         lead_profile at LLM wrap-up, so fall back to scanning recent
         conversation turns (most recent first) for a named model.
+
+        Deliberately does NOT persist what it resolves. Seeding
+        lead_profile here looks like it would help a new customer (no CRM
+        product_enquired to fall back on), but history already covers that
+        case — and because the lead_profile hint outranks history below, a
+        sticky value shadows a later product switch: customer says King EV
+        MAX, switches to King Deluxe, then asks for "the brochure" and gets
+        the EV MAX one.
         """
         history_hints = tuple(
             str(turn.get("text") or "")
@@ -1056,7 +1073,9 @@ class ClientMessageProcessor:
         """
         if session.awaiting_brochure_offer:
             return message, ""
-        if wants_product_brochure(user_message) or not wants_product_info(user_message):
+        if wants_product_brochure(user_message) or not classify_product_info_request(
+            user_message
+        ):
             return message, ""
         product, _ = self._resolve_brochure_product(session, user_message)
         if not product or product in session.brochures_sent:
@@ -1744,6 +1763,11 @@ class ClientMessageProcessor:
         Resolved before the LLM call so the prompt can suppress the model's
         own question whenever a dealer-confirm card is going to follow it.
         Read-only — the session is mutated by _attach_nearest_dealer.
+
+        Falls back to a dealer resolved on an earlier turn and persisted in
+        ``pending_nearest_dealer_code`` when this turn's message carries no
+        pincode of its own — see _attach_nearest_dealer for why that persist
+        step exists.
         """
         if self._dealer_directory is None:
             return None
@@ -1752,12 +1776,25 @@ class ClientMessageProcessor:
         if session.awaiting_dealer_share_consent or session.dealer_share_declined:
             return None
         pincode = extract_pincode(user_message)
-        if not pincode or session.dealer_shared_for_pincode == pincode:
-            return None
-        try:
-            return self._dealer_directory.find_nearest_by_pincode(pincode)
-        except Exception:
-            return None
+        if pincode and pincode != session.dealer_shared_for_pincode:
+            try:
+                return self._dealer_directory.find_nearest_by_pincode(pincode)
+            except Exception:
+                return None
+        if (
+            session.pending_nearest_dealer_code
+            and session.pending_nearest_dealer_pincode
+            != session.dealer_shared_for_pincode
+        ):
+            # Must never raise: process() calls this outside any try, so an
+            # exception here costs the customer their whole reply.
+            try:
+                return self._dealer_directory.get_by_code(
+                    session.pending_nearest_dealer_code
+                )
+            except Exception:
+                return None
+        return None
 
     def _attach_nearest_dealer(
         self,
@@ -1773,23 +1810,39 @@ class ClientMessageProcessor:
             return reply
         if session.awaiting_dealer_share_consent or session.dealer_share_declined:
             return reply
-        # Never append to a reply that already asks something (see
-        # _asks_a_question) — the consent question must stand alone. Both
-        # checks come before the lookup: a geocode call is wasted work when
-        # we already know nothing can be appended this turn.
-        if self._asks_a_question(reply):
-            return reply
         pincode = extract_pincode(user_message)
-        if not pincode or session.dealer_shared_for_pincode == pincode:
+        if pincode and pincode != session.dealer_shared_for_pincode:
+            target_pincode = pincode
+        elif (
+            session.pending_nearest_dealer_code
+            and session.pending_nearest_dealer_pincode
+            != session.dealer_shared_for_pincode
+        ):
+            target_pincode = session.pending_nearest_dealer_pincode
+        else:
             return reply
         if dealer is None:
             try:
-                dealer = self._dealer_directory.find_nearest_by_pincode(pincode)
+                dealer = self._dealer_directory.find_nearest_by_pincode(
+                    target_pincode
+                )
             except Exception:
                 return reply
         if dealer is None:
             return reply
-        session.dealer_shared_for_pincode = pincode
+        # Never append to a reply that already asks something (see
+        # _asks_a_question) — the consent question must stand alone. Unlike
+        # a pincode, which only ever appears once in the message stream, the
+        # resolved dealer is persisted here so a later, question-free turn
+        # can still offer it instead of losing the chance for good (mirrors
+        # _maybe_offer_crm_dealer's every-turn retry for the CRM-dealer case).
+        if self._asks_a_question(reply):
+            session.pending_nearest_dealer_code = dealer.dealer_code
+            session.pending_nearest_dealer_pincode = target_pincode
+            return reply
+        session.pending_nearest_dealer_code = ""
+        session.pending_nearest_dealer_pincode = ""
+        session.dealer_shared_for_pincode = target_pincode
         ask = self._dealer_share_ask_for_session(session, dealer.dealer_code)
         return f"{reply.rstrip()}\n\n{ask}"
 
@@ -1839,6 +1892,21 @@ class ClientMessageProcessor:
         result = resolve_purchase_date(user_message)
         if result.value and result.rule in {"explicit_dmy", "month_name"}:
             session.lead_profile["purchase_timeline"] = result.value
+
+    def _capture_pincode(
+        self,
+        session: ClientSession,
+        *,
+        user_message: str,
+    ) -> None:
+        """Persist a typed 6-digit pincode for dispose, independent of dealer card.
+
+        Dealer consent attach may be deferred when the LLM asks its own question;
+        dispose still needs the pin on that same turn (Option A).
+        """
+        pin = extract_pincode(user_message)
+        if pin:
+            session.lead_profile["pincode"] = pin
 
     def _capture_lead_name(
         self,
@@ -1969,6 +2037,12 @@ class ClientMessageProcessor:
             self._dispose_client.dispose(payload.body)
             session.last_dispose_fingerprint = fingerprint
             session.dispose_sent = True
+            log.info(
+                "dispose ok mobile=%s status=%s pincode=%s",
+                session.mobile,
+                payload.status,
+                payload.body.get("pincode", ""),
+            )
         except Exception:
             log.exception(
                 "dispose failed mobile=%s status=%s",
@@ -2161,7 +2235,7 @@ class ClientMessageProcessor:
                 self._maybe_switch_language(session, content)
             return session.language
 
-        # Fresh session (including after 4h Redis TTL expiry): always show the
+        # Fresh session (including after the idle Redis TTL expires): always show the
         # language menu. Do not auto-apply CRM preferred_language — the customer
         # must choose again for the new conversation.
         session.awaiting_language_selection = True

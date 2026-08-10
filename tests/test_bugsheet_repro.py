@@ -316,7 +316,7 @@ def test_distance_is_shown_on_the_dealer_card():
 def test_250703_conversation_restarts_after_wrap_up():
     """Sheet 250703 + BOT Behaviour #1: once the chat is completed and the
     customer says thank you, the next message should start a new flow with
-    the language menu. Today only the 4h Redis TTL resets anything."""
+    the language menu. Today only the idle Redis TTL resets anything."""
     processor, deps = _processor()
     deps["engine"].reply = "The dealership will contact you. Thank you!"
     deps["engine"].profile = {

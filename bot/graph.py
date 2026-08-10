@@ -319,7 +319,7 @@ class BrochureRequestClassification(BaseModel):
 # message might be a document-send ask the regex missed.
 _BROCHURE_REQUEST_SOFT_RE = re.compile(
     r"(?i)("
-    r"bhej|send|share|pdf|brochure|brocher|catalog|catalogue|"
+    r"bhej|behj|send|share|pdf|brochure|brocher|catalog|catalogue|"
     r"document|pamphlet|leaflet|file|"
     r"भेज|ब्रोशर|ब्रॉशर|पीडीएफ|कैटलॉग|कॅटलॉग|पाठव|"
     r"బ్రోచర్|பிரோஷர்|ಬ್ರೋಷರ್|ബ്രോഷർ"
@@ -384,6 +384,103 @@ def classify_brochure_request(user_message: str) -> bool:
     path, then soft-signal + LLM for other languages/phrasing."""
     result = brochure_request_graph.invoke({"user_message": user_message})
     return bool(result["wants_brochure"])
+
+
+class ProductInfoRequestState(TypedDict):
+    user_message: str
+    wants_info: bool
+
+
+class ProductInfoRequestClassification(BaseModel):
+    wants_info: bool = Field(
+        description=(
+            "True if the customer is asking a general product question — "
+            "specs, features, price, mileage, range, warranty, or a plain "
+            "'tell me more' — in any language or script, including "
+            "Romanized Hindi ('jankari chahiye', 'aur details do', "
+            "'batao'). False for greetings, yes/no replies, pincodes, "
+            "dates, an explicit document/brochure send request, or "
+            "anything unrelated to asking about the product."
+        )
+    )
+
+
+# Soft gate so we don't call the LLM on every turn — only when the message
+# might be an info ask the regex missed. PRODUCT_INFO_ASK_RE only knows
+# Devanagari/English wording, so Romanized Hindi ("jankari chahiye") fell
+# through both the regex and the offer/send flow entirely — the LLM never
+# got a chance to answer, and the model ended up freelancing (and once,
+# claiming to send a brochure it never sent). This net is deliberately
+# loose; the LLM makes the real call.
+_PRODUCT_INFO_SOFT_RE = re.compile(
+    r"(?i)("
+    r"spec|feature|detail|info|price|cost|mileage|range|battery|warrant|"
+    r"jankari|jaankari|janakari|batao|bataye|"
+    r"जानकारी|विवरण|माहिती|तपशील|"
+    r"సమాచారం|వివరాలు|விவரங்கள்|தகவல்|ವಿವರ|ಮಾಹಿತಿ|വിവരം|വിശദാംശങ്ങൾ"
+    r")"
+)
+
+
+def _route_product_info_request(state: ProductInfoRequestState) -> str:
+    from client_media_assets import wants_product_info
+
+    msg = state["user_message"]
+    if wants_product_info(msg):
+        return "yes"
+    if not _PRODUCT_INFO_SOFT_RE.search(msg or ""):
+        return "no"
+    return "classify"
+
+
+def _product_info_request_yes(state: ProductInfoRequestState) -> dict:
+    return {"wants_info": True}
+
+
+def _product_info_request_no(state: ProductInfoRequestState) -> dict:
+    return {"wants_info": False}
+
+
+def _classify_product_info_request(state: ProductInfoRequestState) -> dict:
+    try:
+        classifier = get_llm("fast").with_structured_output(
+            ProductInfoRequestClassification
+        )
+        result = classifier.invoke(
+            "In a TVS three-wheeler sales WhatsApp chat, the customer said "
+            "(any language or script, possibly Romanized Hindi): "
+            f"{state['user_message']!r}. "
+            "Are they asking a general product question that deserves a "
+            "text answer — not a document-send request?"
+        )
+        return {"wants_info": bool(result.wants_info)}
+    except Exception:
+        log.exception(
+            "product-info classifier call failed; defaulting to False"
+        )
+        return {"wants_info": False}
+
+
+product_info_request_builder = StateGraph(ProductInfoRequestState)
+product_info_request_builder.add_node("yes", _product_info_request_yes)
+product_info_request_builder.add_node("no", _product_info_request_no)
+product_info_request_builder.add_node("classify", _classify_product_info_request)
+product_info_request_builder.add_conditional_edges(
+    START, _route_product_info_request, ["yes", "no", "classify"]
+)
+product_info_request_builder.add_edge("yes", END)
+product_info_request_builder.add_edge("no", END)
+product_info_request_builder.add_edge("classify", END)
+
+product_info_request_graph = product_info_request_builder.compile()
+
+
+def classify_product_info_request(user_message: str) -> bool:
+    """True if the customer is asking a general product-info question —
+    regex fast path, then soft-signal + LLM for phrasing the regex misses
+    (e.g. Romanized Hindi 'jankari chahiye')."""
+    result = product_info_request_graph.invoke({"user_message": user_message})
+    return bool(result["wants_info"])
 
 
 class ShareConsentState(TypedDict):

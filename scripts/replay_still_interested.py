@@ -1,4 +1,4 @@
-"""Interactive local test for post-4h returning-customer still-interested flow.
+"""Interactive local test for the returning-customer still-interested flow.
 
 Assumes CRM already knows the customer (name + product). Simulates a fresh
 session after idle expiry: language menu → still-interested ask → your replies.
@@ -25,7 +25,7 @@ from dealers import DealerDirectory
 
 MOBILE = "+918459522206"
 
-# Assumed CRM data for a returning customer after 4h idle.
+# Assumed CRM data for a returning customer after the idle window.
 CUSTOMER = Customer(
     customer_id="313784",
     name="Onkar Game",
@@ -128,7 +128,7 @@ def main() -> None:
 
     print("Returning-customer still-interested local replay")
     print(f"CRM: {CUSTOMER.name} | {CUSTOMER.product_enquired} | {CUSTOMER.last_status}")
-    print("Fresh session (as after 4h idle). Type messages; empty line to quit.\n")
+    print("Fresh session (as after idle expiry). Type messages; empty line to quit.\n")
     print("Suggested path: Hi → 1 (English) → then 1 / 2 / yes / no / free text\n")
 
     n = 0

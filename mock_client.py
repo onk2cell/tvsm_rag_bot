@@ -255,7 +255,7 @@ def create_mock_client(
 
     @app.post("/mock/chat/reset")
     def reset_chat(payload: dict):
-        """Clear replies + Redis bot session for this mobile (fresh 4h-idle start)."""
+        """Clear replies + Redis bot session for this mobile (fresh 1h-idle start)."""
         mobile = str(payload.get("mobile") or "").strip()
         with lock:
             state["replies"] = [
@@ -475,7 +475,7 @@ def _chat_page() -> str:
     </div>
   </section>
   <section id="messages">
-    <div class="message system">Save CRM, then type below. Use Reset session to simulate 4h idle expiry.</div>
+    <div class="message system">Save CRM, then type below. Use Reset session to simulate 1h idle expiry.</div>
   </section>
   <form class="send" id="form">
     <input id="content" autocomplete="off" maxlength="4096" placeholder="Type a WhatsApp message…">

@@ -6,6 +6,12 @@
 *.key
 compose.override.yaml
 
+# Local PII exports (do not commit)
+all_other_interactions.txt
+unmapped_interactions.txt
+deepali_raw.txt
+chat_9371062202.txt
+
 # Runtime admin config (seeded on first run)
 data/*
 !data/dealers.json

@@ -11,7 +11,7 @@ docker compose --profile client up -d --build
 
 - `client-webhook` — `POST /client/webhook/messages` (ports 8002 / 8004)
 - `client-worker` — RQ worker (`CLIENT_QUEUE_NAME=client`)
-- `redis` — queue + 4h session TTL
+- `redis` — queue + 1h session TTL
 
 Configure `.env` with Gemini, `CLIENT_*` JAM URLs/API key, dealers data under `data/`.
 
@@ -98,6 +98,6 @@ Unit tests:
 
 ## Notes
 
-- Session idle expiry is **4 hours** (`CLIENT_HISTORY_TTL_SEC`); fresh session always shows the language menu.
+- Session idle expiry is **1 hour** (`CLIENT_HISTORY_TTL_SEC`); fresh session always shows the language menu.
 - Keep a **single** `client-worker` replica so webhook order is preserved per queue.
 - Lab values in `.env.mock` are test-only — never use them in production.

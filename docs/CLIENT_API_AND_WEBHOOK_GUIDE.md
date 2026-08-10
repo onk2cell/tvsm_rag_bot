@@ -428,7 +428,7 @@ Any HTTP **`2xx`** response (including `200` or `204`) means the reply was deliv
 |---|---|
 | Session key | `mobile` |
 | Continuity | Same mobile continues one conversation while active |
-| Idle expiry | After **4 hours** of inactivity, Redis session expires and a **new conversation** starts. The bot **always shows the language menu first** (even if CRM has a preferred language), then uses CRM remarks/status for welcome-back |
+| Idle expiry | After **1 hour** of inactivity (`CLIENT_HISTORY_TTL_SEC`), Redis session expires and a **new conversation** starts. The bot **always shows the language menu first** (even if CRM has a preferred language), then uses CRM remarks/status for welcome-back |
 | Ordering | Messages for one mobile are processed in arrival order |
 | Reply type | Text only in v1 |
 | Images | Used for document recognition (licence, ID, finance, vehicle docs, etc.) |
@@ -480,7 +480,7 @@ In the lab UI:
 
 1. Choose a **preset** (or edit mobile + CRM JSON)
 2. **Save CRM for this mobile**
-3. **Reset session** to simulate 4h idle expiry (language menu)
+3. **Reset session** to simulate 1h idle expiry (language menu)
 4. Chat — replies appear from the mock reply sink
 
 Lab ports: mock UI `8003`, lab webhook `8005`. Values live in `.env.mock`

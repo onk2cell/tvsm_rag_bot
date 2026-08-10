@@ -134,9 +134,12 @@ def build_processor(redis: Redis | None = None) -> ClientMessageProcessor:
     except Exception:
         log.exception("Dealer directory unavailable; pincode routing disabled")
 
+    # Dispose always uses JAM X-API-KEY auth. Wire it whenever URL + key are
+    # present — including lab (basic mock replies) so dispose can still hit
+    # real CRM with CLIENT_DISPOSE_URL + CLIENT_REPLY_API_KEY from .env.
     dispose_client = None
     dispose_url = _jam_dispose_url()
-    if config.CLIENT_REPLY_AUTH_MODE == "api_key" and dispose_url and config.CLIENT_REPLY_API_KEY:
+    if dispose_url and config.CLIENT_REPLY_API_KEY:
         dispose_client = JamDisposeClient(
             dispose_url,
             api_key=config.CLIENT_REPLY_API_KEY,

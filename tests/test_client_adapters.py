@@ -80,6 +80,24 @@ def test_customer_lookup_uses_first_crm_match():
     assert http.calls[0]["auth"] == ("api", "secret")
 
 
+def test_http_customer_directory_404_returns_unknown_stub():
+    """Lab mock CRM returns 404 for numbers not in CRM — must not hard-fail."""
+    http = FakeHttp([FakeResponse(404, {"customers": []})])
+    directory = HttpCustomerDirectory(
+        "http://mock-client:8002/mock/customers",
+        username="mock-client",
+        password="secret",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    customer = directory.lookup("+919999000111")
+
+    assert customer.customer_id.startswith("unknown-")
+    assert customer.name == "Customer 9999000111"
+    assert customer.preferred_language == ""
+
+
 def test_customer_lookup_retries_transient_failures():
     http = FakeHttp(
         [
@@ -462,9 +480,9 @@ class FakeRedis:
         return True
 
 
-def test_client_state_persists_history_customer_and_four_hour_ttl():
+def test_client_state_persists_history_customer_and_one_hour_ttl():
     redis = FakeRedis()
-    state = RedisClientState(redis, ttl_seconds=14400, id_factory=lambda: "conversation-1")
+    state = RedisClientState(redis, ttl_seconds=3600, id_factory=lambda: "conversation-1")
     session = state.load_or_start("+918286871533")
     session.history.append({"role": "user", "text": "hi"})
     state.save(session)
@@ -473,10 +491,25 @@ def test_client_state_persists_history_customer_and_four_hour_ttl():
 
     assert loaded.conversation_id == "conversation-1"
     assert loaded.history == [{"role": "user", "text": "hi"}]
-    assert redis.expiries["client:session:+918286871533"] == 14400
+    assert redis.expiries["client:session:+918286871533"] == 3600
     assert json.loads(redis.data["client:session:+918286871533"])["mobile"] == (
         "+918286871533"
     )
+
+
+def test_session_idle_expiry_defaults_to_one_hour():
+    """The idle window is what makes a returning customer get a fresh
+    conversation (and the language menu) instead of resuming an old one.
+    It is set in two places that must agree: the RedisClientState default
+    and the CLIENT_HISTORY_TTL_SEC config default."""
+    import config
+
+    redis = FakeRedis()
+    state = RedisClientState(redis, id_factory=lambda: "conversation-1")
+    state.save(state.load_or_start("+918286871533"))
+
+    assert redis.expiries["client:session:+918286871533"] == 3600
+    assert config.CLIENT_HISTORY_TTL_SEC == 3600
 
 
 def test_client_state_round_trips_every_session_field():
@@ -487,7 +520,7 @@ def test_client_state_round_trips_every_session_field():
     back, so a future field addition here fails loudly instead of quietly
     resetting mid-conversation flags after the next Redis round-trip."""
     redis = FakeRedis()
-    state = RedisClientState(redis, ttl_seconds=14400, id_factory=lambda: "conversation-1")
+    state = RedisClientState(redis, ttl_seconds=3600, id_factory=lambda: "conversation-1")
     session = state.load_or_start("+918286871533")
 
     non_default = {}

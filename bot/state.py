@@ -12,7 +12,7 @@ second, non-grounded model.
 
 No LangGraph checkpointer is used for cross-turn persistence — RQ workers
 are stateless per job, and RedisClientState already durably persists
-session state (with the correct 4h TTL). `graph.invoke()` runs once per
+session state (with the correct idle TTL). `graph.invoke()` runs once per
 turn with a fully-formed BotState built from TurnInput.
 """
 from typing import Any, TypedDict
