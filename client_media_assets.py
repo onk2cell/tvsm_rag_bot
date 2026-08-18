@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 
+import admin_config
 import config
 from dispose import normalize_product_name
 
@@ -38,42 +39,24 @@ SHARE_LOCATION_CAPTIONS = {
     ),
 }
 
-# Canonical product → public brochure PDF on JAM CDN (not Cloudflare/local media).
-_JAM_PDF_BASE = "https://1.jamoutsourcing.com/f"
+# Product documents are admin-configurable (admin_config "documents"), so a new
+# model year is a config edit rather than a redeploy. Read per call — the store
+# reloads from disk, the same reload-on-read contract the engine uses — with the
+# built-in defaults as the fallback when the key is absent or the store is
+# unreadable, so document sending can never be broken by a config problem.
+def product_documents() -> dict:
+    try:
+        configured = admin_config.get_store().get().get("documents")
+    except Exception:  # unreadable/invalid config must not stop a brochure
+        configured = None
+    if isinstance(configured, dict) and configured:
+        return configured
+    return admin_config.DEFAULT_PRODUCT_DOCUMENTS
 
-PRODUCT_BROCHURE_URLS = {
-    "King EV MAX": f"{_JAM_PDF_BASE}/King_EV_MAX-English.pdf",
-    "King Deluxe": f"{_JAM_PDF_BASE}/King_Deluxe_Petrol-English.pdf",
-    "King Duramax Plus": f"{_JAM_PDF_BASE}/King_Duramax_Plus_Petrol-English.pdf",
-}
 
-# Fuel-specific brochures when the customer names CNG / LPG / Petrol.
-PRODUCT_BROCHURE_FUEL_URLS = {
-    "King Deluxe": {
-        "cng": f"{_JAM_PDF_BASE}/King_Deluxe_CNG-English.pdf",
-        "lpg": f"{_JAM_PDF_BASE}/King_Deluxe_LPG-English.pdf",
-        "petrol": f"{_JAM_PDF_BASE}/King_Deluxe_Petrol-English.pdf",
-    },
-    "King Duramax Plus": {
-        "cng": f"{_JAM_PDF_BASE}/King_Duramax_Plus_CNG-English.pdf",
-        "petrol": f"{_JAM_PDF_BASE}/King_Duramax_Plus_Petrol-English.pdf",
-    },
-}
+def configured_products() -> list[str]:
+    return list(product_documents())
 
-# Extra PDFs sent with the product brochure (warranty / PMS schedule).
-PRODUCT_SUPPORT_DOC_URLS = {
-    "King EV MAX": [
-        (f"{_JAM_PDF_BASE}/TVS_King_EV_MAX_Warranty_Policy.pdf", "warranty"),
-    ],
-    "King Deluxe": [
-        (f"{_JAM_PDF_BASE}/Deluxe-PMS-Schedule.pdf", "pms"),
-        (f"{_JAM_PDF_BASE}/Deluxe-Warranty-Policy-new.pdf", "warranty"),
-    ],
-    "King Duramax Plus": [
-        (f"{_JAM_PDF_BASE}/Duramaxplus-PMS-Schedule.pdf", "pms"),
-        (f"{_JAM_PDF_BASE}/Duramaxplus-Warranty-Policy.pdf", "warranty"),
-    ],
-}
 
 # Kept for callers/tests that still check configured products.
 PRODUCT_BROCHURE_SLUG = {
@@ -191,9 +174,10 @@ def wants_product_info(message: str | None) -> bool:
 
 def brochure_product_from_text(*texts: str | None) -> str:
     """Pick a brochure product from free text (message, profile, CRM hint)."""
+    documents = product_documents()
     for text in texts:
         product = normalize_product_name(text)
-        if product in PRODUCT_BROCHURE_URLS:
+        if product in documents:
             return product
     return ""
 
@@ -213,14 +197,15 @@ def _fuel_from_text(*texts: str | None) -> str:
 def product_brochure_url(product: str, *hint_texts: str | None) -> str:
     """HTTPS URL for a product brochure PDF on the JAM CDN, or empty."""
     product = (product or "").strip()
-    if product not in PRODUCT_BROCHURE_URLS:
+    entry = product_documents().get(product)
+    if not entry:
         return ""
     fuel = _fuel_from_text(*hint_texts)
     if fuel:
-        fuel_map = PRODUCT_BROCHURE_FUEL_URLS.get(product) or {}
-        if fuel in fuel_map:
-            return fuel_map[fuel]
-    return PRODUCT_BROCHURE_URLS[product]
+        fuel_url = (entry.get("fuel") or {}).get(fuel)
+        if fuel_url:
+            return fuel_url
+    return entry.get("brochure") or ""
 
 
 # Customer asked about servicing/maintenance or warranty specifically — only
@@ -257,8 +242,9 @@ def product_document_pack(
         return []
     pack: list[tuple[str, str]] = [(brochure, "brochure")]
     if include_support_docs:
-        for link, kind in PRODUCT_SUPPORT_DOC_URLS.get(product, ()):
-            pack.append((link, kind))
+        entry = product_documents().get(product) or {}
+        for doc in entry.get("support") or []:
+            pack.append((doc["url"], doc["kind"]))
     return pack
 
 

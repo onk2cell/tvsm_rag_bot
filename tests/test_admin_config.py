@@ -163,3 +163,42 @@ def test_blank_string_means_unset():
     config = _cfg(campaign_starts_on="", campaign_ends_on="")
     validate_config(config)
     assert campaign_is_active(config, date(2026, 8, 18))
+
+
+# --- product documents ------------------------------------------------------
+
+from admin_config import validate_documents  # noqa: E402
+
+
+def test_default_documents_validate():
+    validate_config(default_config())
+
+
+def test_reject_a_document_entry_without_a_brochure():
+    with pytest.raises(ValueError, match="brochure must be a non-empty URL"):
+        validate_documents({"King EV MAX": {"fuel": {}}})
+
+
+def test_reject_an_unknown_fuel():
+    with pytest.raises(ValueError, match="unknown fuel"):
+        validate_documents(
+            {"King Deluxe": {"brochure": "https://x/a.pdf", "fuel": {"diesel": "https://x/d.pdf"}}}
+        )
+
+
+def test_reject_an_unknown_support_kind():
+    with pytest.raises(ValueError, match="kind must be one of"):
+        validate_documents(
+            {
+                "King Deluxe": {
+                    "brochure": "https://x/a.pdf",
+                    "support": [{"url": "https://x/b.pdf", "kind": "manual"}],
+                }
+            }
+        )
+
+
+def test_documents_may_be_omitted_entirely():
+    config = default_config()
+    del config["documents"]
+    validate_config(config)

@@ -145,3 +145,122 @@ def test_wants_support_documents_detects_warranty_and_service_asks():
     assert wants_support_documents("मला वॉरंटी माहिती हवी")
     assert not wants_support_documents("send brochure")
     assert not wants_support_documents("Yes send brochure")
+
+
+# --- admin-configurable product documents -----------------------------------
+
+
+def _documents_config(monkeypatch, documents):
+    """Point client_media_assets at a config carrying these documents."""
+    import client_media_assets
+
+    class FakeStore:
+        def get(self):
+            return {"documents": documents}
+
+    monkeypatch.setattr(
+        client_media_assets.admin_config, "get_store", lambda: FakeStore()
+    )
+
+
+def test_defaults_are_used_when_config_has_no_documents(monkeypatch):
+    """An existing config predates this feature and must behave as before."""
+    import client_media_assets
+
+    class EmptyStore:
+        def get(self):
+            return {}
+
+    monkeypatch.setattr(
+        client_media_assets.admin_config, "get_store", lambda: EmptyStore()
+    )
+    url = client_media_assets.product_brochure_url("King EV MAX")
+    assert url.endswith("King_EV_MAX-English.pdf")
+
+
+def test_a_new_model_year_needs_only_a_config_edit(monkeypatch):
+    import client_media_assets
+
+    _documents_config(
+        monkeypatch,
+        {"King EV MAX": {"brochure": "https://cdn.example/King_EV_MAX-2027.pdf"}},
+    )
+    assert (
+        client_media_assets.product_brochure_url("King EV MAX")
+        == "https://cdn.example/King_EV_MAX-2027.pdf"
+    )
+
+
+def test_fuel_override_comes_from_config(monkeypatch):
+    import client_media_assets
+
+    _documents_config(
+        monkeypatch,
+        {
+            "King Deluxe": {
+                "brochure": "https://cdn.example/deluxe.pdf",
+                "fuel": {"cng": "https://cdn.example/deluxe-cng.pdf"},
+            }
+        },
+    )
+    assert (
+        client_media_assets.product_brochure_url("King Deluxe", "cng chahiye")
+        == "https://cdn.example/deluxe-cng.pdf"
+    )
+    # no fuel named, and an unconfigured fuel, both fall back to the default
+    assert (
+        client_media_assets.product_brochure_url("King Deluxe")
+        == "https://cdn.example/deluxe.pdf"
+    )
+    assert (
+        client_media_assets.product_brochure_url("King Deluxe", "petrol")
+        == "https://cdn.example/deluxe.pdf"
+    )
+
+
+def test_support_docs_come_from_config_and_stay_opt_in(monkeypatch):
+    import client_media_assets
+
+    _documents_config(
+        monkeypatch,
+        {
+            "King Deluxe": {
+                "brochure": "https://cdn.example/deluxe.pdf",
+                "support": [
+                    {"url": "https://cdn.example/warranty.pdf", "kind": "warranty"}
+                ],
+            }
+        },
+    )
+    # asking for "the brochure" must still deliver exactly one file
+    assert client_media_assets.product_document_pack("King Deluxe") == [
+        ("https://cdn.example/deluxe.pdf", "brochure")
+    ]
+    assert client_media_assets.product_document_pack(
+        "King Deluxe", include_support_docs=True
+    ) == [
+        ("https://cdn.example/deluxe.pdf", "brochure"),
+        ("https://cdn.example/warranty.pdf", "warranty"),
+    ]
+
+
+def test_a_product_removed_from_config_sends_nothing(monkeypatch):
+    import client_media_assets
+
+    _documents_config(monkeypatch, {"King EV MAX": {"brochure": "https://x/ev.pdf"}})
+    assert client_media_assets.product_brochure_url("King Deluxe") == ""
+    assert client_media_assets.product_document_pack("King Deluxe") == []
+    assert client_media_assets.brochure_product_from_text("king deluxe") == ""
+
+
+def test_an_unreadable_config_still_sends_the_default_brochure(monkeypatch):
+    """A config problem must never stop a customer getting a brochure."""
+    import client_media_assets
+
+    def explode():
+        raise RuntimeError("config file is corrupt")
+
+    monkeypatch.setattr(client_media_assets.admin_config, "get_store", explode)
+    assert client_media_assets.product_brochure_url("King EV MAX").endswith(
+        "King_EV_MAX-English.pdf"
+    )

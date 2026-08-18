@@ -368,6 +368,18 @@ The live bot configuration. This is the exact document `PUT` expects back.
   "campaign_text": "ACTIVE CAMPAIGN — \"Vaada\" scheme …",
   "campaign_starts_on": "2026-08-01",
   "campaign_ends_on": "2026-10-31",
+  "documents": {
+    "King Deluxe": {
+      "brochure": "https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf",
+      "fuel": {
+        "cng": "https://1.jamoutsourcing.com/f/King_Deluxe_CNG-English.pdf",
+        "petrol": "https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf"
+      },
+      "support": [
+        {"url": "https://1.jamoutsourcing.com/f/Deluxe-PMS-Schedule.pdf", "kind": "pms"}
+      ]
+    }
+  },
   "intro": {"English": {"text": "Hi! I'm TVS Motor's assistant …", "audio_url": null}},
   "entry_sources": {"whatsapp": {"welcome_override": null}}
 }
@@ -399,6 +411,11 @@ Returns the saved document on `200`. Changes reach the worker on its next messag
 - `voice_policy` one of `always`, `intro_only`, `never`, `mirror_user`
 - `intro` must contain an entry for **every** language `code`, each `{text: string, audio_url: string|null}`
 - `campaign_starts_on` / `campaign_ends_on` must be `YYYY-MM-DD` or `null`, and the end must not precede the start
+- `documents` is optional. Each product needs a non-empty `brochure` URL; `fuel` keys must be `cng`, `lpg` or `petrol`; each `support` entry needs a `url` and a `kind` of `warranty` or `pms`
+
+**Product documents.** `documents` replaces what used to be a hardcoded table, so a new model year is a config edit rather than a redeploy. These PDFs live on JAM's own CDN — `CLIENT_MEDIA_BASE_URL` serves only the share-location card, not brochures.
+
+`brochure` is the default; `fuel` overrides it when the customer names a fuel type; `support` PDFs are sent **only** when they ask about warranty or servicing, so asking for "the brochure" delivers one file rather than three. Removing a product from `documents` stops the bot offering its brochure at all. If the key is absent, or the config cannot be read, the built-in defaults apply — a config problem can never stop a customer getting a brochure.
 
 **Campaign scheduling.** Both date fields are optional and default to `null`, which means open-ended — a config with neither set behaves exactly as before scheduling existed, always on. Bounds are **inclusive** and evaluated in **India time**, so a campaign ending `2026-10-31` stops after that day in IST rather than 5h30m out.
 

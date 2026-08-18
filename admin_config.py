@@ -73,6 +73,93 @@ DEFAULT_INTRO_TEXT = (
     "and connect you with your nearest dealership."
 )
 
+# Product documents sent over WhatsApp. These live on JAM's own CDN, not the
+# media host — CLIENT_MEDIA_BASE_URL serves only the share-location card.
+#
+# Admin-editable so a new model year is a config edit, not a redeploy:
+#   brochure — the default PDF for the product
+#   fuel     — overrides when the customer names CNG / LPG / petrol
+#   support  — warranty and PMS schedules, sent only when they ask about
+#              servicing or warranty (one request must not deliver three files)
+JAM_PDF_BASE = "https://1.jamoutsourcing.com/f"
+
+DEFAULT_PRODUCT_DOCUMENTS = {
+    "King EV MAX": {
+        "brochure": f"{JAM_PDF_BASE}/King_EV_MAX-English.pdf",
+        "fuel": {},
+        "support": [
+            {"url": f"{JAM_PDF_BASE}/TVS_King_EV_MAX_Warranty_Policy.pdf",
+             "kind": "warranty"},
+        ],
+    },
+    "King Deluxe": {
+        "brochure": f"{JAM_PDF_BASE}/King_Deluxe_Petrol-English.pdf",
+        "fuel": {
+            "cng": f"{JAM_PDF_BASE}/King_Deluxe_CNG-English.pdf",
+            "lpg": f"{JAM_PDF_BASE}/King_Deluxe_LPG-English.pdf",
+            "petrol": f"{JAM_PDF_BASE}/King_Deluxe_Petrol-English.pdf",
+        },
+        "support": [
+            {"url": f"{JAM_PDF_BASE}/Deluxe-PMS-Schedule.pdf", "kind": "pms"},
+            {"url": f"{JAM_PDF_BASE}/Deluxe-Warranty-Policy-new.pdf",
+             "kind": "warranty"},
+        ],
+    },
+    "King Duramax Plus": {
+        "brochure": f"{JAM_PDF_BASE}/King_Duramax_Plus_Petrol-English.pdf",
+        "fuel": {
+            "cng": f"{JAM_PDF_BASE}/King_Duramax_Plus_CNG-English.pdf",
+            "petrol": f"{JAM_PDF_BASE}/King_Duramax_Plus_Petrol-English.pdf",
+        },
+        "support": [
+            {"url": f"{JAM_PDF_BASE}/Duramaxplus-PMS-Schedule.pdf", "kind": "pms"},
+            {"url": f"{JAM_PDF_BASE}/Duramaxplus-Warranty-Policy.pdf",
+             "kind": "warranty"},
+        ],
+    },
+}
+
+SUPPORT_DOC_KINDS = frozenset({"warranty", "pms"})
+FUEL_KINDS = frozenset({"cng", "lpg", "petrol"})
+
+
+def validate_documents(documents: Any) -> None:
+    """Raise ValueError with a message naming the offending product."""
+    if not isinstance(documents, dict):
+        raise ValueError("documents must be an object keyed by product name")
+    for product, entry in documents.items():
+        where = f"documents[{product!r}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{where} must be an object")
+        brochure = entry.get("brochure")
+        if not isinstance(brochure, str) or not brochure.strip():
+            raise ValueError(f"{where}.brochure must be a non-empty URL")
+        fuel = entry.get("fuel", {})
+        if not isinstance(fuel, dict):
+            raise ValueError(f"{where}.fuel must be an object")
+        for kind, url in fuel.items():
+            if kind not in FUEL_KINDS:
+                raise ValueError(
+                    f"{where}.fuel has unknown fuel {kind!r}; "
+                    f"expected one of {', '.join(sorted(FUEL_KINDS))}"
+                )
+            if not isinstance(url, str) or not url.strip():
+                raise ValueError(f"{where}.fuel[{kind}] must be a non-empty URL")
+        support = entry.get("support", [])
+        if not isinstance(support, list):
+            raise ValueError(f"{where}.support must be a list")
+        for i, doc in enumerate(support):
+            if not isinstance(doc, dict):
+                raise ValueError(f"{where}.support[{i}] must be an object")
+            if not isinstance(doc.get("url"), str) or not doc["url"].strip():
+                raise ValueError(f"{where}.support[{i}].url must be a non-empty URL")
+            if doc.get("kind") not in SUPPORT_DOC_KINDS:
+                raise ValueError(
+                    f"{where}.support[{i}].kind must be one of "
+                    f"{', '.join(sorted(SUPPORT_DOC_KINDS))}"
+                )
+
+
 # Written to CSV by adapters/the engine — not asked as chat questions.
 SYSTEM_CSV_COLUMNS = [
     "timestamp",
@@ -161,7 +248,7 @@ def default_config() -> dict[str, Any]:
         "campaign_text": DEFAULT_CAMPAIGN_TEXT.strip(),
         "campaign_starts_on": None,   # null = no start bound
         "campaign_ends_on": None,     # null = never expires
-
+        "documents": deepcopy(DEFAULT_PRODUCT_DOCUMENTS),
         "intro": intro,
         "entry_sources": {
             "web": {"welcome_override": None},
@@ -258,6 +345,9 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError(
             f"campaign_ends_on ({ends}) is before campaign_starts_on ({starts})"
         )
+
+    if "documents" in config:
+        validate_documents(config["documents"])
 
     entry_sources = config.get("entry_sources")
     if entry_sources is not None:

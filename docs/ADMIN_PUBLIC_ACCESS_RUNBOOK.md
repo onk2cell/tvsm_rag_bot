@@ -46,7 +46,9 @@ Both are `--restart unless-stopped`, so they come back after a reboot — **but 
 
 ### Why this needs fixing
 
-1. **Brochures break silently.** `CLIENT_MEDIA_BASE_URL` in the server's `.env` is pinned to the media tunnel's current random hostname. When that tunnel restarts, the URL changes, the env var goes stale, and every brochure and location image sent to a customer 404s. Nothing alerts on it. The tunnel has survived since 24 Jul on luck alone.
+1. **The share-location card breaks silently.** `CLIENT_MEDIA_BASE_URL` in the server's `.env` is pinned to the media tunnel's current random hostname. When that tunnel restarts the URL changes, the env var goes stale, and the image 404s with nothing alerting on it. The tunnel has survived since 24 Jul on luck alone.
+
+   Scope, precisely: `media_base_url()` is consumed by exactly one caller, `share_location_image_url()`. **Brochures are not affected** — `documents` in the admin config points at JAM's own CDN (`https://1.jamoutsourcing.com/f`), a different host entirely. So the blast radius is the how-to image shown to customers who do not know their pincode: they get asked to share their location with no picture explaining how. Real, and worth fixing, but not the whole document pipeline.
 2. **The admin panel is protected by one shared static token.** No expiry, no rate limit, no lockout, no record of who accessed what — in front of every customer's phone number, name, and full chat transcript.
 
 Both are fixed by the same change.
@@ -208,7 +210,7 @@ docker rm -f tvsm-admin-tunnel
 docker rm -f tvsm-media-tunnel
 ```
 
-Removing `tvsm-media-tunnel` **breaks brochures instantly** if step 5 was skipped or `.env` was not applied. Confirm a real brochure downloads over `media.example.com` first.
+Removing `tvsm-media-tunnel` **breaks the share-location card instantly** if step 5 was skipped or `.env` was not applied. Confirm the image loads over `media.example.com` first. (Brochures come from JAM's CDN and are unaffected either way.)
 
 ---
 
@@ -217,7 +219,7 @@ Removing `tvsm-media-tunnel` **breaks brochures instantly** if step 5 was skippe
 | Situation | Action |
 |---|---|
 | New tunnel misbehaves, quick tunnels still running | `docker rm -f tvsm-tunnel`. Nothing else changed; old URLs keep working |
-| Brochures stopped after the `.env` edit | `cp .env.bak.<date> .env` then `docker compose --profile client up -d client-worker` |
+| Share-location image stopped after the `.env` edit | `cp .env.bak.<date> .env` then `docker compose --profile client up -d client-worker` |
 | Quick tunnels already deleted and the new one fails | Recreate: `docker run -d --name tvsm-media-tunnel --restart unless-stopped --add-host host.docker.internal:host-gateway cloudflare/cloudflared:latest tunnel --no-autoupdate --url http://host.docker.internal:8088`, read the new URL from `docker logs`, put it in `.env`, restart `client-worker` |
 
 Read a quick tunnel's current URL at any time:
