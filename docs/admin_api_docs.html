@@ -1,0 +1,1032 @@
+<title>TVS Bot Admin API</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  :root {
+    --ground:      #f3f6f5;
+    --surface:     #ffffff;
+    --surface-alt: #eaefed;
+    --ink:         #101917;
+    --ink-soft:    #46544f;
+    --ink-faint:   #7a8783;
+    --rule:        #dce3e0;
+    --rule-strong: #c3ceca;
+    --accent:      #0d5f57;
+    --accent-soft: #dcece8;
+    --code-bg:     #0f1a18;
+    --code-ink:    #d6e3df;
+    --code-key:    #7fd0bd;
+    --code-str:    #e0c489;
+    --code-dim:    #6d817c;
+    --get:         #10607e;  --get-bg:  #ddedf3;
+    --post:        #7d5410;  --post-bg: #f6ead3;
+    --put:         #524a91;  --put-bg:  #e6e4f4;
+    --del:         #93372f;  --del-bg:  #f6dfdb;
+    --ok:          #2f6a45;  --ok-bg:   #dfeee4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0c1211;
+      --surface:     #141c1a;
+      --surface-alt: #1a2422;
+      --ink:         #e7eeeb;
+      --ink-soft:    #a6b3ae;
+      --ink-faint:   #77857f;
+      --rule:        #26312e;
+      --rule-strong: #35433f;
+      --accent:      #63c5b0;
+      --accent-soft: #16302b;
+      --code-bg:     #080e0d;
+      --code-ink:    #cbdad5;
+      --code-key:    #7fd0bd;
+      --code-str:    #e0c489;
+      --code-dim:    #5e716c;
+      --get:         #78c0dc;  --get-bg:  #122a34;
+      --post:        #dcb46e;  --post-bg: #322710;
+      --put:         #a9a2e0;  --put-bg:  #23204a;
+      --del:         #e2887c;  --del-bg:  #3a1e1a;
+      --ok:          #86c79c;  --ok-bg:   #17301f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #0c1211;
+    --surface:     #141c1a;
+    --surface-alt: #1a2422;
+    --ink:         #e7eeeb;
+    --ink-soft:    #a6b3ae;
+    --ink-faint:   #77857f;
+    --rule:        #26312e;
+    --rule-strong: #35433f;
+    --accent:      #63c5b0;
+    --accent-soft: #16302b;
+    --code-bg:     #080e0d;
+    --code-ink:    #cbdad5;
+    --code-key:    #7fd0bd;
+    --code-str:    #e0c489;
+    --code-dim:    #5e716c;
+    --get:         #78c0dc;  --get-bg:  #122a34;
+    --post:        #dcb46e;  --post-bg: #322710;
+    --put:         #a9a2e0;  --put-bg:  #23204a;
+    --del:         #e2887c;  --del-bg:  #3a1e1a;
+    --ok:          #86c79c;  --ok-bg:   #17301f;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; scroll-padding-top: 1.5rem; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    font-size: 16.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+  code, pre, .path, .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+
+  /* ---------- shell ---------- */
+
+  .shell {
+    max-width: 84rem;
+    margin: 0 auto;
+    padding: clamp(1.6rem, 4vw, 3rem) clamp(1rem, 3.5vw, 2.5rem) 6rem;
+    display: grid;
+    gap: clamp(1.5rem, 4vw, 3rem);
+  }
+  @media (min-width: 66rem) {
+    .shell { grid-template-columns: 15.5rem minmax(0, 1fr); align-items: start; }
+    .masthead { grid-column: 1 / -1; }
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.5rem; }
+  .kicker {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .7rem; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 .75rem; font-weight: 500;
+  }
+  h1 {
+    font-family: "Archivo", system-ui, sans-serif;
+    font-weight: 700; font-size: clamp(1.9rem, 5vw, 2.9rem);
+    letter-spacing: -.03em; line-height: 1.02; margin: 0 0 .7rem;
+    text-wrap: balance;
+  }
+  .standfirst { margin: 0; color: var(--ink-soft); max-width: 60ch; font-size: 1.06rem; }
+  .masthead .meta {
+    margin: 1.1rem 0 0; display: flex; flex-wrap: wrap; gap: .45rem 1.4rem;
+    font-family: "JetBrains Mono", monospace; font-size: .74rem;
+    color: var(--ink-faint); letter-spacing: .02em;
+  }
+  .masthead .meta b { color: var(--ink-soft); font-weight: 500; }
+
+  /* ---------- rail ---------- */
+
+  .rail { min-width: 0; }
+  @media (min-width: 66rem) {
+    .rail { position: sticky; top: 1.5rem; max-height: calc(100vh - 3rem); overflow-y: auto; padding-right: .4rem; }
+  }
+  .rail h2 {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .68rem; letter-spacing: .15em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 500;
+    margin: 1.5rem 0 .5rem; padding-bottom: .35rem; border-bottom: 1px solid var(--rule);
+  }
+  .rail h2:first-child { margin-top: 0; }
+  .rail ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+  .rail a {
+    display: grid; grid-template-columns: 3.1rem minmax(0, 1fr); gap: .5rem;
+    align-items: baseline; padding: .28rem .4rem; border-radius: 4px;
+    text-decoration: none; color: var(--ink-soft); font-size: .82rem;
+  }
+  .rail a:hover { background: var(--surface-alt); color: var(--ink); }
+  .rail a.on { background: var(--accent-soft); color: var(--ink); }
+  .rail .v {
+    font-family: "JetBrains Mono", monospace; font-size: .6rem; font-weight: 700;
+    letter-spacing: .05em; text-align: right; color: var(--ink-faint);
+  }
+  .rail a.on .v { color: var(--accent); }
+  .rail .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------- body column ---------- */
+
+  .doc { min-width: 0; display: grid; gap: 2.6rem; }
+
+  .band {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 12px; padding: clamp(1.1rem, 3vw, 1.7rem);
+    display: grid; gap: 1.1rem;
+  }
+  .band h2, .grp > h2 {
+    font-family: "Archivo", sans-serif; font-weight: 700;
+    font-size: 1.3rem; letter-spacing: -.02em; margin: 0;
+  }
+  .band p { margin: 0; color: var(--ink-soft); }
+
+  .grp { display: grid; gap: 1rem; }
+  .grp > header { display: grid; gap: .3rem; border-bottom: 1px solid var(--rule-strong); padding-bottom: .7rem; }
+  .grp > header h2 { font-family: "Archivo", sans-serif; font-weight: 700; font-size: 1.55rem; letter-spacing: -.025em; margin: 0; }
+  .grp > header p { margin: 0; color: var(--ink-soft); font-size: .95rem; max-width: 68ch; }
+
+  /* ---------- endpoint ---------- */
+
+  .ep {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 12px; overflow: hidden;
+  }
+  .ep > .sig {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .55rem;
+    padding: .75rem 1rem; background: var(--surface-alt);
+    border-bottom: 1px solid var(--rule);
+  }
+  .v-tag {
+    font-family: "JetBrains Mono", monospace; font-size: .68rem; font-weight: 700;
+    letter-spacing: .07em; padding: .2rem .45rem; border-radius: 4px; flex: none;
+  }
+  .v-get { background: var(--get-bg); color: var(--get); }
+  .v-post { background: var(--post-bg); color: var(--post); }
+  .v-put { background: var(--put-bg); color: var(--put); }
+  .v-del { background: var(--del-bg); color: var(--del); }
+  .sig .path { font-size: .92rem; font-weight: 500; word-break: break-all; }
+  .sig .path em { font-style: normal; color: var(--accent); }
+  .sig .free {
+    margin-left: auto; font-family: "JetBrains Mono", monospace;
+    font-size: .64rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ok); background: var(--ok-bg); padding: .18rem .45rem; border-radius: 4px;
+  }
+  .ep > .in { padding: 1rem 1rem 1.2rem; display: grid; gap: .9rem; }
+  .ep .lead { margin: 0; color: var(--ink-soft); font-size: .95rem; }
+  .ep .lead strong { color: var(--ink); }
+
+  h4 {
+    font-family: "JetBrains Mono", monospace;
+    font-size: .66rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 500; margin: .3rem 0 -.2rem;
+  }
+
+  /* ---------- tables ---------- */
+
+  .tw { overflow-x: auto; border: 1px solid var(--rule); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: .87rem; min-width: 30rem; }
+  th, td { text-align: left; padding: .48rem .7rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  thead th {
+    font-family: "JetBrains Mono", monospace; font-size: .64rem;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+    font-weight: 500; background: var(--surface-alt); white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td:first-child { white-space: nowrap; }
+  td code { font-size: .84em; }
+  .num { font-variant-numeric: tabular-nums; }
+  .req { color: var(--del); font-weight: 600; font-size: .78rem; }
+  .opt { color: var(--ink-faint); font-size: .78rem; }
+
+  /* ---------- code ---------- */
+
+  pre {
+    margin: 0; background: var(--code-bg); color: var(--code-ink);
+    border-radius: 8px; padding: .8rem .9rem; overflow-x: auto;
+    font-size: .82rem; line-height: 1.62; tab-size: 2;
+  }
+  pre .k { color: var(--code-key); }
+  pre .s { color: var(--code-str); }
+  pre .c { color: var(--code-dim); }
+  :not(pre) > code {
+    background: var(--surface-alt); border: 1px solid var(--rule);
+    padding: .06em .32em; border-radius: 4px; font-size: .85em;
+  }
+
+  .callout {
+    border-left: 3px solid var(--accent); background: var(--accent-soft);
+    padding: .65rem .85rem; border-radius: 0 6px 6px 0; font-size: .89rem;
+    color: var(--ink-soft);
+  }
+  .callout strong { color: var(--ink); }
+  .callout p { margin: 0; }
+  .callout p + p { margin-top: .5rem; }
+
+  .cols { display: grid; gap: .9rem; }
+  @media (min-width: 52rem) { .cols-2 { grid-template-columns: 1fr 1fr; } }
+
+  footer {
+    grid-column: 1 / -1; margin-top: 1rem; padding-top: 1.2rem;
+    border-top: 1px solid var(--rule); color: var(--ink-faint); font-size: .82rem;
+  }
+</style>
+
+<div class="shell">
+
+<header class="masthead">
+  <p class="kicker">TVS Passenger 3W · WhatsApp Assistant</p>
+  <h1>Admin API</h1>
+  <p class="standfirst">Every endpoint the control panel is built on — request shape, response shape, and a working <code>curl</code> for each. One shared bearer token; changes reach the bot on the next customer message, with nothing to restart.</p>
+  <p class="meta">
+    <span><b>23</b> endpoints</span>
+    <span><b>7</b> groups</span>
+    <span>OpenAPI 3.1 at <b>/openapi.json</b></span>
+    <span>Swagger at <b>/docs</b></span>
+  </p>
+</header>
+
+<nav class="rail" aria-label="Endpoints">
+  <h2>Getting started</h2>
+  <ul>
+    <li><a href="#start"><span class="v"></span><span class="n">Base URL &amp; auth</span></a></li>
+    <li><a href="#errors"><span class="v"></span><span class="n">Error responses</span></a></li>
+  </ul>
+
+  <h2>Operations</h2>
+  <ul>
+    <li><a href="#health"><span class="v">GET</span><span class="n">/admin/health</span></a></li>
+    <li><a href="#status"><span class="v">GET</span><span class="n">/api/status</span></a></li>
+    <li><a href="#reset"><span class="v">POST</span><span class="n">/api/session/reset</span></a></li>
+  </ul>
+
+  <h2>Conversations</h2>
+  <ul>
+    <li><a href="#interactions"><span class="v">GET</span><span class="n">/api/interactions</span></a></li>
+    <li><a href="#interactions-csv"><span class="v">GET</span><span class="n">…/export.csv</span></a></li>
+    <li><a href="#transcript"><span class="v">GET</span><span class="n">…/{session}</span></a></li>
+    <li><a href="#review"><span class="v">POST</span><span class="n">…/{id}/review</span></a></li>
+  </ul>
+
+  <h2>Leads</h2>
+  <ul>
+    <li><a href="#leads"><span class="v">GET</span><span class="n">/api/leads</span></a></li>
+    <li><a href="#leads-csv"><span class="v">GET</span><span class="n">…/export.csv</span></a></li>
+  </ul>
+
+  <h2>Media</h2>
+  <ul>
+    <li><a href="#media-list"><span class="v">GET</span><span class="n">/api/media/{kind}</span></a></li>
+    <li><a href="#media-post"><span class="v">POST</span><span class="n">/api/media/{kind}</span></a></li>
+    <li><a href="#media-del"><span class="v">DEL</span><span class="n">…/{filename}</span></a></li>
+  </ul>
+
+  <h2>Knowledge base</h2>
+  <ul>
+    <li><a href="#kb"><span class="v">GET</span><span class="n">/api/kb</span></a></li>
+    <li><a href="#kb-post"><span class="v">POST</span><span class="n">/api/kb</span></a></li>
+    <li><a href="#kb-del"><span class="v">DEL</span><span class="n">/api/kb/{id}</span></a></li>
+  </ul>
+
+  <h2>Configuration</h2>
+  <ul>
+    <li><a href="#config"><span class="v">GET</span><span class="n">/api/config</span></a></li>
+    <li><a href="#config-put"><span class="v">PUT</span><span class="n">/api/config</span></a></li>
+    <li><a href="#meta"><span class="v">GET</span><span class="n">/api/meta</span></a></li>
+  </ul>
+
+  <h2>Credentials</h2>
+  <ul>
+    <li><a href="#gemini"><span class="v">GET</span><span class="n">/api/gemini</span></a></li>
+    <li><a href="#gemini-post"><span class="v">POST</span><span class="n">/api/gemini</span></a></li>
+    <li><a href="#gemini-del"><span class="v">DEL</span><span class="n">/api/gemini</span></a></li>
+  </ul>
+
+  <h2>Panel pages</h2>
+  <ul>
+    <li><a href="#pages"><span class="v">GET</span><span class="n">/admin, /</span></a></li>
+  </ul>
+
+  <h2>Building a client</h2>
+  <ul>
+    <li><a href="#gotchas"><span class="v"></span><span class="n">Things that bite</span></a></li>
+  </ul>
+</nav>
+
+<main class="doc">
+
+<!-- ============ START HERE ============ -->
+
+<section class="band" id="start">
+  <h2>Base URL and authentication</h2>
+  <p>Set these once and every example on this page runs as written.</p>
+<pre><span class="c"># the admin host — the Cloudflare tunnel hostname in the current setup</span>
+BASE=https://&lt;your-admin-host&gt;
+AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
+  <p>Every endpoint requires the bearer header except the three panel pages. There is <strong>one shared token</strong> — no user accounts, no roles, no per-person access. Anyone holding it can read every customer's name, number and full chat history.</p>
+<pre>Authorization: Bearer &lt;ADMIN_TOKEN&gt;</pre>
+  <div class="callout">
+    <p><strong>Token comparison is constant-time</strong> and a missing header is rejected the same way a wrong one is, so the endpoint gives nothing away to a guesser.</p>
+  </div>
+</section>
+
+<section class="band" id="errors">
+  <h2>Error responses</h2>
+  <p>Every failure is a JSON body with a single <code>detail</code> string. No error codes to map.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Status</th><th>When</th><th>Body</th></tr></thead>
+    <tbody>
+      <tr><td class="num">400</td><td>Validation failed</td><td><code>{"detail": "&lt;what was wrong, naming the field&gt;"}</code></td></tr>
+      <tr><td class="num">401</td><td>Header missing or wrong</td><td><code>{"detail": "Invalid or missing admin token."}</code></td></tr>
+      <tr><td class="num">404</td><td>No such record, or not applicable</td><td><code>{"detail": "…"}</code></td></tr>
+      <tr><td class="num">502</td><td>Gemini unreachable <span class="opt">(knowledge base only)</span></td><td><code>{"detail": "…"}</code></td></tr>
+      <tr><td class="num">503</td><td>Redis unavailable <span class="opt">(session reset only)</span></td><td><code>{"detail": "Redis unavailable: …"}</code></td></tr>
+      <tr><td class="num">503</td><td><code>ADMIN_TOKEN</code> unset on the server</td><td><code>{"detail": "Admin panel is disabled (ADMIN_TOKEN is not set)."}</code></td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout">
+    <p><strong>An unset token disables the panel, it does not open it.</strong> Every request gets <code>503</code> until <code>ADMIN_TOKEN</code> is set — there is no state in which the API answers without one.</p>
+  </div>
+</section>
+
+<!-- ============ OPERATIONS ============ -->
+
+<section class="grp">
+  <header>
+    <h2>Operations</h2>
+    <p>Is the bot alive, and how do I unstick one customer.</p>
+  </header>
+
+  <article class="ep" id="health">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/health</span><span class="free">No auth</span></div>
+    <div class="in">
+      <p class="lead">Liveness only — deliberately dependency-free, so it still answers when Redis and the CRM are down. Point your uptime monitor here; use <a href="#status">the status endpoint</a> for real health.</p>
+<pre>curl -s <span class="s">"$BASE/admin/health"</span>
+
+<span class="k">{"status"</span>: <span class="s">"ok"</span>}</pre>
+    </div>
+  </article>
+
+  <article class="ep" id="status">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/status</span></div>
+    <div class="in">
+      <p class="lead">One rolled-up verdict over six checks. No parameters. Live probes are cached for 60 seconds so polling this page cannot hammer the CRM.</p>
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/status"</span></pre>
+<pre>{
+  <span class="k">"status"</span>: <span class="s">"degraded"</span>,
+  <span class="k">"checked_at"</span>: <span class="s">"2026-08-18T09:14:02Z"</span>,
+  <span class="k">"checks"</span>: [
+    {<span class="k">"name"</span>: <span class="s">"Redis"</span>,       <span class="k">"status"</span>: <span class="s">"ok"</span>,       <span class="k">"detail"</span>: <span class="s">"Connected (2 ms)"</span>},
+    {<span class="k">"name"</span>: <span class="s">"Worker"</span>,      <span class="k">"status"</span>: <span class="s">"ok"</span>,       <span class="k">"detail"</span>: <span class="s">"1 worker, last seen 4s ago"</span>},
+    {<span class="k">"name"</span>: <span class="s">"Queue"</span>,       <span class="k">"status"</span>: <span class="s">"degraded"</span>, <span class="k">"detail"</span>: <span class="s">"47 messages waiting, 3 failed"</span>},
+    {<span class="k">"name"</span>: <span class="s">"Gemini key"</span>,  <span class="k">"status"</span>: <span class="s">"ok"</span>,       <span class="k">"detail"</span>: <span class="s">"Runtime key active"</span>},
+    {<span class="k">"name"</span>: <span class="s">"JAM CRM"</span>,     <span class="k">"status"</span>: <span class="s">"ok"</span>,       <span class="k">"detail"</span>: <span class="s">"Reachable (310 ms)"</span>},
+    {<span class="k">"name"</span>: <span class="s">"JAM dispose"</span>, <span class="k">"status"</span>: <span class="s">"down"</span>,     <span class="k">"detail"</span>: <span class="s">"HTTP 502 (cached 12s ago)"</span>}
+  ]
+}</pre>
+      <h4>Fields</h4>
+      <div class="tw"><table>
+        <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>status</code></td><td><code>ok</code> / <code>degraded</code> / <code>down</code> — the worst individual check</td></tr>
+          <tr><td><code>checked_at</code></td><td>UTC, ISO 8601, <code>Z</code> suffix</td></tr>
+          <tr><td><code>checks[].name</code></td><td>Fixed set — always these six, always this order</td></tr>
+          <tr><td><code>checks[].detail</code></td><td>Human-readable. Reused probes append <code>(cached Ns ago)</code></td></tr>
+        </tbody>
+      </table></div>
+      <h4>What turns each check red or amber</h4>
+      <div class="tw"><table>
+        <thead><tr><th>Check</th><th>down</th><th>degraded</th></tr></thead>
+        <tbody>
+          <tr><td>Redis</td><td>unreachable</td><td>—</td></tr>
+          <tr><td>Worker</td><td>none registered</td><td>heartbeat older than 480s</td></tr>
+          <tr><td>Queue</td><td>—</td><td>depth over <code>ADMIN_QUEUE_WARN_DEPTH</code> (default 20), or any failed jobs</td></tr>
+          <tr><td>Gemini key</td><td>—</td><td>not configured</td></tr>
+          <tr><td>JAM CRM / dispose</td><td>—</td><td>connection failure or 5xx</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout">
+        <p><strong>Absence is not a fault.</strong> A dependency that isn't configured reports <code>ok</code> with <code>"Not configured"</code>. When Redis is down, Worker and Queue report <code>down</code> with <code>"Unknown — Redis unreachable"</code>, because their true state cannot be known from here.</p>
+        <p>A 4xx from the CRM counts as <em>reachable</em> — the check proves the host answers, not that the credentials are right.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="ep" id="reset">
+    <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/session/reset</span></div>
+    <div class="in">
+      <p class="lead">Hard-resets one customer. Their next WhatsApp message starts from language selection — language, captured answers, confirmed dealer and brochures-already-sent are all cleared.</p>
+      <h4>Request body</h4>
+      <div class="tw"><table>
+        <thead><tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>mobile</code></td><td>string</td><td><span class="req">required</span></td><td>Non-blank; whitespace trimmed. Use the format the CRM sends, normally <code>+91…</code></td></tr>
+        </tbody>
+      </table></div>
+<pre>curl -s -X POST -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"mobile":"+919371062202"}'</span> <span class="s">"$BASE/admin/api/session/reset"</span>
+
+{<span class="k">"mobile"</span>: <span class="s">"+919371062202"</span>, <span class="k">"cleared"</span>: true}</pre>
+      <p class="lead"><code>cleared</code> is <code>false</code> when there was nothing to clear. Both are success. Deduplication keys are left alone — they're keyed per message, not per customer.</p>
+      <p class="lead"><strong>Errors</strong> — <code>400</code> blank or missing <code>mobile</code>; <code>503</code> Redis unavailable.</p>
+    </div>
+  </article>
+</section>
+
+<!-- ============ CONVERSATIONS ============ -->
+
+<section class="grp">
+  <header>
+    <h2>Conversations</h2>
+    <p>Every row is <strong>one turn</strong> — a customer message or a bot reply — not a whole conversation. Turns are stored the moment they happen, so this is the record of what the bot actually said.</p>
+  </header>
+
+  <article class="ep" id="interactions">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/interactions</span></div>
+    <div class="in">
+      <p class="lead">Search conversation turns. All parameters are optional and combine with AND.</p>
+      <h4>Query parameters</h4>
+      <div class="tw"><table>
+        <thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>mobile</code></td><td>string</td><td>—</td><td>Exact match. URL-encode <code>+</code> as <code>%2B</code></td></tr>
+          <tr><td><code>session</code></td><td>string</td><td>—</td><td>Exact conversation id</td></tr>
+          <tr><td><code>channel</code></td><td>string</td><td>—</td><td>e.g. <code>client_app</code></td></tr>
+          <tr><td><code>language</code></td><td>string</td><td>—</td><td>e.g. <code>Hindi</code></td></tr>
+          <tr><td><code>status</code></td><td>string</td><td>—</td><td><code>ok</code>, <code>delivery_failed</code>, …</td></tr>
+          <tr><td><code>needs_review</code></td><td>bool</td><td>—</td><td><code>true</code> = flagged and not yet reviewed</td></tr>
+          <tr><td><code>search</code></td><td>string</td><td>—</td><td>Substring across <code>message</code>, <code>error</code>, <code>session</code></td></tr>
+          <tr><td><code>limit</code></td><td>int</td><td class="num">100</td><td>Clamped to 1–500</td></tr>
+          <tr><td><code>offset</code></td><td>int</td><td class="num">0</td><td>Negatives clamp to 0</td></tr>
+        </tbody>
+      </table></div>
+      <h4>Response 200</h4>
+<pre>{
+  <span class="k">"count"</span>: 3692,
+  <span class="k">"items"</span>: [
+    {
+      <span class="k">"id"</span>: 4101,
+      <span class="k">"timestamp"</span>: <span class="s">"2026-08-18T09:14:02+00:00"</span>,
+      <span class="k">"session"</span>: <span class="s">"client-e622c23876cc45a"</span>,
+      <span class="k">"mobile"</span>: <span class="s">"+919371062202"</span>,
+      <span class="k">"channel"</span>: <span class="s">"client_app"</span>,
+      <span class="k">"source"</span>: <span class="s">"client_app"</span>,
+      <span class="k">"language"</span>: <span class="s">"Hindi"</span>,
+      <span class="k">"role"</span>: <span class="s">"user"</span>,
+      <span class="k">"message"</span>: <span class="s">"price kya hai"</span>,
+      <span class="k">"latency_ms"</span>: null,
+      <span class="k">"status"</span>: <span class="s">"ok"</span>,
+      <span class="k">"error"</span>: <span class="s">""</span>,
+      <span class="k">"model"</span>: <span class="s">""</span>,
+      <span class="k">"citations"</span>: [],
+      <span class="k">"needs_review"</span>: false,
+      <span class="k">"reviewed_at"</span>: null,
+      <span class="k">"review_note"</span>: <span class="s">""</span>,
+      <span class="k">"prompt_tokens"</span>: null,
+      <span class="k">"completion_tokens"</span>: null
+    }
+  ]
+}</pre>
+      <p class="lead"><code>count</code> is the total matching the filter, not the page size — so pagination is <code>Math.ceil(count / limit)</code>. <code>items</code> is one page, ordered <strong>oldest first within the page</strong>, while pages walk backwards from the newest: <code>offset=0</code> is the most recent page and reads top-to-bottom like a transcript.</p>
+      <p class="lead"><code>role</code> is <code>user</code> or <code>assistant</code>. On a user turn, <code>latency_ms</code>, <code>model</code>, <code>citations</code> and the token counts are empty — they belong to the assistant turn.</p>
+      <h4>Examples</h4>
+<pre><span class="c"># everything this customer ever said, across all their sessions</span>
+curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions?mobile=%2B919371062202"</span>
+
+<span class="c"># what still needs a human</span>
+curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions?needs_review=true&amp;limit=50"</span>
+
+<span class="c"># find a phrase</span>
+curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions?search=EMI"</span></pre>
+      <div class="callout">
+        <p>Turns recorded <strong>before the <code>mobile</code> column shipped</strong> have <code>mobile: ""</code> and cannot be found by number. There is no backfill — for those, search by <code>session</code> or by phrase.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="ep" id="interactions-csv">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/interactions/export.csv</span></div>
+    <div class="in">
+      <p class="lead">The same filters as above — <code>mobile</code>, <code>session</code>, <code>channel</code>, <code>language</code>, <code>status</code>, <code>needs_review</code>, <code>search</code> — with no pagination. Returns every match.</p>
+      <p class="lead"><code>Content-Type: text/csv</code>, <code>Content-Disposition: attachment; filename="interactions.csv"</code>.</p>
+<pre>id,timestamp,session,mobile,channel,source,language,role,message,
+latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pre>
+      <p class="lead"><code>citations</code> is a JSON array encoded as a string.</p>
+<pre>curl -s -H <span class="s">"$AUTH"</span> -o interactions.csv \
+  <span class="s">"$BASE/admin/api/interactions/export.csv?mobile=%2B919371062202"</span></pre>
+    </div>
+  </article>
+
+  <article class="ep" id="transcript">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/interactions/<em>{session}</em></span></div>
+    <div class="in">
+      <p class="lead">One conversation in full, oldest turn first, up to 500 turns.</p>
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions/client-e622c23876cc45a"</span>
+
+{
+  <span class="k">"session"</span>: <span class="s">"client-e622c23876cc45a"</span>,
+  <span class="k">"count"</span>: 12,
+  <span class="k">"items"</span>: [ <span class="c">/* same shape as the search endpoint */</span> ]
+}</pre>
+      <p class="lead"><code>404</code> when the session has no turns.</p>
+      <div class="callout">
+        <p><strong>A session is not a customer.</strong> Someone who comes back after their 1-hour session lapses gets a brand-new <code>session</code> id. To see everything one person ever said, search by <code>mobile</code> instead.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="ep" id="review">
+    <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/interactions/<em>{id}</em>/review</span></div>
+    <div class="in">
+      <p class="lead">Mark one flagged turn as handled. <code>{id}</code> is the numeric <code>id</code> from the search endpoint. The body is optional — <code>{}</code> is valid.</p>
+      <div class="tw"><table>
+        <thead><tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>note</code></td><td>string</td><td><span class="opt">optional</span></td><td>Trimmed. Defaults to <code>""</code></td></tr>
+        </tbody>
+      </table></div>
+<pre>curl -s -X POST -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"note":"dealer called back"}'</span> <span class="s">"$BASE/admin/api/interactions/4101/review"</span>
+
+{<span class="k">"id"</span>: 4101, <span class="k">"reviewed"</span>: true, <span class="k">"note"</span>: <span class="s">"dealer called back"</span>}</pre>
+      <div class="callout">
+        <p><strong><code>404</code> here is normal, not an error to surface loudly.</strong> It means the turn isn't awaiting review — either never flagged, or somebody already claimed it. That's deliberate, so two people can't both work the same item.</p>
+      </div>
+    </div>
+  </article>
+</section>
+
+<!-- ============ LEADS ============ -->
+
+<section class="grp">
+  <header>
+    <h2>Leads</h2>
+    <p>Captured lead rows, read under a shared file lock — a page is never a half-written file.</p>
+  </header>
+
+  <article class="ep" id="leads">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/leads</span></div>
+    <div class="in">
+      <p class="lead">Newest first.</p>
+      <div class="tw"><table>
+        <thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>search</code></td><td>string</td><td><code>""</code></td><td>Case-insensitive substring across <strong>every</strong> column — one box covers mobile, name and pincode</td></tr>
+          <tr><td><code>limit</code></td><td>int</td><td class="num">100</td><td>Clamped to 1–500</td></tr>
+          <tr><td><code>offset</code></td><td>int</td><td class="num">0</td><td></td></tr>
+        </tbody>
+      </table></div>
+<pre>{
+  <span class="k">"count"</span>: 359,
+  <span class="k">"columns"</span>: [<span class="s">"timestamp"</span>, <span class="s">"channel"</span>, <span class="s">"source"</span>, <span class="s">"session"</span>, <span class="s">"language"</span>, <span class="s">"mobile"</span>, <span class="s">"…"</span>],
+  <span class="k">"items"</span>: [
+    {
+      <span class="k">"timestamp"</span>: <span class="s">"2026-08-17T15:15:43"</span>,
+      <span class="k">"channel"</span>: <span class="s">"client_app"</span>,
+      <span class="k">"source"</span>: <span class="s">"client_app"</span>,
+      <span class="k">"session"</span>: <span class="s">"client-e622c23876cc45a"</span>,
+      <span class="k">"language"</span>: <span class="s">"Hindi"</span>,
+      <span class="k">"mobile"</span>: <span class="s">"+919371062202"</span>,
+      <span class="k">"crm_customer_id"</span>: <span class="s">""</span>,
+      <span class="k">"customer_name"</span>: <span class="s">"Ramesh"</span>,
+      <span class="k">"product_interest"</span>: <span class="s">"King EV MAX"</span>,
+      <span class="k">"purchase_timeline"</span>: <span class="s">"next month"</span>,
+      <span class="k">"pincode"</span>: <span class="s">"411001"</span>,
+      <span class="k">"lead_quality"</span>: <span class="s">"hot"</span>,
+      <span class="k">"disposition"</span>: <span class="s">"interested"</span>
+    }
+  ]
+}</pre>
+      <div class="callout">
+        <p><strong>Render from <code>columns</code>, not a hard-coded list.</strong> It's the authoritative order, taken from the live config — so it changes the moment somebody edits the capture fields. Every value is a string; empty means not captured.</p>
+      </div>
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/leads?search=411001"</span></pre>
+    </div>
+  </article>
+
+  <article class="ep" id="leads-csv">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/leads/export.csv</span></div>
+    <div class="in">
+      <p class="lead">The whole leads file, same lock discipline. <code>text/csv</code>, <code>filename="leads.csv"</code>. No parameters.</p>
+    </div>
+  </article>
+</section>
+
+<!-- ============ MEDIA ============ -->
+
+<section class="grp">
+  <header>
+    <h2>Media</h2>
+    <p><code>data/media</code> is a shared volume: the admin container writes to it, and the media host serves the same directory read-only at <code>/media/</code>. Publishing is a file write — no CDN account, no third party, no long-running job.</p>
+  </header>
+
+  <div class="band">
+    <h2>The two kinds</h2>
+    <div class="tw"><table>
+      <thead><tr><th>kind</th><th>Directory</th><th>Accepts</th><th>Limit</th><th>Used for</th></tr></thead>
+      <tbody>
+        <tr><td><code>brochures</code></td><td><code>data/media/brochures</code></td><td><code>.pdf</code></td><td class="num">25 MB</td><td>Product brochures, warranty and PMS PDFs</td></tr>
+        <tr><td><code>images</code></td><td><code>data/media/share_location</code></td><td><code>.jpg</code> <code>.jpeg</code> <code>.png</code></td><td class="num">5 MB</td><td>The how-to-share-location cards</td></tr>
+      </tbody>
+    </table></div>
+    <p>Any other <code>{kind}</code> returns <code>404</code>.</p>
+    <div class="callout">
+      <p><strong>Uploading does not change what the bot sends.</strong> Publishing a draft must never start delivering it — so after upload, point <code>documents.&lt;product&gt;.brochure</code> or <code>share_location_image.url</code> at the returned URL as a separate, deliberate step.</p>
+    </div>
+  </div>
+
+  <article class="ep" id="media-list">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/media/<em>{kind}</em></span></div>
+    <div class="in">
+<pre>{
+  <span class="k">"kind"</span>: <span class="s">"brochures"</span>,
+  <span class="k">"base_url"</span>: <span class="s">"https://media.example.com/media/brochures"</span>,
+  <span class="k">"max_upload_bytes"</span>: 26214400,
+  <span class="k">"allowed_suffixes"</span>: [<span class="s">".pdf"</span>],
+  <span class="k">"items"</span>: [
+    {<span class="k">"filename"</span>: <span class="s">"King_EV_MAX_2027.pdf"</span>, <span class="k">"size_bytes"</span>: 3215592,
+     <span class="k">"url"</span>: <span class="s">"https://media.example.com/media/brochures/King_EV_MAX_2027.pdf"</span>}
+  ]
+}</pre>
+    </div>
+  </article>
+
+  <article class="ep" id="media-post">
+    <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/media/<em>{kind}</em></span></div>
+    <div class="in">
+      <p class="lead"><code>multipart/form-data</code>.</p>
+      <div class="tw"><table>
+        <thead><tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>file</code></td><td>file</td><td><span class="req">required</span></td><td>The PDF or image</td></tr>
+          <tr><td><code>overwrite</code></td><td>bool</td><td><span class="opt">optional</span></td><td>Defaults <code>false</code> — replacing an existing name has to be deliberate</td></tr>
+        </tbody>
+      </table></div>
+<pre>curl -s -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX_2027.pdf"</span> \
+  <span class="s">"$BASE/admin/api/media/brochures"</span>
+
+curl -s -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@how_to.jpg"</span> \
+  <span class="s">"$BASE/admin/api/media/images"</span>
+
+{<span class="k">"kind"</span>: <span class="s">"brochures"</span>, <span class="k">"filename"</span>: <span class="s">"King_EV_MAX_2027.pdf"</span>,
+ <span class="k">"size_bytes"</span>: 3215592, <span class="k">"url"</span>: <span class="s">"https://media.example.com/media/brochures/King_EV_MAX_2027.pdf"</span>}</pre>
+      <h4>Rejected with 400 when</h4>
+      <p class="lead">The extension is wrong for the kind · the file is empty or over the limit · the content doesn't match its type (leading bytes are checked, so a PDF renamed <code>.jpg</code> is refused) · the name already exists without <code>overwrite=true</code>.</p>
+      <div class="callout">
+        <p>Filenames are reduced to a single path component and the resolved parent is asserted, so an upload cannot write outside its directory. Writes are staged and then moved into place — the media host can never serve a half-uploaded file.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="ep" id="media-del">
+    <div class="sig"><span class="v-tag v-del">DELETE</span><span class="path">/admin/api/media/<em>{kind}</em>/<em>{filename}</em></span></div>
+    <div class="in">
+<pre>{<span class="k">"kind"</span>: <span class="s">"brochures"</span>, <span class="k">"filename"</span>: <span class="s">"King_EV_MAX_2026.pdf"</span>, <span class="k">"deleted"</span>: true}</pre>
+      <p class="lead"><code>404</code> for an unknown kind, or no such file.</p>
+    </div>
+  </article>
+</section>
+
+<!-- ============ KB ============ -->
+
+<section class="grp">
+  <header>
+    <h2>Knowledge base</h2>
+    <p>The documents Gemini File Search retrieves from when the bot answers a product question. The prompt tells the model to use <strong>only</strong> these — anything not indexed here, it cannot ground on.</p>
+  </header>
+
+  <div class="band">
+    <h2>Indexing has no upsert</h2>
+    <p>Re-indexing a corrected document <strong>adds a second copy</strong> rather than replacing the first, and both stay retrievable — so the model may cite either. <code>duplicate_display_names</code> exists to make that visible, and <code>replace=true</code> on upload is how you avoid it.</p>
+    <p>Changes take effect on the <strong>next customer message</strong>. The store is resolved server-side per request, so there is nothing to restart.</p>
+  </div>
+
+  <article class="ep" id="kb">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/kb</span></div>
+    <div class="in">
+      <p class="lead">Exactly what the bot grounds its answers on right now.</p>
+<pre>{
+  <span class="k">"store"</span>: <span class="s">"fileSearchStores/tvsmanual-ur9gkjpgkxyh"</span>,
+  <span class="k">"document_count"</span>: 1,
+  <span class="k">"duplicate_display_names"</span>: [],
+  <span class="k">"total_size_bytes"</span>: 16838,
+  <span class="k">"display_name"</span>: <span class="s">"tvs-manual"</span>,
+  <span class="k">"active_documents"</span>: 1,
+  <span class="k">"pending_documents"</span>: null,
+  <span class="k">"failed_documents"</span>: null,
+  <span class="k">"size_bytes"</span>: 16838,
+  <span class="k">"documents"</span>: [
+    {
+      <span class="k">"document_id"</span>: <span class="s">"tvsthreewheelerskbpdf-qkm24fandaqq"</span>,
+      <span class="k">"name"</span>: <span class="s">"fileSearchStores/tvsmanual-…/documents/tvsthreewheelerskbpdf-…"</span>,
+      <span class="k">"display_name"</span>: <span class="s">"tvs_three_wheelers_kb.pdf"</span>,
+      <span class="k">"state"</span>: <span class="s">"STATE_ACTIVE"</span>,
+      <span class="k">"size_bytes"</span>: 16838,
+      <span class="k">"mime_type"</span>: <span class="s">"application/pdf"</span>,
+      <span class="k">"create_time"</span>: <span class="s">"2026-07-17 12:35:05.535018+00:00"</span>,
+      <span class="k">"update_time"</span>: <span class="s">"2026-07-17 12:35:08.620802+00:00"</span>
+    }
+  ]
+}</pre>
+      <div class="tw"><table>
+        <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>document_count</code></td><td>Documents actually listed</td></tr>
+          <tr><td><code>duplicate_display_names</code></td><td>Names appearing more than once — <strong>each one means a stale copy is still live</strong></td></tr>
+          <tr><td><code>state</code></td><td><code>STATE_PENDING</code> (indexing) · <code>STATE_ACTIVE</code> (searchable) · <code>STATE_FAILED</code></td></tr>
+          <tr><td><code>document_id</code></td><td>URL-safe handle for <code>DELETE</code> — the last segment of <code>name</code></td></tr>
+        </tbody>
+      </table></div>
+      <p class="lead">Documents come back newest first. <code>pending_documents</code> and <code>failed_documents</code> come straight from Gemini and may be <code>null</code>.</p>
+    </div>
+  </article>
+
+  <article class="ep" id="kb-post">
+    <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/kb</span></div>
+    <div class="in">
+      <p class="lead"><code>multipart/form-data</code>.</p>
+      <div class="tw"><table>
+        <thead><tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><code>file</code></td><td>file</td><td><span class="req">required</span></td><td>Up to 30 MB</td></tr>
+          <tr><td><code>display_name</code></td><td>string</td><td><span class="opt">optional</span></td><td>Defaults to the filename. Worth setting — the CLI indexer names documents after the raw path</td></tr>
+          <tr><td><code>replace</code></td><td>bool</td><td><span class="opt">optional</span></td><td>Defaults <code>false</code>. Deletes existing documents with the same display name, <strong>after</strong> the new one is accepted</td></tr>
+        </tbody>
+      </table></div>
+<pre>curl -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX-English.pdf"</span> <span class="s">"$BASE/admin/api/kb"</span>
+
+<span class="c"># re-index a corrected document without leaving the old one behind</span>
+curl -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX-English.pdf"</span> -F <span class="s">"replace=true"</span> \
+  <span class="s">"$BASE/admin/api/kb"</span></pre>
+<pre>{
+  <span class="k">"display_name"</span>: <span class="s">"King_EV_MAX-English.pdf"</span>,
+  <span class="k">"size_bytes"</span>: 3215592,
+  <span class="k">"state"</span>: <span class="s">"STATE_PENDING"</span>,
+  <span class="k">"indexing"</span>: true,
+  <span class="k">"replaced_document_ids"</span>: [<span class="s">"oldid-abc123"</span>]
+}</pre>
+      <div class="callout">
+        <p><strong>This returns before the document is searchable.</strong> The upload takes seconds, indexing runs for minutes — holding the request open for the whole operation would be dropped by the tunnel in front of this app. Poll <code>GET /admin/api/kb</code> and wait for <code>STATE_ACTIVE</code>.</p>
+        <p>If <code>replace</code> was asked for but the cleanup failed, the upload still succeeds and <code>replaced_document_ids</code> comes back short — the new document is live, and the leftover is a duplicate to remove by hand.</p>
+      </div>
+      <p class="lead"><strong>Errors</strong> — <code>400</code> for an empty file, one over 30 MB, or a missing name. <code>502</code> when Gemini can't be reached, the API key is unset, or <code>FILE_SEARCH_STORE</code> is empty.</p>
+    </div>
+  </article>
+
+  <article class="ep" id="kb-del">
+    <div class="sig"><span class="v-tag v-del">DELETE</span><span class="path">/admin/api/kb/<em>{document_id}</em></span></div>
+    <div class="in">
+<pre>{<span class="k">"document_id"</span>: <span class="s">"tvsthreewheelerskbpdf-qkm24fandaqq"</span>, <span class="k">"deleted"</span>: true}</pre>
+      <p class="lead"><code>404</code> if there is no such document <strong>in this store</strong>. The id is reduced to its last path segment and recombined with the configured store, so a full resource name pointing somewhere else cannot be used to reach another store's documents.</p>
+    </div>
+  </article>
+</section>
+
+<!-- ============ CONFIG ============ -->
+
+<section class="grp">
+  <header>
+    <h2>Configuration</h2>
+    <p>The live bot configuration. Read it, edit it, write the whole document back — changes reach the worker on its next message, with no restart.</p>
+  </header>
+
+  <article class="ep" id="config">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/config</span></div>
+    <div class="in">
+      <p class="lead">The exact document <code>PUT</code> expects back.</p>
+<pre>{
+  <span class="k">"bot_name"</span>: <span class="s">"TVS Passenger 3W Assistant"</span>,
+  <span class="k">"welcome_text"</span>: <span class="s">"Welcome! Choose your language to start …"</span>,
+  <span class="k">"languages"</span>: [{<span class="k">"code"</span>: <span class="s">"English"</span>, <span class="k">"label"</span>: <span class="s">"English"</span>}],
+  <span class="k">"capture_fields"</span>: [{<span class="k">"id"</span>: <span class="s">"pincode"</span>, <span class="k">"label"</span>: <span class="s">"Pincode"</span>, <span class="k">"required"</span>: true}],
+  <span class="k">"flow_steps"</span>: [<span class="s">"intro"</span>, <span class="s">"model_interest"</span>, <span class="s">"campaign_awareness"</span>, <span class="s">"timeline"</span>,
+                  <span class="s">"location"</span>, <span class="s">"feature_awareness"</span>, <span class="s">"documents"</span>, <span class="s">"wrap_up"</span>],
+  <span class="k">"voice_policy"</span>: <span class="s">"intro_only"</span>,
+  <span class="k">"campaign_text"</span>: <span class="s">"ACTIVE CAMPAIGN — \"Vaada\" scheme …"</span>,
+  <span class="k">"campaign_starts_on"</span>: <span class="s">"2026-08-01"</span>,
+  <span class="k">"campaign_ends_on"</span>: <span class="s">"2026-10-31"</span>,
+  <span class="k">"documents"</span>: {
+    <span class="k">"King Deluxe"</span>: {
+      <span class="k">"brochure"</span>: <span class="s">"https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf"</span>,
+      <span class="k">"fuel"</span>: {
+        <span class="k">"cng"</span>:    <span class="s">"https://1.jamoutsourcing.com/f/King_Deluxe_CNG-English.pdf"</span>,
+        <span class="k">"petrol"</span>: <span class="s">"https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf"</span>
+      },
+      <span class="k">"support"</span>: [
+        {<span class="k">"url"</span>: <span class="s">"https://1.jamoutsourcing.com/f/Deluxe-PMS-Schedule.pdf"</span>, <span class="k">"kind"</span>: <span class="s">"pms"</span>}
+      ]
+    }
+  },
+  <span class="k">"intro"</span>: {<span class="k">"English"</span>: {<span class="k">"text"</span>: <span class="s">"Hi! I'm TVS Motor's assistant …"</span>, <span class="k">"audio_url"</span>: null}},
+  <span class="k">"entry_sources"</span>: {<span class="k">"whatsapp"</span>: {<span class="k">"welcome_override"</span>: null}}
+}</pre>
+      <div class="callout">
+        <p><strong>Not every field is wired up.</strong> Only <code>bot_name</code>, <code>campaign_text</code>, <code>campaign_starts_on</code>, <code>campaign_ends_on</code>, <code>flow_steps</code>, <code>capture_fields</code> and <code>documents</code> currently affect the WhatsApp bot. <code>welcome_text</code>, <code>intro</code>, <code>languages</code>, <code>voice_policy</code> and <code>entry_sources</code> are stored and returned but not read on the WhatsApp path — that copy is hardcoded.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="ep" id="config-put">
+    <div class="sig"><span class="v-tag v-put">PUT</span><span class="path">/admin/api/config</span></div>
+    <div class="in">
+      <p class="lead">Replaces the <strong>entire</strong> document. There is no partial update and no version history — always <code>GET</code> first, edit, then <code>PUT</code> back.</p>
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/config"</span> &gt; cfg.json
+<span class="c"># edit cfg.json</span>
+curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Type: application/json"</span> \
+  --data @cfg.json <span class="s">"$BASE/admin/api/config"</span></pre>
+      <p class="lead">Returns the saved document on <code>200</code>.</p>
+      <h4>Required fields</h4>
+      <p class="lead"><code>bot_name</code> · <code>welcome_text</code> · <code>languages</code> · <code>capture_fields</code> · <code>flow_steps</code> · <code>voice_policy</code> · <code>campaign_text</code> · <code>intro</code></p>
+      <h4>Validation rules — each returns 400 naming the field</h4>
+      <div class="tw"><table>
+        <thead><tr><th>Field</th><th>Rule</th></tr></thead>
+        <tbody>
+          <tr><td><code>bot_name</code></td><td>Non-empty string. <code>welcome_text</code> and <code>campaign_text</code> must be strings</td></tr>
+          <tr><td><code>languages</code></td><td>Non-empty; every entry <code>{code, label}</code>, both non-empty, <code>code</code> unique</td></tr>
+          <tr><td><code>capture_fields</code></td><td>Non-empty; every entry needs a unique non-empty <code>id</code>; <code>required</code> must be boolean</td></tr>
+          <tr><td><code>flow_steps</code></td><td>Non-empty list of non-empty strings</td></tr>
+          <tr><td><code>voice_policy</code></td><td>One of <code>always</code>, <code>intro_only</code>, <code>never</code>, <code>mirror_user</code></td></tr>
+          <tr><td><code>intro</code></td><td>An entry for <strong>every</strong> language <code>code</code>, each <code>{text: string, audio_url: string|null}</code></td></tr>
+          <tr><td><code>campaign_*_on</code></td><td><code>YYYY-MM-DD</code> or <code>null</code>; the end must not precede the start</td></tr>
+          <tr><td><code>documents</code></td><td>Optional. Each product needs a non-empty <code>brochure</code> URL; <code>fuel</code> keys must be <code>cng</code>, <code>lpg</code> or <code>petrol</code>; each <code>support</code> entry needs a <code>url</code> and a <code>kind</code> of <code>warranty</code> or <code>pms</code></td></tr>
+        </tbody>
+      </table></div>
+      <h4>Product documents</h4>
+      <p class="lead"><code>documents</code> replaces what used to be a hardcoded table, so a new model year is a config edit rather than a redeploy. <code>brochure</code> is the default; <code>fuel</code> overrides it when the customer names a fuel type; <code>support</code> PDFs are sent <strong>only</strong> when they ask about warranty or servicing — so asking for "the brochure" delivers one file, not three.</p>
+      <p class="lead">Removing a product stops the bot offering its brochure at all. If the key is absent, or the config can't be read, the built-in defaults apply — a config problem can never stop a customer getting a brochure.</p>
+      <h4>Campaign scheduling</h4>
+      <p class="lead">Both date fields are optional and default to <code>null</code>, meaning open-ended — a config with neither set behaves exactly as it did before scheduling existed. Bounds are <strong>inclusive</strong> and evaluated in <strong>India time</strong>, so a campaign ending <code>2026-10-31</code> stops after that day in IST rather than 5h30m out.</p>
+      <div class="callout">
+        <p>Outside the window the bot doesn't merely omit the offer: the <code>CAMPAIGN</code> section, the "make them aware of the active campaign" goal, and the <code>campaign_awareness</code> flow step are <strong>all</strong> removed from the prompt, and <code>campaign_shown</code> is instructed to stay empty. Leaving any one of them in was enough for the model to keep pitching a scheme that had expired.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="ep" id="meta">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/meta</span></div>
+    <div class="in">
+      <p class="lead">Allowed values and factory defaults, for building a form.</p>
+<pre>{
+  <span class="k">"voice_policies"</span>: [<span class="s">"always"</span>, <span class="s">"intro_only"</span>, <span class="s">"mirror_user"</span>, <span class="s">"never"</span>],
+  <span class="k">"default_config"</span>: { <span class="c">/* a full config document */</span> },
+  <span class="k">"gemini"</span>: {<span class="k">"configured"</span>: true, <span class="k">"source"</span>: <span class="s">"env"</span>,
+             <span class="k">"model"</span>: <span class="s">"gemini-3.5-flash-lite"</span>,
+             <span class="k">"file_search_store"</span>: <span class="s">"fileSearchStores/…"</span>}
+}</pre>
+    </div>
+  </article>
+</section>
+
+<!-- ============ CREDENTIALS ============ -->
+
+<section class="grp">
+  <header>
+    <h2>Credentials</h2>
+    <p>The Gemini key the bot answers with. A runtime key set here overrides the one in <code>.env</code>.</p>
+  </header>
+
+  <article class="ep" id="gemini">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/gemini</span></div>
+    <div class="in">
+<pre>{
+  <span class="k">"configured"</span>: true,
+  <span class="k">"source"</span>: <span class="s">"env"</span>,
+  <span class="k">"model"</span>: <span class="s">"gemini-3.5-flash-lite"</span>,
+  <span class="k">"file_search_store"</span>: <span class="s">"fileSearchStores/tvsmanual-ur9gkjpgkxyh"</span>
+}</pre>
+      <div class="tw"><table>
+        <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>configured</code></td><td>Whether a usable client exists. <code>false</code> means <strong>the bot cannot answer</strong></td></tr>
+          <tr><td><code>source</code></td><td><code>runtime</code> (set through this API) · <code>env</code> (from <code>.env</code>) · <code>null</code> (none)</td></tr>
+        </tbody>
+      </table></div>
+      <p class="lead">The key itself is never returned.</p>
+    </div>
+  </article>
+
+  <article class="ep" id="gemini-post">
+    <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/gemini</span></div>
+    <div class="in">
+<pre>{<span class="k">"api_key"</span>: <span class="s">"AIza…"</span>}</pre>
+      <p class="lead">The key is <strong>validated with a live Gemini call before it is saved</strong>. On success it's written to <code>data/gemini_key.txt</code> (mode 600) and overrides the <code>.env</code> key; the worker picks it up on its next message. Returns the same shape as <code>GET</code>, with <code>source</code> now <code>runtime</code>.</p>
+      <p class="lead"><strong>Errors</strong> — <code>400</code> on a blank key, or <code>{"detail": "Key rejected: …"}</code> when Gemini refuses it. A rejected key is never saved, so a bad paste cannot take the bot down.</p>
+    </div>
+  </article>
+
+  <article class="ep" id="gemini-del">
+    <div class="sig"><span class="v-tag v-del">DELETE</span><span class="path">/admin/api/gemini</span></div>
+    <div class="in">
+      <p class="lead">Removes the runtime key and falls back to <code>.env</code>. Returns the same shape as <code>GET</code>.</p>
+      <div class="callout">
+        <p><strong>Check <code>source</code> first.</strong> If <code>GEMINI_API_KEY</code> is empty in <code>.env</code>, this leaves the bot with no key at all and it stops answering.</p>
+      </div>
+    </div>
+  </article>
+</section>
+
+<!-- ============ PAGES ============ -->
+
+<section class="grp" id="pages">
+  <header>
+    <h2>Panel pages</h2>
+    <p>Unauthenticated because they carry no data — the browser prompts for the token and sends it on every API call after that.</p>
+  </header>
+
+  <article class="ep">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin</span><span class="free">No auth</span></div>
+    <div class="in"><p class="lead">The panel's HTML shell. Carries no secrets.</p></div>
+  </article>
+
+  <article class="ep">
+    <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/</span><span class="free">No auth</span></div>
+    <div class="in"><p class="lead"><code>307</code> redirect to <code>/admin</code>.</p></div>
+  </article>
+</section>
+
+<!-- ============ CLIENT NOTES ============ -->
+
+<section class="band" id="gotchas">
+  <h2>Building a client: the things that bite</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Watch for</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Render leads from <code>columns</code></td><td>Admins can add and reorder capture fields at any time; a hard-coded column list goes stale silently</td></tr>
+      <tr><td>Group conversations by <code>mobile</code>, not <code>session</code></td><td>One customer produces a fresh <code>session</code> every time their 1-hour window lapses</td></tr>
+      <tr><td>Encode <code>+</code> as <code>%2B</code></td><td>Otherwise it arrives as a space and the <code>mobile</code> filter matches nothing</td></tr>
+      <tr><td><code>count</code> is the filtered total</td><td>Pagination is <code>Math.ceil(count / limit)</code>, not the length of <code>items</code></td></tr>
+      <tr><td><code>404</code> from review is normal</td><td>Someone else already handled it — don't surface it as a failure</td></tr>
+      <tr><td><code>PUT /config</code> is read-modify-write</td><td>There's no history, so a blind write silently loses whatever another admin just saved</td></tr>
+      <tr><td>KB upload returns before indexing finishes</td><td>Show "indexing" and poll for <code>STATE_ACTIVE</code> rather than reporting success immediately</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>Machine-readable spec</h2>
+  <p>The OpenAPI 3.1 document is generated from the routes themselves, so it cannot drift from the code — a test fails if it goes stale. Import it straight into Postman, Insomnia, or a client generator.</p>
+<pre><span class="c"># regenerate after changing a route</span>
+./venv/bin/python scripts/export_openapi.py</pre>
+  <p>The same spec is served live at <code>$BASE/openapi.json</code>, with interactive views at <code>$BASE/docs</code> (Swagger) and <code>$BASE/redoc</code>. Swagger's <strong>Authorize</strong> button works — the spec declares an <code>HTTPBearer</code> scheme, so paste the token once and every "Try it out" carries it.</p>
+</section>
+
+</main>
+
+<footer>
+  Generated from <code>web.py</code> · 23 endpoints · matches <code>docs/openapi.json</code> and <code>docs/ADMIN_API_REFERENCE.md</code> as at 18 August 2026.
+</footer>
+
+</div>
+
+<script>
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('.rail a[href^="#"]'));
+    var targets = links
+      .map(function (a) {
+        var el = document.getElementById(a.getAttribute('href').slice(1));
+        return el ? { a: a, el: el } : null;
+      })
+      .filter(Boolean);
+    if (!targets.length || !('IntersectionObserver' in window)) return;
+
+    var visible = new Set();
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) visible.add(e.target); else visible.delete(e.target);
+      });
+      var first = targets.filter(function (t) { return visible.has(t.el); })[0];
+      if (!first) return;
+      links.forEach(function (a) { a.classList.remove('on'); });
+      first.a.classList.add('on');
+    }, { rootMargin: '0px 0px -70% 0px', threshold: 0 });
+
+    targets.forEach(function (t) { io.observe(t.el); });
+  })();
+</script>
