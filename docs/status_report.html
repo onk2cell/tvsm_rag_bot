@@ -1,0 +1,271 @@
+<title>Bot Control Panel Status</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --ground: #f7f6f3;
+    --card: #ffffff;
+    --ink: #1c1b19;
+    --ink-soft: #55524d;
+    --ink-faint: #86827b;
+    --rule: #e2dfd8;
+    --accent: #7a5c2e;
+    --accent-soft: #f0e8da;
+    --live: #3f6b47;
+    --live-soft: #e3ede4;
+    --next: #8a6a24;
+    --next-soft: #f4ead6;
+    --wait: #6a5a80;
+    --wait-soft: #ebe6f1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #17161a;
+      --card: #201f24;
+      --ink: #eeece7;
+      --ink-soft: #b3aea5;
+      --ink-faint: #837e75;
+      --rule: #34323a;
+      --accent: #d8b47c;
+      --accent-soft: #322b20;
+      --live: #8fc79b;
+      --live-soft: #22301f;
+      --next: #dfba6d;
+      --next-soft: #322a1a;
+      --wait: #b9a8d4;
+      --wait-soft: #29233a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #17161a;
+    --card: #201f24;
+    --ink: #eeece7;
+    --ink-soft: #b3aea5;
+    --ink-faint: #837e75;
+    --rule: #34323a;
+    --accent: #d8b47c;
+    --accent-soft: #322b20;
+    --live: #8fc79b;
+    --live-soft: #22301f;
+    --next: #dfba6d;
+    --next-soft: #322a1a;
+    --wait: #b9a8d4;
+    --wait-soft: #29233a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: clamp(2rem, 6vw, 4.5rem) clamp(1.1rem, 4vw, 2.5rem) 5rem;
+  }
+
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 1.4rem; margin-bottom: 2.6rem; }
+  .eyebrow {
+    font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600; margin: 0 0 .6rem;
+  }
+  h1 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 500; font-size: clamp(2rem, 5.5vw, 3rem);
+    line-height: 1.08; letter-spacing: -.015em; margin: 0 0 .7rem;
+    text-wrap: balance;
+  }
+  .standfirst { color: var(--ink-soft); font-size: 1.05rem; max-width: 44ch; margin: 0; }
+
+  h2 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 600; font-size: 1.45rem; letter-spacing: -.01em;
+    margin: 0; display: flex; align-items: baseline; gap: .7rem;
+  }
+  section { margin-bottom: 3rem; }
+  .sec-head { display: flex; align-items: baseline; gap: .8rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+  .count {
+    font-family: "IBM Plex Mono", monospace; font-size: .78rem;
+    color: var(--ink-faint); letter-spacing: .04em;
+  }
+
+  .grid { display: grid; gap: .85rem; }
+  @media (min-width: 42rem) { .grid { grid-template-columns: 1fr 1fr; } }
+
+  .item {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 1.05rem 1.15rem;
+    display: flex; flex-direction: column; gap: .35rem;
+  }
+  .item h3 {
+    margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: -.005em;
+  }
+  .item p { margin: 0; color: var(--ink-soft); font-size: .9rem; line-height: 1.5; }
+
+  .chip {
+    align-self: flex-start;
+    font-size: .68rem; font-weight: 600; letter-spacing: .09em;
+    text-transform: uppercase; padding: .18rem .5rem; border-radius: 4px;
+    font-family: "IBM Plex Sans", sans-serif;
+  }
+  .c-live { background: var(--live-soft); color: var(--live); }
+  .c-next { background: var(--next-soft); color: var(--next); }
+  .c-wait { background: var(--wait-soft); color: var(--wait); }
+
+  .lede {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 1rem 1.15rem; border-radius: 0 8px 8px 0;
+    margin-bottom: 1.3rem;
+  }
+  .lede p { margin: 0; font-size: .92rem; color: var(--ink-soft); }
+  .lede strong { color: var(--ink); }
+
+  .rail { display: grid; gap: 0; margin-top: .4rem; }
+  .rail .row {
+    display: grid; grid-template-columns: auto 1fr; gap: 1rem;
+    padding: .85rem 0; border-bottom: 1px solid var(--rule); align-items: baseline;
+  }
+  .rail .row:last-child { border-bottom: none; }
+  .who {
+    font-family: "IBM Plex Mono", monospace; font-size: .74rem;
+    text-transform: uppercase; letter-spacing: .07em; color: var(--accent);
+    font-weight: 500; white-space: nowrap;
+  }
+  .rail p { margin: 0; font-size: .92rem; color: var(--ink-soft); }
+  .rail strong { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 3.5rem; padding-top: 1.3rem; border-top: 1px solid var(--rule);
+    color: var(--ink-faint); font-size: .82rem;
+  }
+</style>
+
+<div class="page">
+
+<header>
+  <p class="eyebrow">TVS Passenger 3W · WhatsApp Assistant</p>
+  <h1>Control Panel Status</h1>
+  <p class="standfirst">What the team can now manage without a developer, and what comes next.</p>
+</header>
+
+<section>
+  <div class="sec-head">
+    <h2>Live today</h2>
+    <span class="count">23 capabilities delivered</span>
+  </div>
+
+  <div class="lede">
+    <p><strong>The headline:</strong> the bot's settings, documents and conversation history can now be managed directly. Changes take effect on the next customer message — no downtime, no release.</p>
+  </div>
+
+  <div class="grid">
+    <div class="item">
+      <span class="chip c-live">Live</span>
+      <h3>See if the bot is working</h3>
+      <p>One page shows whether messages are flowing, whether the CRM is reachable, and whether anything needs attention.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-live">Live</span>
+      <h3>Read any conversation</h3>
+      <p>Search by phone number and read exactly what the bot said to that customer. Previously this needed a developer.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-live">Live</span>
+      <h3>Browse and export leads</h3>
+      <p>All captured leads, searchable by name, number or pincode, downloadable as a spreadsheet.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-live">Live</span>
+      <h3>Unstick a customer</h3>
+      <p>If someone gets stuck mid-conversation, reset them by phone number and their next message starts fresh.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-live">Live</span>
+      <h3>Campaign start and end dates</h3>
+      <p>Schemes now have an expiry. The bot stops promoting a campaign the day it ends, instead of offering benefits the dealership no longer honours.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-live">Live</span>
+      <h3>Change which brochure is sent</h3>
+      <p>Product, fuel type and warranty documents are all editable. A new model year is a settings change, not a software release.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-live">Live</span>
+      <h3>Upload brochures and images</h3>
+      <p>Publish a new PDF or WhatsApp image directly and point the bot at it.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-live">Live</span>
+      <h3>Manage the bot's product knowledge</h3>
+      <p>See exactly which documents the bot answers from, add new ones, and remove outdated versions.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Next</h2>
+    <span class="count">in priority order</span>
+  </div>
+
+  <div class="grid">
+    <div class="item">
+      <span class="chip c-next">Highest value</span>
+      <h3>Load the full product documentation</h3>
+      <p>The bot currently answers from a short summary rather than the full brochures and warranty policies. Loading the complete set is the single biggest improvement to answer quality — and the tools to do it are now in place.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-next">Next</span>
+      <h3>On-screen control panel</h3>
+      <p>Everything above works today, but through direct system calls. The visual screens for the team to click through are the next build.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-next">Next</span>
+      <h3>Adding a new vehicle model</h3>
+      <p>Brochures for a new model are already configurable, but the bot's conversation still names the three current models directly. Making that a setting is a follow-on task.</p>
+    </div>
+    <div class="item">
+      <span class="chip c-next">Later</span>
+      <h3>Named logins and change history</h3>
+      <p>Individual accounts per team member, a record of who changed what, and the ability to undo a change.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Waiting on a decision</h2>
+    <span class="count">3 items</span>
+  </div>
+
+  <div class="rail">
+    <div class="row">
+      <span class="who">JAM</span>
+      <p><strong>Host one image on the TVS CDN.</strong> The "how to share your location" card sent to customers who don't know their pincode. All product PDFs are already hosted there; this image is the only asset still served from elsewhere. Files ready to send.</p>
+    </div>
+    <div class="row">
+      <span class="who">Infra</span>
+      <p><strong>A permanent web address for the control panel.</strong> Either opening standard web ports on the server, or a managed tunnel. Until then the panel's address can change after a restart.</p>
+    </div>
+    <div class="row">
+      <span class="who">Team</span>
+      <p><strong>Access control before wider rollout.</strong> The panel shows customer names, numbers and full chat history. Named logins should be in place before it is shared beyond the immediate team.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Status as at 18 August 2026 · All items marked Live are deployed and in use on the production server.
+</footer>
+
+</div>
