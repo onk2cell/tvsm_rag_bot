@@ -46,11 +46,11 @@ There is one shared token. No roles, no per-user access.
 | 13 | `POST` | `/admin/api/media/brochures` | Upload a brochure PDF |
 | 14 | `DELETE` | `/admin/api/media/brochures/{filename}` | Delete a brochure |
 | 15 | `GET` | `/admin/api/config` | Read live bot config |
-| 13 | `PUT` | `/admin/api/config` | Replace bot config |
-| 14 | `GET` | `/admin/api/meta` | Defaults and allowed values |
-| 15 | `GET` | `/admin/api/gemini` | Gemini key state |
-| 16 | `POST` | `/admin/api/gemini` | Set / rotate the key |
-| 17 | `DELETE` | `/admin/api/gemini` | Clear the runtime key |
+| 16 | `PUT` | `/admin/api/config` | Replace bot config |
+| 17 | `GET` | `/admin/api/meta` | Defaults and allowed values |
+| 18 | `GET` | `/admin/api/gemini` | Gemini key state |
+| 19 | `POST` | `/admin/api/gemini` | Set / rotate the key |
+| 20 | `DELETE` | `/admin/api/gemini` | Clear the runtime key |
 
 ### Machine-readable spec
 
@@ -441,7 +441,7 @@ The live bot configuration. This is the exact document `PUT` expects back.
 
 > Only `bot_name`, `campaign_text`, `flow_steps` and `capture_fields` currently affect the WhatsApp bot. `welcome_text`, `intro`, `languages`, `voice_policy` and `entry_sources` are stored and returned but **not read** by the WhatsApp path — that copy is hardcoded in `client_static_messages.py`.
 
-## 13. `PUT /admin/api/config`
+## 16. `PUT /admin/api/config`
 
 Replaces the **entire** document. There is no partial update and no version history — always `GET` first, edit, then `PUT` back.
 
@@ -477,7 +477,7 @@ Outside the window the bot does not merely omit the offer: the `CAMPAIGN` sectio
 
 Adding a language therefore means adding its `intro` entry in the same request.
 
-## 14. `GET /admin/api/meta`
+## 17. `GET /admin/api/meta`
 
 Allowed values and factory defaults, for building a form.
 
@@ -492,7 +492,7 @@ Allowed values and factory defaults, for building a form.
 
 ---
 
-## 15. `GET /admin/api/gemini`
+## 18. `GET /admin/api/gemini`
 
 ```json
 {
@@ -508,7 +508,7 @@ Allowed values and factory defaults, for building a form.
 | `configured` | Whether a usable client exists. `false` means **the bot cannot answer** |
 | `source` | `runtime` (set via #16), `env` (from `.env`), or `null` (none) |
 
-## 16. `POST /admin/api/gemini`
+## 19. `POST /admin/api/gemini`
 
 **Request body**
 
@@ -518,13 +518,13 @@ Allowed values and factory defaults, for building a form.
 
 The key is **validated with a live Gemini call before being saved**. On success it is written to `data/gemini_key.txt` (chmod 600) and overrides the `.env` key; the worker picks it up on its next message.
 
-Returns the same shape as #15, with `source` now `runtime`.
+Returns the same shape as #18, with `source` now `runtime`.
 
 **`400`** on a blank key, or `{"detail": "Key rejected: …"}` when Gemini refuses it. A rejected key is never saved, so a bad paste cannot take the bot down.
 
-## 17. `DELETE /admin/api/gemini`
+## 20. `DELETE /admin/api/gemini`
 
-Removes the runtime key and falls back to `.env`. Returns the same shape as #15.
+Removes the runtime key and falls back to `.env`. Returns the same shape as #18.
 
 > If `GEMINI_API_KEY` is empty in `.env`, this leaves the bot with **no key at all** and it stops answering. Check `source` first.
 
