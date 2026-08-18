@@ -1,0 +1,196 @@
+"""Read and prune the Gemini File Search store the bot grounds its answers on.
+
+Until now nothing in this codebase ever listed the store's contents: documents
+went in via ``index_document.py`` and there was no inventory, no way to see what
+the bot was grounding on, and no way to remove anything.
+
+That matters because indexing has **no upsert**. Re-uploading a corrected
+document adds a second copy rather than replacing the first, and both stay
+retrievable — so the model can ground on superseded text with nothing to
+indicate which version it used. Deleting the stale copy is the only fix, and
+this module is what makes that possible.
+
+Adding or removing a document takes effect on the next customer message: the
+store name is sent with each request and resolved server-side, so there is no
+cache to bust and no restart needed.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Callable
+
+import config
+
+
+class KnowledgeBaseError(RuntimeError):
+    """Reportable failure — the message is safe to show an admin."""
+
+
+@dataclass(frozen=True)
+class KbDocument:
+    document_id: str
+    name: str
+    display_name: str
+    state: str
+    size_bytes: int
+    mime_type: str
+    create_time: str
+    update_time: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "document_id": self.document_id,
+            "name": self.name,
+            "display_name": self.display_name,
+            "state": self.state,
+            "size_bytes": self.size_bytes,
+            "mime_type": self.mime_type,
+            "create_time": self.create_time,
+            "update_time": self.update_time,
+        }
+
+
+def _text(value: Any) -> str:
+    """Enum members, datetimes and None all have to survive to JSON."""
+    if value is None:
+        return ""
+    return getattr(value, "value", None) or str(value)
+
+
+def document_id_of(name: str) -> str:
+    """Last path segment of ``fileSearchStores/x/documents/y``.
+
+    Used as the URL-safe handle, since the full resource name contains slashes.
+    """
+    return (name or "").strip().rstrip("/").rsplit("/", 1)[-1].strip()
+
+
+class KnowledgeBase:
+    """Inventory and pruning for one File Search store."""
+
+    def __init__(
+        self,
+        *,
+        client_factory: Callable[[], Any] | None = None,
+        store_name: str | None = None,
+    ):
+        self._client_factory = client_factory
+        self._store_name = store_name
+
+    @property
+    def store_name(self) -> str:
+        if self._store_name is not None:
+            return self._store_name
+        return config.FILE_SEARCH_STORE
+
+    def _client(self) -> Any:
+        if self._client_factory is not None:
+            return self._client_factory()
+        import rag
+
+        client = rag.get_client()
+        if client is None:
+            raise KnowledgeBaseError(
+                "No Gemini API key is configured, so the knowledge base "
+                "cannot be read."
+            )
+        return client
+
+    def _require_store(self) -> str:
+        store = self.store_name
+        if not store:
+            raise KnowledgeBaseError(
+                "FILE_SEARCH_STORE is not set, so there is no knowledge base "
+                "to read."
+            )
+        return store
+
+    def documents(self) -> list[KbDocument]:
+        store = self._require_store()
+        try:
+            pages = self._client().file_search_stores.documents.list(parent=store)
+        except Exception as exc:
+            raise KnowledgeBaseError(f"Could not list documents: {exc}") from exc
+
+        found: list[KbDocument] = []
+        for document in pages:
+            name = _text(getattr(document, "name", ""))
+            found.append(
+                KbDocument(
+                    document_id=document_id_of(name),
+                    name=name,
+                    display_name=_text(getattr(document, "display_name", "")),
+                    state=_text(getattr(document, "state", "")),
+                    size_bytes=int(getattr(document, "size_bytes", 0) or 0),
+                    mime_type=_text(getattr(document, "mime_type", "")),
+                    create_time=_text(getattr(document, "create_time", "")),
+                    update_time=_text(getattr(document, "update_time", "")),
+                )
+            )
+        return found
+
+    def summary(self) -> dict[str, Any]:
+        """Store totals plus every document, newest first.
+
+        ``duplicate_display_names`` is the point of this endpoint: because
+        indexing never replaces, a name appearing twice means two copies are
+        live and the model may be citing the older one.
+        """
+        store = self._require_store()
+        documents = self.documents()
+
+        counts: dict[str, int] = {}
+        for document in documents:
+            if document.display_name:
+                counts[document.display_name] = counts.get(document.display_name, 0) + 1
+        duplicates = sorted(name for name, n in counts.items() if n > 1)
+
+        stats: dict[str, Any] = {}
+        try:
+            detail = self._client().file_search_stores.get(name=store)
+            stats = {
+                "display_name": _text(getattr(detail, "display_name", "")),
+                "active_documents": getattr(detail, "active_documents_count", None),
+                "pending_documents": getattr(detail, "pending_documents_count", None),
+                "failed_documents": getattr(detail, "failed_documents_count", None),
+                "size_bytes": getattr(detail, "size_bytes", None),
+            }
+        except Exception:
+            # Store metadata is a nicety; the document list is the point.
+            stats = {}
+
+        return {
+            "store": store,
+            "document_count": len(documents),
+            "duplicate_display_names": duplicates,
+            "total_size_bytes": sum(d.size_bytes for d in documents),
+            **stats,
+            "documents": sorted(
+                (d.as_dict() for d in documents),
+                key=lambda d: d["create_time"],
+                reverse=True,
+            ),
+        }
+
+    def delete(self, document_id: str) -> bool:
+        """Remove one document. False when it is not in this store.
+
+        Scoped deliberately: the id is combined with *our* store name rather
+        than accepting a full resource name, so this cannot reach a document
+        in some other store.
+        """
+        store = self._require_store()
+        wanted = document_id_of(document_id)
+        if not wanted:
+            raise KnowledgeBaseError("A document id is required.")
+
+        target = next(
+            (d for d in self.documents() if d.document_id == wanted), None
+        )
+        if target is None:
+            return False
+        try:
+            self._client().file_search_stores.documents.delete(name=target.name)
+        except Exception as exc:
+            raise KnowledgeBaseError(f"Could not delete {wanted}: {exc}") from exc
+        return True

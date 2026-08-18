@@ -44,6 +44,7 @@ from admin_config import (
     validate_config,
 )
 from admin_status import StatusReporter
+from knowledge_base import KnowledgeBase, KnowledgeBaseError
 from leads import read_leads, read_leads_csv
 from media_library import MEDIA_KINDS, MediaError, MediaLibrary
 from session_keys import client_session_key
@@ -76,6 +77,7 @@ API_TAGS = [
     {"name": "configuration", "description": "What the bot says and asks."},
     {"name": "credentials", "description": "The Gemini API key backing the bot."},
     {"name": "media", "description": "Brochures and images served by the media host."},
+    {"name": "knowledge base", "description": "Documents the bot grounds its answers on."},
 ]
 
 _UNAUTHORIZED = {
@@ -104,6 +106,7 @@ def create_admin_app(
     interaction_store: Any = None,
     leads_path: Path | None = None,
     media_library: MediaLibrary | None = None,
+    knowledge_base: KnowledgeBase | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="TVS Bot Admin",
@@ -126,6 +129,7 @@ def create_admin_app(
         return leads_path or Path(config.LEADS_CSV_PATH)
 
     media = media_library or MediaLibrary(Path(config.MEDIA_ROOT))
+    kb = knowledge_base or KnowledgeBase()
 
     reporter = status_reporter or StatusReporter(
         redis_factory=redis_factory,
@@ -420,6 +424,41 @@ def create_admin_app(
                 detail=f"No {kind} file named {filename}.",
             )
         return {"kind": kind, "filename": filename, "deleted": True}
+
+    # --- knowledge base ----------------------------------------------------
+
+    @app.get("/admin/api/kb", tags=["knowledge base"], summary="What the bot grounds its answers on", responses={**_UNAUTHORIZED, 502: {"description": "The knowledge base could not be read."}})
+    def read_knowledge_base(_: None = Depends(require_admin)) -> dict[str, Any]:
+        """Every document in the File Search store, with duplicates flagged.
+
+        Indexing never replaces, so a display name appearing twice means two
+        copies are live and the bot may be citing the older one.
+        """
+        try:
+            return kb.summary()
+        except KnowledgeBaseError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            ) from exc
+
+    @app.delete("/admin/api/kb/{document_id}", tags=["knowledge base"], summary="Remove a document from the knowledge base", responses={**_UNAUTHORIZED, 404: {"description": "No such document in this store."}, 502: {"description": "The knowledge base could not be reached."}})
+    def delete_knowledge_document(
+        document_id: str,
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Delete one document. Takes effect on the next customer message."""
+        try:
+            removed = kb.delete(document_id)
+        except KnowledgeBaseError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            ) from exc
+        if not removed:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No document {document_id} in this knowledge base.",
+            )
+        return {"document_id": document_id, "deleted": True}
 
     @app.get("/admin/api/gemini", tags=["credentials"], summary="Gemini key state", responses=_UNAUTHORIZED)
     def gemini_status(_: None = Depends(require_admin)) -> dict[str, Any]:

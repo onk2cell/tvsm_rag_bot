@@ -98,6 +98,7 @@ def _app(
     interaction_store=None,
     leads_path=None,
     media_library=None,
+    knowledge_base=None,
 ):
     store = AdminConfigStore(tmp_path / "admin_config.json")
     store.ensure_seeded()
@@ -110,6 +111,7 @@ def _app(
         interaction_store=interaction_store,
         leads_path=leads_path,
         media_library=media_library,
+        knowledge_base=knowledge_base,
     )
 
 
@@ -742,6 +744,7 @@ def test_spec_declares_bearer_auth_so_swagger_can_authorize(tmp_path):
         "configuration",
         "credentials",
         "media",
+        "knowledge base",
     }
 
 
@@ -911,3 +914,70 @@ def test_an_unknown_media_kind_is_404(tmp_path):
     resp = client.get("/admin/api/media/videos", headers=_auth())
     assert resp.status_code == 404
     assert "brochures" in resp.json()["detail"]
+
+
+# --- knowledge base ---------------------------------------------------------
+
+
+class FakeKb:
+    def __init__(self, *, documents=None, error=None):
+        self._documents = documents if documents is not None else []
+        self._error = error
+        self.deleted = []
+
+    def summary(self):
+        if self._error:
+            raise self._error
+        return {
+            "store": "fileSearchStores/test",
+            "document_count": len(self._documents),
+            "duplicate_display_names": ["price_list.pdf"],
+            "total_size_bytes": 4096,
+            "documents": self._documents,
+        }
+
+    def delete(self, document_id):
+        if self._error:
+            raise self._error
+        if document_id not in [d["document_id"] for d in self._documents]:
+            return False
+        self.deleted.append(document_id)
+        return True
+
+
+def test_kb_lists_documents_and_flags_duplicates(tmp_path):
+    kb = FakeKb(documents=[{"document_id": "a1", "display_name": "price_list.pdf"}])
+    client = TestClient(_app(tmp_path, knowledge_base=kb))
+    body = client.get("/admin/api/kb", headers=_auth()).json()
+    assert body["document_count"] == 1
+    assert body["duplicate_display_names"] == ["price_list.pdf"]
+
+
+def test_kb_delete_removes_a_stale_document(tmp_path):
+    kb = FakeKb(documents=[{"document_id": "a1", "display_name": "old.pdf"}])
+    client = TestClient(_app(tmp_path, knowledge_base=kb))
+    resp = client.delete("/admin/api/kb/a1", headers=_auth())
+    assert resp.status_code == 200
+    assert resp.json() == {"document_id": "a1", "deleted": True}
+    assert kb.deleted == ["a1"]
+
+
+def test_kb_delete_of_an_unknown_document_is_404(tmp_path):
+    client = TestClient(_app(tmp_path, knowledge_base=FakeKb()))
+    assert client.delete("/admin/api/kb/nope", headers=_auth()).status_code == 404
+
+
+def test_kb_reports_an_upstream_failure_as_502_not_500(tmp_path):
+    from knowledge_base import KnowledgeBaseError
+
+    kb = FakeKb(error=KnowledgeBaseError("No Gemini API key is configured"))
+    client = TestClient(_app(tmp_path, knowledge_base=kb))
+    resp = client.get("/admin/api/kb", headers=_auth())
+    assert resp.status_code == 502
+    assert "Gemini API key" in resp.json()["detail"]
+
+
+def test_kb_requires_a_token(tmp_path):
+    client = TestClient(_app(tmp_path, knowledge_base=FakeKb()))
+    assert client.get("/admin/api/kb").status_code == 401
+    assert client.delete("/admin/api/kb/a1").status_code == 401

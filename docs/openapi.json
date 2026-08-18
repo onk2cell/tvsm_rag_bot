@@ -1026,6 +1026,106 @@
         }
       }
     },
+    "/admin/api/kb": {
+      "get": {
+        "tags": [
+          "knowledge base"
+        ],
+        "summary": "What the bot grounds its answers on",
+        "description": "Every document in the File Search store, with duplicates flagged.\n\nIndexing never replaces, so a display name appearing twice means two\ncopies are live and the bot may be citing the older one.",
+        "operationId": "read_knowledge_base_admin_api_kb_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Read Knowledge Base Admin Api Kb Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "502": {
+            "description": "The knowledge base could not be read."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/kb/{document_id}": {
+      "delete": {
+        "tags": [
+          "knowledge base"
+        ],
+        "summary": "Remove a document from the knowledge base",
+        "description": "Delete one document. Takes effect on the next customer message.",
+        "operationId": "delete_knowledge_document_admin_api_kb__document_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Knowledge Document Admin Api Kb  Document Id  Delete"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "404": {
+            "description": "No such document in this store."
+          },
+          "502": {
+            "description": "The knowledge base could not be reached."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/api/gemini": {
       "get": {
         "tags": [
@@ -1252,6 +1352,10 @@
     {
       "name": "media",
       "description": "Brochures and images served by the media host."
+    },
+    {
+      "name": "knowledge base",
+      "description": "Documents the bot grounds its answers on."
     }
   ]
 }
