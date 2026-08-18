@@ -45,7 +45,7 @@ from admin_config import (
 )
 from admin_status import StatusReporter
 from leads import read_leads, read_leads_csv
-from media_library import MAX_UPLOAD_BYTES, MediaError, MediaLibrary
+from media_library import MEDIA_KINDS, MediaError, MediaLibrary
 from session_keys import client_session_key
 
 _PAGE_PATH = Path(__file__).with_name("assets") / "admin.html"
@@ -75,7 +75,7 @@ API_TAGS = [
     {"name": "leads", "description": "Qualified leads captured for the dealership."},
     {"name": "configuration", "description": "What the bot says and asks."},
     {"name": "credentials", "description": "The Gemini API key backing the bot."},
-    {"name": "media", "description": "Brochure PDFs served by the media host."},
+    {"name": "media", "description": "Brochures and images served by the media host."},
 ]
 
 _UNAUTHORIZED = {
@@ -352,44 +352,64 @@ def create_admin_app(
 
     # --- media -------------------------------------------------------------
 
-    @app.get("/admin/api/media/brochures", tags=["media"], summary="List uploaded brochures", responses=_UNAUTHORIZED)
-    def list_brochures(_: None = Depends(require_admin)) -> dict[str, Any]:
+    def library_for(kind_name: str) -> MediaLibrary:
+        kind = MEDIA_KINDS.get(kind_name)
+        if kind is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"Unknown media kind {kind_name!r}. "
+                    f"Expected one of: {', '.join(sorted(MEDIA_KINDS))}."
+                ),
+            )
+        return media.for_kind(kind)
+
+    @app.get("/admin/api/media/{kind}", tags=["media"], summary="List uploaded media", responses={**_UNAUTHORIZED, 404: {"description": "Unknown media kind."}})
+    def list_media(kind: str, _: None = Depends(require_admin)) -> dict[str, Any]:
+        library = library_for(kind)
         return {
-            "base_url": media.url_for("").rstrip("/"),
-            "max_upload_bytes": MAX_UPLOAD_BYTES,
-            "items": [item.as_dict() for item in media.list()],
+            "kind": kind,
+            "base_url": library.url_for("").rstrip("/"),
+            "max_upload_bytes": library.kind.max_bytes,
+            "allowed_suffixes": sorted(library.kind.suffixes),
+            "items": [item.as_dict() for item in library.list()],
         }
 
-    @app.post("/admin/api/media/brochures", tags=["media"], summary="Upload a brochure PDF", responses={**_UNAUTHORIZED, 400: {"description": "Not a PDF, too large, empty, or the name already exists."}})
-    async def upload_brochure(
-        file: UploadFile = File(..., description="The brochure PDF."),
+    @app.post("/admin/api/media/{kind}", tags=["media"], summary="Upload a brochure or image", responses={**_UNAUTHORIZED, 400: {"description": "Wrong type, too large, empty, or the name already exists."}, 404: {"description": "Unknown media kind."}})
+    async def upload_media(
+        kind: str,
+        file: UploadFile = File(..., description="The file to publish."),
         overwrite: bool = Form(False, description="Replace a file of the same name."),
         _: None = Depends(require_admin),
     ) -> dict[str, Any]:
-        """Publish a PDF on the media host and return its public URL.
+        """Publish a file on the media host and return its public URL.
+
+        `kind` is `brochures` (PDF) or `images` (JPEG/PNG share-location cards).
 
         This does not change what the bot sends. Point
-        ``documents.<product>.brochure`` at the returned URL to make it live —
-        uploading a draft must never start sending it on its own.
+        ``documents.<product>.brochure`` or ``share_location_image.url`` at the
+        returned URL to make it live — uploading a draft must never start
+        sending it.
         """
+        library = library_for(kind)
         content = await file.read()
         try:
-            saved = media.save(
-                file.filename or "", content, overwrite=overwrite
-            )
+            saved = library.save(file.filename or "", content, overwrite=overwrite)
         except MediaError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
-        return saved.as_dict()
+        return {"kind": kind, **saved.as_dict()}
 
-    @app.delete("/admin/api/media/brochures/{filename}", tags=["media"], summary="Delete a brochure", responses={**_UNAUTHORIZED, 404: {"description": "No such brochure."}})
-    def delete_brochure(
+    @app.delete("/admin/api/media/{kind}/{filename}", tags=["media"], summary="Delete a brochure or image", responses={**_UNAUTHORIZED, 404: {"description": "Unknown media kind, or no such file."}})
+    def delete_media(
+        kind: str,
         filename: str,
         _: None = Depends(require_admin),
     ) -> dict[str, Any]:
+        library = library_for(kind)
         try:
-            removed = media.delete(filename)
+            removed = library.delete(filename)
         except MediaError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
@@ -397,9 +417,9 @@ def create_admin_app(
         if not removed:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No brochure named {filename}.",
+                detail=f"No {kind} file named {filename}.",
             )
-        return {"filename": filename, "deleted": True}
+        return {"kind": kind, "filename": filename, "deleted": True}
 
     @app.get("/admin/api/gemini", tags=["credentials"], summary="Gemini key state", responses=_UNAUTHORIZED)
     def gemini_status(_: None = Depends(require_admin)) -> dict[str, Any]:

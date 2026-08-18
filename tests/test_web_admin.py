@@ -817,7 +817,7 @@ def test_upload_rejects_a_non_pdf(tmp_path):
         headers=_auth(),
     )
     assert resp.status_code == 400
-    assert "not a PDF" in resp.json()["detail"]
+    assert "not a valid brochure" in resp.json()["detail"]
 
 
 def test_upload_refuses_to_silently_replace(tmp_path):
@@ -867,3 +867,47 @@ def test_media_endpoints_require_a_token(tmp_path):
     client, _ = _media_app(tmp_path)
     assert client.get("/admin/api/media/brochures").status_code == 401
     assert client.post("/admin/api/media/brochures").status_code == 401
+
+
+def test_upload_a_share_location_image(tmp_path):
+    client, _ = _media_app(tmp_path)
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+    resp = client.post(
+        "/admin/api/media/images",
+        files={"file": ("how_to.jpg", jpeg, "image/jpeg")},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["kind"] == "images"
+    assert body["url"] == (
+        "https://media.example.com/media/share_location/how_to.jpg"
+    )
+
+
+def test_image_and_brochure_listings_are_separate(tmp_path):
+    client, _ = _media_app(tmp_path)
+    client.post(
+        "/admin/api/media/brochures",
+        files={"file": ("king.pdf", b"%PDF-1.4\nx\n", "application/pdf")},
+        headers=_auth(),
+    )
+    client.post(
+        "/admin/api/media/images",
+        files={"file": ("how_to.jpg", b"\xff\xd8\xff\xe0" + b"\x00" * 8, "image/jpeg")},
+        headers=_auth(),
+    )
+    brochures = client.get("/admin/api/media/brochures", headers=_auth()).json()
+    images = client.get("/admin/api/media/images", headers=_auth()).json()
+
+    assert [i["filename"] for i in brochures["items"]] == ["king.pdf"]
+    assert [i["filename"] for i in images["items"]] == ["how_to.jpg"]
+    assert images["allowed_suffixes"] == [".jpeg", ".jpg", ".png"]
+    assert images["max_upload_bytes"] < brochures["max_upload_bytes"]
+
+
+def test_an_unknown_media_kind_is_404(tmp_path):
+    client, _ = _media_app(tmp_path)
+    resp = client.get("/admin/api/media/videos", headers=_auth())
+    assert resp.status_code == 404
+    assert "brochures" in resp.json()["detail"]

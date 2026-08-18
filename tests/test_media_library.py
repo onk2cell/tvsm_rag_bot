@@ -52,7 +52,7 @@ def test_only_pdfs_are_accepted(tmp_path):
 def test_a_pdf_extension_is_not_enough(tmp_path):
     """Extension is trivially forged; the magic bytes are checked too."""
     lib = _library(tmp_path)
-    with pytest.raises(MediaError, match="not a PDF"):
+    with pytest.raises(MediaError, match="not a valid brochure"):
         lib.save("actually_html.pdf", b"<html><script>alert(1)</script>")
 
 
@@ -61,7 +61,7 @@ def test_empty_and_oversized_uploads_are_refused(tmp_path):
     with pytest.raises(MediaError, match="empty"):
         lib.save("x.pdf", b"")
     too_big = b"%PDF-" + b"0" * MAX_UPLOAD_BYTES
-    with pytest.raises(MediaError, match="the limit is"):
+    with pytest.raises(MediaError, match="the limit for brochures is"):
         lib.save("big.pdf", too_big)
 
 
@@ -128,3 +128,65 @@ def test_delete_refuses_a_non_pdf_name_outright(tmp_path):
 def test_no_media_host_configured_yields_no_url(tmp_path):
     lib = _library(tmp_path, base_url="")
     assert lib.save("a.pdf", PDF).url == ""
+
+
+# --- images (share-location cards) ------------------------------------------
+
+from media_library import IMAGES  # noqa: E402
+
+JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 40
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
+
+
+def _images(tmp_path, base_url="https://media.example.com/media"):
+    return MediaLibrary(tmp_path, kind=IMAGES, base_url=base_url)
+
+
+def test_image_lands_in_the_share_location_directory(tmp_path):
+    lib = _images(tmp_path)
+    saved = lib.save("how_to.jpg", JPEG)
+    assert saved.url == (
+        "https://media.example.com/media/share_location/how_to.jpg"
+    )
+    assert (tmp_path / "share_location" / "how_to.jpg").read_bytes() == JPEG
+
+
+def test_png_is_accepted_too(tmp_path):
+    assert _images(tmp_path).save("card.png", PNG).filename == "card.png"
+
+
+def test_a_pdf_cannot_be_uploaded_as_an_image(tmp_path):
+    lib = _images(tmp_path)
+    with pytest.raises(MediaError, match="Only .jpeg, .jpg, .png"):
+        lib.save("brochure.pdf", PDF)
+
+
+def test_an_image_extension_is_not_enough(tmp_path):
+    """A .jpg name on a PDF body must not be published as an image."""
+    lib = _images(tmp_path)
+    with pytest.raises(MediaError, match="not a valid image"):
+        lib.save("sneaky.jpg", PDF)
+
+
+def test_images_have_their_own_smaller_size_limit(tmp_path):
+    lib = _images(tmp_path)
+    assert IMAGES.max_bytes < MAX_UPLOAD_BYTES  # 5 MB vs 25 MB
+    with pytest.raises(MediaError, match="the limit for images is"):
+        lib.save("huge.jpg", JPEG + b"0" * IMAGES.max_bytes)
+
+
+def test_the_two_kinds_do_not_see_each_other(tmp_path):
+    brochures = _library(tmp_path)
+    images = _images(tmp_path)
+    brochures.save("king.pdf", PDF)
+    images.save("how_to.jpg", JPEG)
+
+    assert [i.filename for i in brochures.list()] == ["king.pdf"]
+    assert [i.filename for i in images.list()] == ["how_to.jpg"]
+
+
+def test_an_image_filename_cannot_escape_either(tmp_path):
+    lib = _images(tmp_path)
+    saved = lib.save("../../../etc/evil.jpg", JPEG)
+    written = tmp_path / "share_location" / saved.filename
+    assert written.resolve().parent == (tmp_path / "share_location").resolve()

@@ -42,9 +42,9 @@ There is one shared token. No roles, no per-user access.
 | 9 | `POST` | `/admin/api/interactions/{id}/review` | Mark a turn reviewed |
 | 10 | `GET` | `/admin/api/leads` | Captured leads |
 | 11 | `GET` | `/admin/api/leads/export.csv` | Leads as CSV |
-| 12 | `GET` | `/admin/api/media/brochures` | List uploaded brochures |
-| 13 | `POST` | `/admin/api/media/brochures` | Upload a brochure PDF |
-| 14 | `DELETE` | `/admin/api/media/brochures/{filename}` | Delete a brochure |
+| 12 | `GET` | `/admin/api/media/{kind}` | List uploaded media |
+| 13 | `POST` | `/admin/api/media/{kind}` | Upload a brochure or image |
+| 14 | `DELETE` | `/admin/api/media/{kind}/{filename}` | Delete one |
 | 15 | `GET` | `/admin/api/config` | Read live bot config |
 | 16 | `PUT` | `/admin/api/config` | Replace bot config |
 | 17 | `GET` | `/admin/api/meta` | Defaults and allowed values |
@@ -355,22 +355,33 @@ The whole leads file, same lock discipline. `text/csv`, `filename="leads.csv"`.
 
 ---
 
-## Brochure uploads
+## Media uploads
 
 `data/media` is a shared volume: the admin container writes to it and the media
-host serves the same directory read-only at `/media/`. Publishing a brochure is
-therefore a file write — no CDN account, no third party, no long-running job.
+host serves the same directory read-only at `/media/`. Publishing is therefore a
+file write — no CDN account, no third party, no long-running job.
 
-**Uploading does not change what the bot sends.** An admin still has to point
-`documents.<product>.brochure` at the returned URL. Publishing a draft must
-never start sending it.
+`{kind}` is one of:
 
-### `GET /admin/api/media/brochures`
+| kind | Directory | Accepts | Limit | Used for |
+|---|---|---|---|---|
+| `brochures` | `data/media/brochures` | `.pdf` | 25 MB | Product brochures, warranty and PMS PDFs |
+| `images` | `data/media/share_location` | `.jpg` `.jpeg` `.png` | 5 MB | The how-to share-location cards |
+
+Any other kind returns `404`.
+
+**Uploading does not change what the bot sends.** An admin still points
+`documents.<product>.brochure` or `share_location_image.url` at the returned
+URL. Publishing a draft must never start sending it.
+
+### `GET /admin/api/media/{kind}`
 
 ```json
 {
+  "kind": "brochures",
   "base_url": "https://media.example.com/media/brochures",
   "max_upload_bytes": 26214400,
+  "allowed_suffixes": [".pdf"],
   "items": [
     {"filename": "King_EV_MAX_2027.pdf", "size_bytes": 3215592,
      "url": "https://media.example.com/media/brochures/King_EV_MAX_2027.pdf"}
@@ -378,7 +389,7 @@ never start sending it.
 }
 ```
 
-### `POST /admin/api/media/brochures`
+### `POST /admin/api/media/{kind}`
 
 `multipart/form-data`:
 
@@ -390,19 +401,25 @@ never start sending it.
 ```bash
 curl -s -H "$AUTH" -F "file=@King_EV_MAX_2027.pdf" \
   "$BASE/admin/api/media/brochures"
+
+curl -s -H "$AUTH" -F "file=@how_to.jpg" \
+  "$BASE/admin/api/media/images"
 ```
 
-Returns `{"filename", "size_bytes", "url"}`.
+Returns `{"kind", "filename", "size_bytes", "url"}`.
 
-Rejected with `400` when the file is empty, over 25 MB, not a PDF (the `%PDF-`
-header is checked, not just the extension), or the name already exists without
-`overwrite=true`. Filenames are sanitised to a single path component, so an
-upload cannot write outside the brochure directory. Writes are staged and moved
-into place, so the media host can never serve a half-uploaded file.
+Rejected with `400` when the extension is wrong for the kind, the file is empty
+or over the limit, the content does not match its type (the leading bytes are
+checked, so a PDF renamed `.jpg` is refused), or the name already exists without
+`overwrite=true`. Filenames are sanitised to a single path component and the
+resolved parent is asserted, so an upload cannot write outside its directory.
+Writes are staged then moved into place, so the media host can never serve a
+half-uploaded file.
 
-### `DELETE /admin/api/media/brochures/{filename}`
+### `DELETE /admin/api/media/{kind}/{filename}`
 
-`{"filename": "...", "deleted": true}`, or `404` if there is no such brochure.
+`{"kind": "...", "filename": "...", "deleted": true}`, or `404` if there is no
+such file.
 
 ---
 
