@@ -441,6 +441,47 @@ def create_admin_app(
                 status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
             ) from exc
 
+    @app.post("/admin/api/kb", tags=["knowledge base"], summary="Index a document into the knowledge base", responses={**_UNAUTHORIZED, 400: {"description": "Empty, too large, or unnamed."}, 502: {"description": "The knowledge base could not be reached."}})
+    async def add_knowledge_document(
+        file: UploadFile = File(..., description="The document to index."),
+        display_name: str = Form("", description="Defaults to the filename."),
+        replace: bool = Form(False, description="Delete existing documents with the same display name."),
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Add a document the bot will ground its answers on.
+
+        Returns as soon as the file is accepted, not once it is searchable —
+        indexing runs for minutes, and holding the request open that long would
+        be dropped by the tunnel in front of this app. Poll `GET /admin/api/kb`
+        and watch the document go from `STATE_PENDING` to `STATE_ACTIVE`.
+
+        Pass `replace=true` when re-indexing a corrected document: indexing has
+        no upsert, so otherwise the new copy simply joins the stale one and the
+        bot may cite either.
+        """
+        content = await file.read()
+        try:
+            return kb.add(
+                file.filename or "",
+                content,
+                display_name=display_name,
+                replace=replace,
+            )
+        except KnowledgeBaseError as exc:
+            message = str(exc)
+            rejected = any(
+                phrase in message
+                for phrase in ("limit is", "empty", "is required")
+            )
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_400_BAD_REQUEST
+                    if rejected
+                    else status.HTTP_502_BAD_GATEWAY
+                ),
+                detail=message,
+            ) from exc
+
     @app.delete("/admin/api/kb/{document_id}", tags=["knowledge base"], summary="Remove a document from the knowledge base", responses={**_UNAUTHORIZED, 404: {"description": "No such document in this store."}, 502: {"description": "The knowledge base could not be reached."}})
     def delete_knowledge_document(
         document_id: str,

@@ -22,6 +22,11 @@ from typing import Any, Callable
 import config
 
 
+# Well above the largest TVS brochure (9.2 MB) and inside the 100 MB body
+# limit of the tunnel in front of the admin app.
+MAX_DOCUMENT_BYTES = 30 * 1024 * 1024
+
+
 class KnowledgeBaseError(RuntimeError):
     """Reportable failure — the message is safe to show an admin."""
 
@@ -170,6 +175,82 @@ class KnowledgeBase:
                 key=lambda d: d["create_time"],
                 reverse=True,
             ),
+        }
+
+    def add(
+        self,
+        filename: str,
+        content: bytes,
+        *,
+        display_name: str = "",
+        replace: bool = False,
+    ) -> dict[str, Any]:
+        """Index a document. Returns once uploaded, not once searchable.
+
+        Indexing is a long-running operation that can take minutes, but the
+        upload itself is seconds. Waiting for indexing would hold the HTTP
+        request open long enough for the tunnel in front of this app to drop
+        it, so we return as soon as the file is accepted. The document shows
+        as PENDING in ``summary()`` and becomes ACTIVE on its own.
+
+        ``replace`` deletes any existing documents with the same display name
+        **after** the new one is accepted. Indexing has no upsert, so without
+        this a corrected document simply joins the stale one and the model can
+        ground on either.
+        """
+        store = self._require_store()
+        name = (display_name or filename or "").strip()
+        if not name:
+            raise KnowledgeBaseError("A filename or display name is required.")
+        if not content:
+            raise KnowledgeBaseError("The uploaded file is empty.")
+        if len(content) > MAX_DOCUMENT_BYTES:
+            raise KnowledgeBaseError(
+                f"File is {len(content) / 1_048_576:.1f} MB; the limit is "
+                f"{MAX_DOCUMENT_BYTES // 1_048_576} MB."
+            )
+
+        superseded = (
+            [d for d in self.documents() if d.display_name == name]
+            if replace
+            else []
+        )
+
+        import tempfile
+        from pathlib import Path as _Path
+
+        suffix = _Path(name).suffix or ".pdf"
+        client = self._client()
+        with tempfile.NamedTemporaryFile(suffix=suffix) as handle:
+            handle.write(content)
+            handle.flush()
+            try:
+                client.file_search_stores.upload_to_file_search_store(
+                    file_search_store_name=store,
+                    file=handle.name,
+                    config={"display_name": name},
+                )
+            except Exception as exc:
+                raise KnowledgeBaseError(f"Could not index {name}: {exc}") from exc
+
+        replaced: list[str] = []
+        for stale in superseded:
+            # Only after the new copy is safely in: deleting first would leave
+            # the bot with no source at all if the upload then failed.
+            try:
+                client.file_search_stores.documents.delete(name=stale.name)
+                replaced.append(stale.document_id)
+            except Exception:
+                # The new document is live; a failed cleanup is a duplicate to
+                # tidy later, not a reason to fail the request.
+                pass
+
+        return {
+            "display_name": name,
+            "size_bytes": len(content),
+            "state": "STATE_PENDING",
+            "indexing": True,
+            "replaced_document_ids": replaced,
         }
 
     def delete(self, document_id: str) -> bool:

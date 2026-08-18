@@ -1062,6 +1062,65 @@
             "HTTPBearer": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "knowledge base"
+        ],
+        "summary": "Index a document into the knowledge base",
+        "description": "Add a document the bot will ground its answers on.\n\nReturns as soon as the file is accepted, not once it is searchable —\nindexing runs for minutes, and holding the request open that long would\nbe dropped by the tunnel in front of this app. Poll `GET /admin/api/kb`\nand watch the document go from `STATE_PENDING` to `STATE_ACTIVE`.\n\nPass `replace=true` when re-indexing a corrected document: indexing has\nno upsert, so otherwise the new copy simply joins the stale one and the\nbot may cite either.",
+        "operationId": "add_knowledge_document_admin_api_kb_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_add_knowledge_document_admin_api_kb_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Add Knowledge Document Admin Api Kb Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "400": {
+            "description": "Empty, too large, or unnamed."
+          },
+          "502": {
+            "description": "The knowledge base could not be reached."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/admin/api/kb/{document_id}": {
@@ -1252,6 +1311,33 @@
   },
   "components": {
     "schemas": {
+      "Body_add_knowledge_document_admin_api_kb_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File",
+            "description": "The document to index."
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Defaults to the filename.",
+            "default": ""
+          },
+          "replace": {
+            "type": "boolean",
+            "title": "Replace",
+            "description": "Delete existing documents with the same display name.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_add_knowledge_document_admin_api_kb_post"
+      },
       "Body_upload_media_admin_api_media__kind__post": {
         "properties": {
           "file": {

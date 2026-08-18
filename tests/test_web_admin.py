@@ -981,3 +981,50 @@ def test_kb_requires_a_token(tmp_path):
     client = TestClient(_app(tmp_path, knowledge_base=FakeKb()))
     assert client.get("/admin/api/kb").status_code == 401
     assert client.delete("/admin/api/kb/a1").status_code == 401
+
+
+def test_kb_upload_returns_before_indexing_finishes(tmp_path):
+    class UploadKb(FakeKb):
+        def add(self, filename, content, *, display_name="", replace=False):
+            self.added = (filename, len(content), display_name, replace)
+            return {
+                "display_name": display_name or filename,
+                "size_bytes": len(content),
+                "state": "STATE_PENDING",
+                "indexing": True,
+                "replaced_document_ids": [],
+            }
+
+    kb = UploadKb()
+    client = TestClient(_app(tmp_path, knowledge_base=kb))
+    resp = client.post(
+        "/admin/api/kb",
+        files={"file": ("specs.pdf", b"%PDF-1.4\nx\n", "application/pdf")},
+        data={"replace": "true"},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["indexing"] is True
+    assert resp.json()["state"] == "STATE_PENDING"
+    assert kb.added[0] == "specs.pdf" and kb.added[3] is True
+
+
+def test_kb_upload_rejects_bad_input_as_400_not_502(tmp_path):
+    from knowledge_base import KnowledgeBaseError
+
+    class RejectingKb(FakeKb):
+        def add(self, *a, **kw):
+            raise KnowledgeBaseError("File is 40.0 MB; the limit is 30 MB.")
+
+    client = TestClient(_app(tmp_path, knowledge_base=RejectingKb()))
+    resp = client.post(
+        "/admin/api/kb",
+        files={"file": ("big.pdf", b"%PDF-x", "application/pdf")},
+        headers=_auth(),
+    )
+    assert resp.status_code == 400
+
+
+def test_kb_upload_requires_a_token(tmp_path):
+    client = TestClient(_app(tmp_path, knowledge_base=FakeKb()))
+    assert client.post("/admin/api/kb").status_code == 401

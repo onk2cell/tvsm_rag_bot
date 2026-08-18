@@ -162,3 +162,115 @@ def test_an_api_failure_is_wrapped_not_leaked():
     kb, _ = _kb([], list_raises=RuntimeError("quota exceeded"))
     with pytest.raises(KnowledgeBaseError, match="Could not list documents"):
         kb.summary()
+
+
+# --- adding documents -------------------------------------------------------
+
+
+class UploadingClient(FakeClient):
+    """FakeClient that records uploads and appends the new document."""
+
+    def __init__(self, documents, *, upload_raises=None):
+        super().__init__(documents)
+        self.uploads = []
+        self._upload_raises = upload_raises
+        outer = self
+
+        class _Stores:
+            documents = self.file_search_stores.documents
+
+            def get(self, *, name):
+                return FakeStoreDetail()
+
+            def upload_to_file_search_store(self, *, file_search_store_name, file, config):
+                if outer._upload_raises:
+                    raise outer._upload_raises
+                import pathlib
+
+                outer.uploads.append(
+                    {
+                        "store": file_search_store_name,
+                        "display_name": config["display_name"],
+                        "bytes": pathlib.Path(file).read_bytes(),
+                        "suffix": pathlib.Path(file).suffix,
+                    }
+                )
+                outer._documents.append(
+                    FakeDocument(f"new{len(outer.uploads)}", config["display_name"])
+                )
+                return object()
+
+        self.file_search_stores = _Stores()
+
+
+def _uploading_kb(documents, **kw):
+    client = UploadingClient(documents, **kw)
+    return KnowledgeBase(client_factory=lambda: client, store_name=STORE), client
+
+
+def test_add_indexes_a_document():
+    kb, client = _uploading_kb([])
+    result = kb.add("price_list.pdf", b"%PDF-1.4\nprices\n")
+
+    assert result["display_name"] == "price_list.pdf"
+    assert result["indexing"] is True
+    assert result["state"] == "STATE_PENDING"
+    assert client.uploads[0]["store"] == STORE
+    assert client.uploads[0]["bytes"] == b"%PDF-1.4\nprices\n"
+    assert client.uploads[0]["suffix"] == ".pdf"
+
+
+def test_add_does_not_wait_for_indexing_to_finish():
+    """Holding the request open for a multi-minute LRO is what the tunnel in
+    front of this app drops."""
+    kb, _ = _uploading_kb([])
+    assert kb.add("a.pdf", b"%PDF-x")["indexing"] is True
+
+
+def test_display_name_can_be_given_explicitly():
+    """index_document.py names documents after the raw CLI path; this lets an
+    admin set something sane instead."""
+    kb, client = _uploading_kb([])
+    kb.add("/tmp/whatever/x9f.pdf", b"%PDF-x", display_name="King EV MAX specs.pdf")
+    assert client.uploads[0]["display_name"] == "King EV MAX specs.pdf"
+
+
+def test_replace_removes_the_superseded_copy():
+    kb, client = _uploading_kb([FakeDocument("old", "price_list.pdf")])
+    result = kb.add("price_list.pdf", b"%PDF-new", replace=True)
+
+    assert result["replaced_document_ids"] == ["old"]
+    assert client.deleted == [f"{STORE}/documents/old"]
+    assert [d["display_name"] for d in kb.summary()["documents"]] == ["price_list.pdf"]
+
+
+def test_without_replace_a_reindex_creates_a_duplicate():
+    """The default is additive, matching the API's own behaviour — the flag has
+    to be asked for."""
+    kb, _ = _uploading_kb([FakeDocument("old", "price_list.pdf")])
+    kb.add("price_list.pdf", b"%PDF-new")
+    assert kb.summary()["duplicate_display_names"] == ["price_list.pdf"]
+
+
+def test_the_old_copy_survives_a_failed_upload():
+    """Deleting first would leave the bot with no source at all."""
+    kb, client = _uploading_kb(
+        [FakeDocument("old", "price_list.pdf")],
+        upload_raises=RuntimeError("quota exceeded"),
+    )
+    with pytest.raises(KnowledgeBaseError, match="Could not index"):
+        kb.add("price_list.pdf", b"%PDF-new", replace=True)
+    assert client.deleted == []
+    assert kb.summary()["document_count"] == 1
+
+
+def test_add_rejects_empty_and_oversized_and_unnamed():
+    from knowledge_base import MAX_DOCUMENT_BYTES
+
+    kb, _ = _uploading_kb([])
+    with pytest.raises(KnowledgeBaseError, match="empty"):
+        kb.add("a.pdf", b"")
+    with pytest.raises(KnowledgeBaseError, match="limit is"):
+        kb.add("a.pdf", b"x" * (MAX_DOCUMENT_BYTES + 1))
+    with pytest.raises(KnowledgeBaseError, match="is required"):
+        kb.add("   ", b"%PDF-x")
