@@ -264,3 +264,65 @@ def test_an_unreadable_config_still_sends_the_default_brochure(monkeypatch):
     assert client_media_assets.product_brochure_url("King EV MAX").endswith(
         "King_EV_MAX-English.pdf"
     )
+
+
+# --- share-location card ----------------------------------------------------
+
+
+def _share_config(monkeypatch, value):
+    import client_media_assets
+
+    class FakeStore:
+        def get(self):
+            return {"share_location_image": value}
+
+    monkeypatch.setattr(
+        client_media_assets.admin_config, "get_store", lambda: FakeStore()
+    )
+
+
+def test_card_falls_back_to_the_media_host(monkeypatch):
+    """Unconfigured behaves exactly as before this setting existed."""
+    import client_media_assets
+
+    _share_config(monkeypatch, {})
+    monkeypatch.setattr(
+        client_media_assets, "media_base_url", lambda: "https://media.example.com/media"
+    )
+    assert client_media_assets.share_location_image_url("Hindi") == (
+        "https://media.example.com/media/share_location/how_to.jpg"
+    )
+
+
+def test_card_can_be_pointed_at_a_stable_cdn(monkeypatch):
+    import client_media_assets
+
+    _share_config(monkeypatch, {"url": "https://1.jamoutsourcing.com/f/how_to.jpg"})
+    assert client_media_assets.share_location_image_url("Hindi") == (
+        "https://1.jamoutsourcing.com/f/how_to.jpg"
+    )
+
+
+def test_a_language_override_wins(monkeypatch):
+    import client_media_assets
+
+    _share_config(
+        monkeypatch,
+        {
+            "url": "https://cdn/how_to.jpg",
+            "by_language": {"Tamil": "https://cdn/tamil.jpg"},
+        },
+    )
+    assert client_media_assets.share_location_image_url("Tamil") == "https://cdn/tamil.jpg"
+    assert client_media_assets.share_location_image_url("Hindi") == "https://cdn/how_to.jpg"
+
+
+def test_an_unreadable_config_still_yields_a_card(monkeypatch):
+    import client_media_assets
+
+    def explode():
+        raise RuntimeError("corrupt")
+
+    monkeypatch.setattr(client_media_assets.admin_config, "get_store", explode)
+    monkeypatch.setattr(client_media_assets, "media_base_url", lambda: "https://m/media")
+    assert client_media_assets.share_location_image_url("Hindi").endswith("how_to.jpg")

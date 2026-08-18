@@ -122,6 +122,34 @@ DEFAULT_PRODUCT_DOCUMENTS = {
 SUPPORT_DOC_KINDS = frozenset({"warranty", "pms"})
 FUEL_KINDS = frozenset({"cng", "lpg", "petrol"})
 
+# The how-to card shown to customers who do not know their pincode.
+#
+# `url` empty means "derive it from CLIENT_MEDIA_BASE_URL", which is today's
+# behaviour and points at our own media host. Set it to an absolute URL to
+# serve the card from somewhere stable instead — JAM's CDN, for example — and
+# the ephemeral media tunnel stops mattering for customer-facing traffic.
+#
+# `by_language` overrides `url` per language code. Localized cards for all
+# seven languages already exist in data/media/share_location/, unused: the bot
+# currently sends one bilingual Android/iOS card to everybody.
+DEFAULT_SHARE_LOCATION_IMAGE: dict[str, Any] = {"url": "", "by_language": {}}
+
+
+def validate_share_location_image(image: Any) -> None:
+    if not isinstance(image, dict):
+        raise ValueError("share_location_image must be an object")
+    url = image.get("url", "")
+    if not isinstance(url, str):
+        raise ValueError("share_location_image.url must be a string")
+    by_language = image.get("by_language", {})
+    if not isinstance(by_language, dict):
+        raise ValueError("share_location_image.by_language must be an object")
+    for code, value in by_language.items():
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"share_location_image.by_language[{code}] must be a non-empty URL"
+            )
+
 
 def validate_documents(documents: Any) -> None:
     """Raise ValueError with a message naming the offending product."""
@@ -249,6 +277,7 @@ def default_config() -> dict[str, Any]:
         "campaign_starts_on": None,   # null = no start bound
         "campaign_ends_on": None,     # null = never expires
         "documents": deepcopy(DEFAULT_PRODUCT_DOCUMENTS),
+        "share_location_image": deepcopy(DEFAULT_SHARE_LOCATION_IMAGE),
         "intro": intro,
         "entry_sources": {
             "web": {"welcome_override": None},
@@ -365,6 +394,9 @@ def validate_config(config: dict[str, Any]) -> None:
 
     if "documents" in config:
         validate_documents(config["documents"])
+
+    if "share_location_image" in config:
+        validate_share_location_image(config["share_location_image"])
 
     entry_sources = config.get("entry_sources")
     if entry_sources is not None:

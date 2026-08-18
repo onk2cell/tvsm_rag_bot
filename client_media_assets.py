@@ -136,8 +136,27 @@ def media_base_url() -> str:
 
 
 def share_location_image_url(language: str = "") -> str:
-    """HTTPS URL for the WhatsApp how-to share-location card."""
-    del language  # one bilingual Android/iOS card for all languages
+    """HTTPS URL for the WhatsApp how-to share-location card.
+
+    Resolution order: a per-language override, then a configured absolute URL,
+    then our own media host. The configured URL exists so the card can be moved
+    somewhere stable (JAM's CDN) without a deploy — while it is served from the
+    media host it inherits that host's ephemeral tunnel hostname.
+    """
+    try:
+        configured = admin_config.get_store().get().get("share_location_image") or {}
+    except Exception:  # a config problem must not cost us the card
+        configured = {}
+
+    by_language = configured.get("by_language") or {}
+    override = by_language.get(language)
+    if override:
+        return override
+
+    url = (configured.get("url") or "").strip()
+    if url:
+        return url
+
     base = media_base_url()
     if not base:
         return ""
