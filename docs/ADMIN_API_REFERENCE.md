@@ -45,12 +45,15 @@ There is one shared token. No roles, no per-user access.
 | 12 | `GET` | `/admin/api/media/{kind}` | List uploaded media |
 | 13 | `POST` | `/admin/api/media/{kind}` | Upload a brochure or image |
 | 14 | `DELETE` | `/admin/api/media/{kind}/{filename}` | Delete one |
-| 15 | `GET` | `/admin/api/config` | Read live bot config |
-| 16 | `PUT` | `/admin/api/config` | Replace bot config |
-| 17 | `GET` | `/admin/api/meta` | Defaults and allowed values |
-| 18 | `GET` | `/admin/api/gemini` | Gemini key state |
-| 19 | `POST` | `/admin/api/gemini` | Set / rotate the key |
-| 20 | `DELETE` | `/admin/api/gemini` | Clear the runtime key |
+| 15 | `GET` | `/admin/api/kb` | What the bot grounds answers on |
+| 16 | `POST` | `/admin/api/kb` | Index a document |
+| 17 | `DELETE` | `/admin/api/kb/{document_id}` | Remove a document |
+| 18 | `GET` | `/admin/api/config` | Read live bot config |
+| 19 | `PUT` | `/admin/api/config` | Replace bot config |
+| 20 | `GET` | `/admin/api/meta` | Defaults and allowed values |
+| 21 | `GET` | `/admin/api/gemini` | Gemini key state |
+| 22 | `POST` | `/admin/api/gemini` | Set / rotate the key |
+| 23 | `DELETE` | `/admin/api/gemini` | Clear the runtime key |
 
 ### Machine-readable spec
 
@@ -423,7 +426,111 @@ such file.
 
 ---
 
-## 15. `GET /admin/api/config`
+## Knowledge base
+
+The documents Gemini File Search retrieves from when the bot answers a product
+question. The prompt tells the model to use **only** these — anything not
+indexed here, it cannot ground on.
+
+**Indexing has no upsert.** Re-indexing a corrected document adds a second copy
+rather than replacing the first, and both stay retrievable, so the model may
+cite either. `duplicate_display_names` exists to make that visible, and
+`replace=true` on upload is how you avoid it.
+
+Changes take effect on the **next customer message** — the store is resolved
+server-side per request, so there is nothing to restart.
+
+### `GET /admin/api/kb`
+
+```json
+{
+  "store": "fileSearchStores/tvsmanual-ur9gkjpgkxyh",
+  "document_count": 1,
+  "duplicate_display_names": [],
+  "total_size_bytes": 16838,
+  "display_name": "tvs-manual",
+  "active_documents": 1,
+  "pending_documents": null,
+  "failed_documents": null,
+  "size_bytes": 16838,
+  "documents": [
+    {
+      "document_id": "tvsthreewheelerskbpdf-qkm24fandaqq",
+      "name": "fileSearchStores/tvsmanual-ur9gkjpgkxyh/documents/tvsthreewheelerskbpdf-qkm24fandaqq",
+      "display_name": "tvs_three_wheelers_kb.pdf",
+      "state": "STATE_ACTIVE",
+      "size_bytes": 16838,
+      "mime_type": "application/pdf",
+      "create_time": "2026-07-17 12:35:05.535018+00:00",
+      "update_time": "2026-07-17 12:35:08.620802+00:00"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `document_count` | Documents actually listed |
+| `duplicate_display_names` | Names appearing more than once — **each means a stale copy is still live** |
+| `state` | `STATE_PENDING` (indexing), `STATE_ACTIVE` (searchable), `STATE_FAILED` |
+| `document_id` | URL-safe handle for `DELETE`; the last segment of `name` |
+
+Documents are newest first. `pending_documents` and `failed_documents` come
+straight from Gemini and may be `null`.
+
+### `POST /admin/api/kb`
+
+`multipart/form-data`:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `file` | file | yes | Up to 30 MB |
+| `display_name` | string | no | Defaults to the filename. Worth setting — `index_document.py` names documents after the raw CLI path |
+| `replace` | bool | no | Defaults `false`. Deletes existing documents with the same display name, **after** the new one is accepted |
+
+```bash
+curl -H "$AUTH" -F "file=@King_EV_MAX-English.pdf" "$BASE/admin/api/kb"
+
+# re-index a corrected document without leaving the old one behind
+curl -H "$AUTH" -F "file=@King_EV_MAX-English.pdf" -F "replace=true" \
+  "$BASE/admin/api/kb"
+```
+
+```json
+{
+  "display_name": "King_EV_MAX-English.pdf",
+  "size_bytes": 3215592,
+  "state": "STATE_PENDING",
+  "indexing": true,
+  "replaced_document_ids": ["oldid-abc123"]
+}
+```
+
+**This returns before the document is searchable.** Indexing runs for minutes
+while the upload itself takes seconds; holding the request open for the whole
+operation would be dropped by the tunnel in front of this app. Poll `GET
+/admin/api/kb` and wait for `STATE_ACTIVE`.
+
+If `replace` was requested but the cleanup failed, the upload still succeeds and
+`replaced_document_ids` comes back short — the new document is live and the
+leftover is a duplicate to remove with `DELETE`.
+
+`400` for an empty file, one over 30 MB, or a missing name. `502` when Gemini
+cannot be reached, the API key is unset, or `FILE_SEARCH_STORE` is empty.
+
+### `DELETE /admin/api/kb/{document_id}`
+
+```json
+{"document_id": "tvsthreewheelerskbpdf-qkm24fandaqq", "deleted": true}
+```
+
+`404` if there is no such document **in this store**. The id is reduced to its
+last path segment and recombined with the configured store, so a full resource
+name pointing elsewhere cannot be used to reach another store's documents.
+
+---
+
+## 18. `GET /admin/api/config`
 
 The live bot configuration. This is the exact document `PUT` expects back.
 
@@ -458,7 +565,7 @@ The live bot configuration. This is the exact document `PUT` expects back.
 
 > Only `bot_name`, `campaign_text`, `flow_steps` and `capture_fields` currently affect the WhatsApp bot. `welcome_text`, `intro`, `languages`, `voice_policy` and `entry_sources` are stored and returned but **not read** by the WhatsApp path — that copy is hardcoded in `client_static_messages.py`.
 
-## 16. `PUT /admin/api/config`
+## 19. `PUT /admin/api/config`
 
 Replaces the **entire** document. There is no partial update and no version history — always `GET` first, edit, then `PUT` back.
 
@@ -494,7 +601,7 @@ Outside the window the bot does not merely omit the offer: the `CAMPAIGN` sectio
 
 Adding a language therefore means adding its `intro` entry in the same request.
 
-## 17. `GET /admin/api/meta`
+## 20. `GET /admin/api/meta`
 
 Allowed values and factory defaults, for building a form.
 
@@ -509,7 +616,7 @@ Allowed values and factory defaults, for building a form.
 
 ---
 
-## 18. `GET /admin/api/gemini`
+## 21. `GET /admin/api/gemini`
 
 ```json
 {
@@ -525,7 +632,7 @@ Allowed values and factory defaults, for building a form.
 | `configured` | Whether a usable client exists. `false` means **the bot cannot answer** |
 | `source` | `runtime` (set via #16), `env` (from `.env`), or `null` (none) |
 
-## 19. `POST /admin/api/gemini`
+## 22. `POST /admin/api/gemini`
 
 **Request body**
 
@@ -535,13 +642,13 @@ Allowed values and factory defaults, for building a form.
 
 The key is **validated with a live Gemini call before being saved**. On success it is written to `data/gemini_key.txt` (chmod 600) and overrides the `.env` key; the worker picks it up on its next message.
 
-Returns the same shape as #18, with `source` now `runtime`.
+Returns the same shape as #21, with `source` now `runtime`.
 
 **`400`** on a blank key, or `{"detail": "Key rejected: …"}` when Gemini refuses it. A rejected key is never saved, so a bad paste cannot take the bot down.
 
-## 20. `DELETE /admin/api/gemini`
+## 23. `DELETE /admin/api/gemini`
 
-Removes the runtime key and falls back to `.env`. Returns the same shape as #18.
+Removes the runtime key and falls back to `.env`. Returns the same shape as #21.
 
 > If `GEMINI_API_KEY` is empty in `.env`, this leaves the bot with **no key at all** and it stops answering. Check `source` first.
 
