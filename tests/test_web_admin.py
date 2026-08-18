@@ -130,6 +130,50 @@ def test_page_served_without_auth(tmp_path):
     assert "Control Panel" in resp.text
 
 
+def test_docs_index_lists_every_page(tmp_path):
+    """The slugs are not guessable, so the index is the only way in."""
+    from web import DOC_PAGES
+
+    client, _ = _client(tmp_path)
+    resp = client.get("/admin/docs")
+    assert resp.status_code == 200
+    for slug in DOC_PAGES:
+        assert f"/admin/docs/{slug}" in resp.text
+
+
+def test_docs_pages_are_served_without_auth(tmp_path):
+    """They carry no customer data, and the whole point is handing out a link."""
+    from web import DOC_PAGES
+
+    client, _ = _client(tmp_path)
+    for slug in DOC_PAGES:
+        resp = client.get(f"/admin/docs/{slug}")
+        assert resp.status_code == 200, slug
+        assert resp.headers["content-type"].startswith("text/html")
+        assert "<title>" in resp.text
+
+
+def test_an_unknown_doc_slug_is_404(tmp_path):
+    client, _ = _client(tmp_path)
+    assert client.get("/admin/docs/nope").status_code == 404
+
+
+def test_a_doc_slug_cannot_escape_the_docs_directory(tmp_path):
+    """A fixed slug map means a traversal attempt never reaches the filesystem."""
+    client, _ = _client(tmp_path)
+    for attempt in ("../.env", "..%2f.env", "../../etc/passwd"):
+        assert client.get(f"/admin/docs/{attempt}").status_code == 404, attempt
+
+
+def test_every_doc_page_is_actually_shipped(tmp_path):
+    """A page listed in DOC_PAGES but missing from the repo would 404 in
+    production while passing every other test here."""
+    from web import DOC_PAGES, _DOCS_DIR
+
+    for slug, (filename, _title) in DOC_PAGES.items():
+        assert (_DOCS_DIR / filename).is_file(), f"{slug} -> docs/{filename}"
+
+
 def test_config_requires_token(tmp_path):
     client, _ = _client(tmp_path)
     assert client.get("/admin/api/config").status_code == 401

@@ -19,3 +19,5 @@ data
 *.pdf
 tests
 docs
+# ...except the reference pages, which the admin app serves at /admin/docs.
+!docs/*.html

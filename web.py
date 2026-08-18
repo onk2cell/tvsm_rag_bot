@@ -51,6 +51,16 @@ from session_keys import client_session_key
 
 _PAGE_PATH = Path(__file__).with_name("assets") / "admin.html"
 
+_DOCS_DIR = Path(__file__).with_name("docs")
+
+# Slug -> filename. A fixed map rather than a path parameter, so nothing a
+# caller sends ever reaches the filesystem. Only .html is shipped in the image
+# (see .dockerignore); the markdown and PDFs in docs/ stay out of the build.
+DOC_PAGES: dict[str, tuple[str, str]] = {
+    "api": ("admin_api_docs.html", "Admin API reference"),
+    "status": ("status_report.html", "Control panel status"),
+}
+
 API_VERSION = "1.0.0"
 
 API_DESCRIPTION = """\
@@ -184,6 +194,31 @@ def create_admin_app(
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
     def admin_page() -> HTMLResponse:
         return HTMLResponse(_PAGE_PATH.read_text(encoding="utf-8"))
+
+    @app.get("/admin/docs", response_class=HTMLResponse, include_in_schema=False)
+    def docs_index() -> HTMLResponse:
+        # The slugs are not guessable, so an index is the only way in.
+        links = "\n".join(
+            f'<li><a href="/admin/docs/{slug}">{title}</a></li>'
+            for slug, (_, title) in DOC_PAGES.items()
+        )
+        return HTMLResponse(
+            "<title>Documentation</title>"
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<body style="font:16px/1.6 system-ui;max-width:36rem;margin:3rem auto;padding:0 1rem">'
+            f"<h1>Documentation</h1><ul>{links}</ul></body>"
+        )
+
+    @app.get("/admin/docs/{page}", response_class=HTMLResponse, include_in_schema=False)
+    def docs_page(page: str) -> HTMLResponse:
+        entry = DOC_PAGES.get(page)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="No such document.")
+        path = _DOCS_DIR / entry[0]
+        if not path.is_file():
+            # The file is committed but was excluded from this image.
+            raise HTTPException(status_code=404, detail="Document not in this build.")
+        return HTMLResponse(path.read_text(encoding="utf-8"))
 
     @app.get("/admin/api/meta", tags=["configuration"], summary="Allowed values and factory defaults", responses=_UNAUTHORIZED)
     def meta(_: None = Depends(require_admin)) -> dict[str, Any]:
