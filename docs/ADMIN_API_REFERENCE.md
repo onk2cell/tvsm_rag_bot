@@ -42,7 +42,10 @@ There is one shared token. No roles, no per-user access.
 | 9 | `POST` | `/admin/api/interactions/{id}/review` | Mark a turn reviewed |
 | 10 | `GET` | `/admin/api/leads` | Captured leads |
 | 11 | `GET` | `/admin/api/leads/export.csv` | Leads as CSV |
-| 12 | `GET` | `/admin/api/config` | Read live bot config |
+| 12 | `GET` | `/admin/api/media/brochures` | List uploaded brochures |
+| 13 | `POST` | `/admin/api/media/brochures` | Upload a brochure PDF |
+| 14 | `DELETE` | `/admin/api/media/brochures/{filename}` | Delete a brochure |
+| 15 | `GET` | `/admin/api/config` | Read live bot config |
 | 13 | `PUT` | `/admin/api/config` | Replace bot config |
 | 14 | `GET` | `/admin/api/meta` | Defaults and allowed values |
 | 15 | `GET` | `/admin/api/gemini` | Gemini key state |
@@ -352,7 +355,58 @@ The whole leads file, same lock discipline. `text/csv`, `filename="leads.csv"`.
 
 ---
 
-## 12. `GET /admin/api/config`
+## Brochure uploads
+
+`data/media` is a shared volume: the admin container writes to it and the media
+host serves the same directory read-only at `/media/`. Publishing a brochure is
+therefore a file write — no CDN account, no third party, no long-running job.
+
+**Uploading does not change what the bot sends.** An admin still has to point
+`documents.<product>.brochure` at the returned URL. Publishing a draft must
+never start sending it.
+
+### `GET /admin/api/media/brochures`
+
+```json
+{
+  "base_url": "https://media.example.com/media/brochures",
+  "max_upload_bytes": 26214400,
+  "items": [
+    {"filename": "King_EV_MAX_2027.pdf", "size_bytes": 3215592,
+     "url": "https://media.example.com/media/brochures/King_EV_MAX_2027.pdf"}
+  ]
+}
+```
+
+### `POST /admin/api/media/brochures`
+
+`multipart/form-data`:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `file` | file | yes | The PDF |
+| `overwrite` | bool | no | Defaults `false`; replacing an existing name must be deliberate |
+
+```bash
+curl -s -H "$AUTH" -F "file=@King_EV_MAX_2027.pdf" \
+  "$BASE/admin/api/media/brochures"
+```
+
+Returns `{"filename", "size_bytes", "url"}`.
+
+Rejected with `400` when the file is empty, over 25 MB, not a PDF (the `%PDF-`
+header is checked, not just the extension), or the name already exists without
+`overwrite=true`. Filenames are sanitised to a single path component, so an
+upload cannot write outside the brochure directory. Writes are staged and moved
+into place, so the media host can never serve a half-uploaded file.
+
+### `DELETE /admin/api/media/brochures/{filename}`
+
+`{"filename": "...", "deleted": true}`, or `404` if there is no such brochure.
+
+---
+
+## 15. `GET /admin/api/config`
 
 The live bot configuration. This is the exact document `PUT` expects back.
 

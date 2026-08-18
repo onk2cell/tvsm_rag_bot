@@ -259,6 +259,23 @@ def default_config() -> dict[str, Any]:
     }
 
 
+def fill_missing_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    """Add top-level keys introduced after this config file was written.
+
+    ``default_config()`` only seeds a *new* file, so a config saved before a
+    feature existed never gains its key — the field would stay invisible to
+    the admin API and therefore uneditable, even though the bot honours it.
+    Existing values are never touched, so this only ever adds.
+    """
+    if not isinstance(config, dict):
+        return config
+    filled = deepcopy(config)
+    for key, value in default_config().items():
+        if key not in filled:
+            filled[key] = deepcopy(value)
+    return filled
+
+
 def validate_config(config: dict[str, Any]) -> None:
     """Raise ValueError with a clear message when config is invalid."""
     if not isinstance(config, dict):
@@ -393,6 +410,7 @@ class AdminConfigStore:
                 data = json.loads(raw)
             except json.JSONDecodeError as e:
                 raise ValueError(f"Invalid JSON in config file: {e}") from e
+            data = fill_missing_defaults(data)
             validate_config(data)
             return deepcopy(data)
 

@@ -21,7 +21,16 @@ import secrets
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -36,6 +45,7 @@ from admin_config import (
 )
 from admin_status import StatusReporter
 from leads import read_leads, read_leads_csv
+from media_library import MAX_UPLOAD_BYTES, MediaError, MediaLibrary
 from session_keys import client_session_key
 
 _PAGE_PATH = Path(__file__).with_name("assets") / "admin.html"
@@ -65,6 +75,7 @@ API_TAGS = [
     {"name": "leads", "description": "Qualified leads captured for the dealership."},
     {"name": "configuration", "description": "What the bot says and asks."},
     {"name": "credentials", "description": "The Gemini API key backing the bot."},
+    {"name": "media", "description": "Brochure PDFs served by the media host."},
 ]
 
 _UNAUTHORIZED = {
@@ -92,6 +103,7 @@ def create_admin_app(
     status_reporter: StatusReporter | None = None,
     interaction_store: Any = None,
     leads_path: Path | None = None,
+    media_library: MediaLibrary | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="TVS Bot Admin",
@@ -112,6 +124,8 @@ def create_admin_app(
 
     def leads_file() -> Path:
         return leads_path or Path(config.LEADS_CSV_PATH)
+
+    media = media_library or MediaLibrary(Path(config.MEDIA_ROOT))
 
     reporter = status_reporter or StatusReporter(
         redis_factory=redis_factory,
@@ -335,6 +349,57 @@ def create_admin_app(
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="leads.csv"'},
         )
+
+    # --- media -------------------------------------------------------------
+
+    @app.get("/admin/api/media/brochures", tags=["media"], summary="List uploaded brochures", responses=_UNAUTHORIZED)
+    def list_brochures(_: None = Depends(require_admin)) -> dict[str, Any]:
+        return {
+            "base_url": media.url_for("").rstrip("/"),
+            "max_upload_bytes": MAX_UPLOAD_BYTES,
+            "items": [item.as_dict() for item in media.list()],
+        }
+
+    @app.post("/admin/api/media/brochures", tags=["media"], summary="Upload a brochure PDF", responses={**_UNAUTHORIZED, 400: {"description": "Not a PDF, too large, empty, or the name already exists."}})
+    async def upload_brochure(
+        file: UploadFile = File(..., description="The brochure PDF."),
+        overwrite: bool = Form(False, description="Replace a file of the same name."),
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Publish a PDF on the media host and return its public URL.
+
+        This does not change what the bot sends. Point
+        ``documents.<product>.brochure`` at the returned URL to make it live —
+        uploading a draft must never start sending it on its own.
+        """
+        content = await file.read()
+        try:
+            saved = media.save(
+                file.filename or "", content, overwrite=overwrite
+            )
+        except MediaError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        return saved.as_dict()
+
+    @app.delete("/admin/api/media/brochures/{filename}", tags=["media"], summary="Delete a brochure", responses={**_UNAUTHORIZED, 404: {"description": "No such brochure."}})
+    def delete_brochure(
+        filename: str,
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        try:
+            removed = media.delete(filename)
+        except MediaError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        if not removed:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No brochure named {filename}.",
+            )
+        return {"filename": filename, "deleted": True}
 
     @app.get("/admin/api/gemini", tags=["credentials"], summary="Gemini key state", responses=_UNAUTHORIZED)
     def gemini_status(_: None = Depends(require_admin)) -> dict[str, Any]:

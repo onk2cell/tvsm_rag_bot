@@ -97,6 +97,7 @@ def _app(
     reporter=None,
     interaction_store=None,
     leads_path=None,
+    media_library=None,
 ):
     store = AdminConfigStore(tmp_path / "admin_config.json")
     store.ensure_seeded()
@@ -108,6 +109,7 @@ def _app(
         status_reporter=reporter or _reporter(),
         interaction_store=interaction_store,
         leads_path=leads_path,
+        media_library=media_library,
     )
 
 
@@ -739,6 +741,7 @@ def test_spec_declares_bearer_auth_so_swagger_can_authorize(tmp_path):
         "leads",
         "configuration",
         "credentials",
+        "media",
     }
 
 
@@ -767,3 +770,100 @@ def test_committed_openapi_json_matches_the_code(tmp_path):
     assert json.loads(committed.read_text(encoding="utf-8")) == build_spec(), (
         "docs/openapi.json is stale — re-run scripts/export_openapi.py"
     )
+
+
+# --- media library endpoints ------------------------------------------------
+
+
+def _media_app(tmp_path):
+    from media_library import MediaLibrary
+
+    library = MediaLibrary(tmp_path / "media", base_url="https://media.example.com/media")
+    return TestClient(_app(tmp_path, media_library=library)), library
+
+
+def test_upload_a_brochure_and_get_its_public_url(tmp_path):
+    client, _ = _media_app(tmp_path)
+    resp = client.post(
+        "/admin/api/media/brochures",
+        files={"file": ("King_EV_MAX_2027.pdf", b"%PDF-1.4\nbody\n", "application/pdf")},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["url"] == (
+        "https://media.example.com/media/brochures/King_EV_MAX_2027.pdf"
+    )
+
+
+def test_uploading_does_not_change_what_the_bot_sends(tmp_path):
+    """Publishing a draft must never start sending it — the admin still has to
+    point documents.<product>.brochure at the new URL."""
+    client, _ = _media_app(tmp_path)
+    before = client.get("/admin/api/config", headers=_auth()).json()["documents"]
+    client.post(
+        "/admin/api/media/brochures",
+        files={"file": ("draft.pdf", b"%PDF-1.4\nx\n", "application/pdf")},
+        headers=_auth(),
+    )
+    after = client.get("/admin/api/config", headers=_auth()).json()["documents"]
+    assert before == after
+
+
+def test_upload_rejects_a_non_pdf(tmp_path):
+    client, _ = _media_app(tmp_path)
+    resp = client.post(
+        "/admin/api/media/brochures",
+        files={"file": ("evil.pdf", b"<html>nope</html>", "application/pdf")},
+        headers=_auth(),
+    )
+    assert resp.status_code == 400
+    assert "not a PDF" in resp.json()["detail"]
+
+
+def test_upload_refuses_to_silently_replace(tmp_path):
+    client, _ = _media_app(tmp_path)
+    payload = {"file": ("king.pdf", b"%PDF-1.4\na\n", "application/pdf")}
+    assert client.post(
+        "/admin/api/media/brochures", files=payload, headers=_auth()
+    ).status_code == 200
+
+    clash = client.post(
+        "/admin/api/media/brochures",
+        files={"file": ("king.pdf", b"%PDF-1.4\nb\n", "application/pdf")},
+        headers=_auth(),
+    )
+    assert clash.status_code == 400
+    assert "already exists" in clash.json()["detail"]
+
+    ok = client.post(
+        "/admin/api/media/brochures",
+        files={"file": ("king.pdf", b"%PDF-1.4\nb\n", "application/pdf")},
+        data={"overwrite": "true"},
+        headers=_auth(),
+    )
+    assert ok.status_code == 200
+
+
+def test_list_and_delete_brochures(tmp_path):
+    client, _ = _media_app(tmp_path)
+    client.post(
+        "/admin/api/media/brochures",
+        files={"file": ("a.pdf", b"%PDF-1.4\na\n", "application/pdf")},
+        headers=_auth(),
+    )
+    listing = client.get("/admin/api/media/brochures", headers=_auth()).json()
+    assert [i["filename"] for i in listing["items"]] == ["a.pdf"]
+    assert listing["max_upload_bytes"] > 0
+
+    assert client.delete(
+        "/admin/api/media/brochures/a.pdf", headers=_auth()
+    ).status_code == 200
+    assert client.delete(
+        "/admin/api/media/brochures/a.pdf", headers=_auth()
+    ).status_code == 404
+
+
+def test_media_endpoints_require_a_token(tmp_path):
+    client, _ = _media_app(tmp_path)
+    assert client.get("/admin/api/media/brochures").status_code == 401
+    assert client.post("/admin/api/media/brochures").status_code == 401

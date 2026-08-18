@@ -202,3 +202,42 @@ def test_documents_may_be_omitted_entirely():
     config = default_config()
     del config["documents"]
     validate_config(config)
+
+
+# --- forward compatibility --------------------------------------------------
+
+
+def test_a_config_written_before_a_feature_gains_its_key(tmp_path):
+    """Production's admin_config.json predates campaign dates and documents.
+    Without backfilling, those fields never appear in GET /admin/api/config,
+    so nobody can edit them even though the bot honours them."""
+    import json
+
+    from admin_config import AdminConfigStore
+
+    legacy = default_config()
+    for key in ("documents", "campaign_starts_on", "campaign_ends_on"):
+        legacy.pop(key, None)
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    loaded = AdminConfigStore(path).get()
+    assert "documents" in loaded
+    assert "campaign_starts_on" in loaded and loaded["campaign_starts_on"] is None
+    assert loaded["documents"]["King EV MAX"]["brochure"].endswith(".pdf")
+
+
+def test_backfill_never_overwrites_an_existing_value(tmp_path):
+    import json
+
+    from admin_config import AdminConfigStore
+
+    config = default_config()
+    config["bot_name"] = "Renamed By Admin"
+    config["documents"] = {"Only Product": {"brochure": "https://x/only.pdf"}}
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+
+    loaded = AdminConfigStore(path).get()
+    assert loaded["bot_name"] == "Renamed By Admin"
+    assert list(loaded["documents"]) == ["Only Product"]

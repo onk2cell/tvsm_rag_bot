@@ -92,6 +92,10 @@ MAX_AUDIO_RECORD_SEC = int(os.environ.get("MAX_AUDIO_RECORD_SEC", "60"))
 # --- Leads export ---
 LEADS_CSV_PATH = os.environ.get("LEADS_CSV_PATH", "data/leads.csv")
 
+# Root of the directory the media host (tvsm-media-nginx) serves read-only.
+# Admin-uploaded brochures land under <root>/brochures.
+MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "data/media")
+
 # --- Interaction history ---
 INTERACTIONS_DB_PATH = os.environ.get(
     "INTERACTIONS_DB_PATH", "data/interactions.db"

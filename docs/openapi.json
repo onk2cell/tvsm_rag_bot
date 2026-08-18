@@ -831,6 +831,154 @@
         ]
       }
     },
+    "/admin/api/media/brochures": {
+      "get": {
+        "tags": [
+          "media"
+        ],
+        "summary": "List uploaded brochures",
+        "operationId": "list_brochures_admin_api_media_brochures_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Brochures Admin Api Media Brochures Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Upload a brochure PDF",
+        "description": "Publish a PDF on the media host and return its public URL.\n\nThis does not change what the bot sends. Point\n``documents.<product>.brochure`` at the returned URL to make it live —\nuploading a draft must never start sending it on its own.",
+        "operationId": "upload_brochure_admin_api_media_brochures_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_brochure_admin_api_media_brochures_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Upload Brochure Admin Api Media Brochures Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "400": {
+            "description": "Not a PDF, too large, empty, or the name already exists."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/media/brochures/{filename}": {
+      "delete": {
+        "tags": [
+          "media"
+        ],
+        "summary": "Delete a brochure",
+        "operationId": "delete_brochure_admin_api_media_brochures__filename__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Brochure Admin Api Media Brochures  Filename  Delete"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "404": {
+            "description": "No such brochure."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/api/gemini": {
       "get": {
         "tags": [
@@ -957,6 +1105,27 @@
   },
   "components": {
     "schemas": {
+      "Body_upload_brochure_admin_api_media_brochures_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File",
+            "description": "The brochure PDF."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "description": "Replace a file of the same name.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_brochure_admin_api_media_brochures_post"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1032,6 +1201,10 @@
     {
       "name": "credentials",
       "description": "The Gemini API key backing the bot."
+    },
+    {
+      "name": "media",
+      "description": "Brochure PDFs served by the media host."
     }
   ]
 }
