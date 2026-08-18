@@ -6,6 +6,31 @@
 
 ---
 
+## Read this first — one decision is blocking everything
+
+The bot works. Customer WhatsApp traffic is unaffected by anything here. What is blocked is **reaching the admin panel at a stable address**, and the fix depends on something only you can answer:
+
+> **Can you get ports 80 and 443 forwarded to `103.195.71.242`?**
+
+**If yes** → skip the tunnels entirely. Forward the ports, then Let's Encrypt on the existing nginx (the `acme-challenge` block is already in the config). See *Alternative if we control the router* at the bottom. This is the cleaner outcome and removes a third-party dependency.
+
+**If no** → we need a **named Cloudflare tunnel**, which needs a **Cloudflare account with a domain whose nameservers point at Cloudflare**. Follow Option A below. Note carefully:
+
+- **Do not use `jamoutsourcing.com` without JAM's sign-off.** Moving its nameservers to Cloudflare affects every service on that domain — their site, their mail, everything. It is not a quiet change.
+- Use a domain we control instead. Any domain works; it does not have to relate to TVS.
+
+Either way, **authentication in front of `/admin` is required, not optional** (step 6). The panel exposes every customer's phone number, name and full chat transcript, and today the only barrier is a single shared token.
+
+### What is broken right now if nobody does this
+
+| | Impact |
+|---|---|
+| Admin panel address changes on every tunnel restart | Whoever needs the panel has to SSH in to find the new URL |
+| `CLIENT_MEDIA_BASE_URL` goes stale at the same moment | The share-location card 404s for customers who do not know their pincode, silently. **Brochures are unaffected** — they come from JAM's CDN |
+| Admin panel is on a public URL behind one shared password | That password is currently the placeholder `dev-admin-change-me` |
+
+---
+
 ## What is running today
 
 | Item | Value |
