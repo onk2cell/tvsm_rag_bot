@@ -177,6 +177,72 @@ class LeadWriter:
                 w.writerow({col: old.get(col, "") for col in columns})
 
 
+@contextmanager
+def _shared_file_lock(path: Path):
+    """Hold a shared lock on the writer's lock file while reading.
+
+    LeadWriter._write_rows opens the CSV with "w", truncating and rewriting
+    the entire file on every lead. A reader that skips this lock will
+    intermittently catch the file mid-rewrite and return a truncated list or
+    raise part-way through parsing.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def read_leads(
+    path: Path,
+    config_store: AdminConfigStore,
+    *,
+    search: str = "",
+    limit: int = 100,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Newest-first page of lead rows, read safely alongside a live writer.
+
+    `search` matches any cell, so one box covers mobile, name, and pincode.
+    """
+    columns = csv_columns(config_store.get())
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+
+    if not path.exists():
+        return {"count": 0, "columns": columns, "items": []}
+
+    with _shared_file_lock(path):
+        with path.open(newline="", encoding="utf-8-sig") as file:
+            rows = list(csv.DictReader(file))
+
+    if search:
+        needle = search.strip().casefold()
+        rows = [
+            row
+            for row in rows
+            if any(needle in (value or "").casefold() for value in row.values())
+        ]
+
+    rows.reverse()  # newest first — the CSV is appended chronologically
+    return {
+        "count": len(rows),
+        "columns": columns,
+        "items": rows[offset : offset + limit],
+    }
+
+
+def read_leads_csv(path: Path) -> str:
+    """The raw CSV, read under the same lock discipline."""
+    if not path.exists():
+        return ""
+    with _shared_file_lock(path):
+        return path.read_text(encoding="utf-8-sig")
+
+
 def leads_summary(path: Path, config_store: AdminConfigStore) -> dict[str, Any]:
     """Row count and column list for admin UI."""
     config = config_store.get()

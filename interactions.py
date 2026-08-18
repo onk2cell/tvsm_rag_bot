@@ -16,6 +16,7 @@ CSV_COLUMNS = [
     "id",
     "timestamp",
     "session",
+    "mobile",
     "channel",
     "source",
     "language",
@@ -90,6 +91,7 @@ class InteractionStore:
         language: str,
         role: str,
         message: str,
+        mobile: str = "",
         latency_ms: int | None = None,
         status: str = "ok",
         error: str = "",
@@ -103,6 +105,7 @@ class InteractionStore:
             cursor = self._insert(
                 connection,
                 session=session,
+                mobile=mobile,
                 channel=channel,
                 source=source,
                 language=language,
@@ -126,6 +129,7 @@ class InteractionStore:
         language: str,
         user_message: str | None,
         assistant_message: str,
+        mobile: str = "",
         latency_ms: int | None = None,
         status: str = "ok",
         error: str = "",
@@ -142,6 +146,7 @@ class InteractionStore:
                 cursor = self._insert(
                     connection,
                     session=session,
+                    mobile=mobile,
                     channel=channel,
                     source=source,
                     language=language,
@@ -152,6 +157,7 @@ class InteractionStore:
             cursor = self._insert(
                 connection,
                 session=session,
+                mobile=mobile,
                 channel=channel,
                 source=source,
                 language=language,
@@ -175,6 +181,7 @@ class InteractionStore:
         language: str | None = None,
         status: str | None = None,
         session: str | None = None,
+        mobile: str | None = None,
         needs_review: bool | None = None,
         search: str | None = None,
         limit: int = 100,
@@ -185,6 +192,7 @@ class InteractionStore:
             language=language,
             status=status,
             session=session,
+            mobile=mobile,
             needs_review=needs_review,
             search=search,
         )
@@ -255,6 +263,7 @@ class InteractionStore:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TEXT NOT NULL,
                         session TEXT NOT NULL,
+                        mobile TEXT NOT NULL DEFAULT '',
                         channel TEXT NOT NULL,
                         source TEXT NOT NULL,
                         language TEXT NOT NULL,
@@ -299,11 +308,19 @@ class InteractionStore:
         for column, ddl in (
             ("prompt_tokens", "INTEGER"),
             ("completion_tokens", "INTEGER"),
+            ("mobile", "TEXT NOT NULL DEFAULT ''"),
         ):
             if column not in existing:
                 connection.execute(
                     f"ALTER TABLE interactions ADD COLUMN {column} {ddl}"
                 )
+        # Indexed here rather than in the CREATE script above: on a database
+        # created before `mobile` existed, indexing it has to wait until the
+        # ALTER above has actually added the column.
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_interactions_mobile "
+            "ON interactions(mobile, id)"
+        )
 
     def _connect(self, *, initialize: bool = True) -> sqlite3.Connection:
         if initialize:
@@ -318,14 +335,15 @@ class InteractionStore:
         return connection.execute(
             """
             INSERT INTO interactions (
-                timestamp, session, channel, source, language, role, message,
-                latency_ms, status, error, model, citations, needs_review,
-                prompt_tokens, completion_tokens
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                timestamp, session, mobile, channel, source, language, role,
+                message, latency_ms, status, error, model, citations,
+                needs_review, prompt_tokens, completion_tokens
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 self._now(),
                 values["session"],
+                values.get("mobile", "") or "",
                 values["channel"],
                 values["source"],
                 values["language"],
@@ -349,6 +367,7 @@ class InteractionStore:
         language: str | None = None,
         status: str | None = None,
         session: str | None = None,
+        mobile: str | None = None,
         needs_review: bool | None = None,
         search: str | None = None,
     ) -> tuple[str, list[Any]]:
@@ -359,6 +378,7 @@ class InteractionStore:
             ("language", language),
             ("status", status),
             ("session", session),
+            ("mobile", mobile),
         ):
             if value:
                 clauses.append(f"{column} = ?")

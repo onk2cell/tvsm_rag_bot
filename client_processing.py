@@ -2270,6 +2270,7 @@ class ClientMessageProcessor:
         except Exception as delivery_error:
             self._interactions.record_exchange(
                 session=session.conversation_id,
+                mobile=session.mobile,
                 channel="client_app",
                 source="client_app",
                 language=language,
@@ -2287,6 +2288,7 @@ class ClientMessageProcessor:
             raise
         self._interactions.record_exchange(
             session=session.conversation_id,
+            mobile=session.mobile,
             channel="client_app",
             source="client_app",
             language=language,

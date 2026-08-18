@@ -88,7 +88,16 @@ def _check(body, name):
     return next(item for item in body["checks"] if item["name"] == name)
 
 
-def _app(tmp_path, *, token=TOKEN, keys=None, redis=None, reporter=None):
+def _app(
+    tmp_path,
+    *,
+    token=TOKEN,
+    keys=None,
+    redis=None,
+    reporter=None,
+    interaction_store=None,
+    leads_path=None,
+):
     store = AdminConfigStore(tmp_path / "admin_config.json")
     store.ensure_seeded()
     return create_admin_app(
@@ -97,6 +106,8 @@ def _app(tmp_path, *, token=TOKEN, keys=None, redis=None, reporter=None):
         key_manager=keys or FakeKeyManager(),
         redis_factory=(lambda: redis) if redis is not None else (lambda: FakeRedis()),
         status_reporter=reporter or _reporter(),
+        interaction_store=interaction_store,
+        leads_path=leads_path,
     )
 
 
@@ -417,3 +428,299 @@ def test_reset_session_reports_redis_failure(tmp_path):
         "/admin/api/session/reset", json={"mobile": "+91937"}, headers=_auth()
     )
     assert resp.status_code == 503
+
+
+# --- Slice B: conversations -------------------------------------------------
+
+
+def _store(tmp_path):
+    from interactions import InteractionStore
+
+    return InteractionStore(tmp_path / "interactions.db")
+
+
+def _conversation(store, *, mobile, session, turns=1, needs_review=False):
+    for i in range(turns):
+        store.record_exchange(
+            session=session,
+            mobile=mobile,
+            channel="client_app",
+            source="client_app",
+            language="Hindi",
+            user_message=f"question {i}",
+            assistant_message=f"answer {i}",
+            needs_review=needs_review,
+        )
+
+
+def test_find_a_conversation_by_phone_number(tmp_path):
+    """The support use case the whole schema change exists for."""
+    store = _store(tmp_path)
+    _conversation(store, mobile="+919371062202", session="client-aaa")
+    _conversation(store, mobile="+919822041558", session="client-bbb")
+
+    client = TestClient(_app(tmp_path, interaction_store=store))
+    body = client.get(
+        "/admin/api/interactions", params={"mobile": "+919371062202"}, headers=_auth()
+    ).json()
+
+    assert body["count"] == 2  # one user turn + one assistant turn
+    assert {item["mobile"] for item in body["items"]} == {"+919371062202"}
+    assert [item["role"] for item in body["items"]] == ["user", "assistant"]
+
+
+def test_one_customer_several_sessions_group_under_their_number(tmp_path):
+    """conversation_id rotates when the Redis session lapses; mobile is what
+    holds a returning customer's history together."""
+    store = _store(tmp_path)
+    _conversation(store, mobile="+919371062202", session="client-day1")
+    _conversation(store, mobile="+919371062202", session="client-day2")
+
+    client = TestClient(_app(tmp_path, interaction_store=store))
+    body = client.get(
+        "/admin/api/interactions", params={"mobile": "+919371062202"}, headers=_auth()
+    ).json()
+
+    assert {item["session"] for item in body["items"]} == {
+        "client-day1",
+        "client-day2",
+    }
+
+
+def test_existing_database_gains_mobile_without_losing_rows(tmp_path):
+    """Production has 3,692 rows written before `mobile` existed."""
+    import sqlite3
+
+    from interactions import InteractionStore
+
+    path = tmp_path / "legacy.db"
+    legacy = sqlite3.connect(path)
+    legacy.executescript(
+        """
+        CREATE TABLE interactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL, session TEXT NOT NULL,
+            channel TEXT NOT NULL, source TEXT NOT NULL, language TEXT NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('user','assistant')),
+            message TEXT NOT NULL, latency_ms INTEGER,
+            status TEXT NOT NULL DEFAULT 'ok', error TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '', citations TEXT NOT NULL DEFAULT '[]',
+            needs_review INTEGER NOT NULL DEFAULT 0, reviewed_at TEXT,
+            review_note TEXT NOT NULL DEFAULT ''
+        );
+        INSERT INTO interactions (timestamp, session, channel, source, language,
+                                  role, message)
+        VALUES ('2026-08-01T10:00:00+00:00', 'client-old', 'client_app',
+                'client_app', 'Hindi', 'user', 'old message');
+        """
+    )
+    legacy.commit()
+    legacy.close()
+
+    store = InteractionStore(path)  # migrates on open
+    result = store.list_interactions()
+
+    assert result["count"] == 1
+    assert result["items"][0]["message"] == "old message"
+    assert result["items"][0]["mobile"] == ""  # no backfill possible
+
+
+def test_read_one_full_conversation(tmp_path):
+    store = _store(tmp_path)
+    _conversation(store, mobile="+919371062202", session="client-aaa", turns=3)
+    client = TestClient(_app(tmp_path, interaction_store=store))
+
+    body = client.get("/admin/api/interactions/client-aaa", headers=_auth()).json()
+    assert body["session"] == "client-aaa"
+    assert body["count"] == 6
+    ids = [item["id"] for item in body["items"]]
+    assert ids == sorted(ids)  # oldest first, so it reads as a transcript
+
+
+def test_unknown_conversation_is_404(tmp_path):
+    client = TestClient(_app(tmp_path, interaction_store=_store(tmp_path)))
+    resp = client.get("/admin/api/interactions/client-nope", headers=_auth())
+    assert resp.status_code == 404
+
+
+def test_export_csv_route_is_not_shadowed_by_the_session_route(tmp_path):
+    """/interactions/export.csv must not be read as session id 'export.csv'."""
+    store = _store(tmp_path)
+    _conversation(store, mobile="+919371062202", session="client-aaa")
+    client = TestClient(_app(tmp_path, interaction_store=store))
+
+    resp = client.get("/admin/api/interactions/export.csv", headers=_auth())
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "attachment" in resp.headers["content-disposition"]
+    assert resp.text.splitlines()[0].startswith("id,timestamp,session,mobile,")
+    assert "+919371062202" in resp.text
+
+
+def test_export_honours_the_mobile_filter(tmp_path):
+    store = _store(tmp_path)
+    _conversation(store, mobile="+919371062202", session="client-aaa")
+    _conversation(store, mobile="+919822041558", session="client-bbb")
+    client = TestClient(_app(tmp_path, interaction_store=store))
+
+    text = client.get(
+        "/admin/api/interactions/export.csv",
+        params={"mobile": "+919371062202"},
+        headers=_auth(),
+    ).text
+    assert "+919371062202" in text
+    assert "+919822041558" not in text
+
+
+def test_pagination_and_limit_cap(tmp_path):
+    store = _store(tmp_path)
+    _conversation(store, mobile="+91937", session="client-aaa", turns=5)
+    client = TestClient(_app(tmp_path, interaction_store=store))
+
+    page = client.get(
+        "/admin/api/interactions", params={"limit": 3, "offset": 0}, headers=_auth()
+    ).json()
+    assert page["count"] == 10 and len(page["items"]) == 3
+
+    capped = client.get(
+        "/admin/api/interactions", params={"limit": 9999}, headers=_auth()
+    ).json()
+    assert len(capped["items"]) == 10  # cap is 500, we only have 10
+
+
+def test_mark_reviewed_then_reject_a_second_attempt(tmp_path):
+    store = _store(tmp_path)
+    _conversation(store, mobile="+91937", session="client-aaa", needs_review=True)
+    client = TestClient(_app(tmp_path, interaction_store=store))
+
+    flagged = client.get(
+        "/admin/api/interactions", params={"needs_review": True}, headers=_auth()
+    ).json()["items"]
+    assert flagged, "expected a flagged turn"
+    target = flagged[0]["id"]
+
+    first = client.post(
+        f"/admin/api/interactions/{target}/review",
+        json={"note": "checked, dealer followed up"},
+        headers=_auth(),
+    )
+    assert first.status_code == 200
+    assert first.json()["reviewed"] is True
+
+    second = client.post(
+        f"/admin/api/interactions/{target}/review", json={}, headers=_auth()
+    )
+    assert second.status_code == 404
+
+
+def test_interactions_require_a_token(tmp_path):
+    client = TestClient(_app(tmp_path, interaction_store=_store(tmp_path)))
+    assert client.get("/admin/api/interactions").status_code == 401
+    assert client.get("/admin/api/leads").status_code == 401
+
+
+# --- Slice B: leads ---------------------------------------------------------
+
+
+def _lead_writer(tmp_path):
+    from leads import LeadWriter
+
+    store = AdminConfigStore(tmp_path / "admin_config.json")
+    store.ensure_seeded()
+    return LeadWriter(tmp_path / "leads.csv", store), tmp_path / "leads.csv"
+
+
+def test_leads_are_listed_newest_first(tmp_path):
+    writer, path = _lead_writer(tmp_path)
+    for i in range(3):
+        writer.append(
+            channel="client_app",
+            source="client_app",
+            session=f"client-{i}",
+            language="Hindi",
+            profile={"lead_name": f"Customer {i}", "pincode": f"41100{i}"},
+        )
+
+    client = TestClient(_app(tmp_path, leads_path=path))
+    body = client.get("/admin/api/leads", headers=_auth()).json()
+
+    assert body["count"] == 3
+    assert body["items"][0]["lead_name"] == "Customer 2"
+    assert "pincode" in body["columns"]
+
+
+def test_leads_search_matches_any_column(tmp_path):
+    writer, path = _lead_writer(tmp_path)
+    writer.append(
+        channel="client_app", source="client_app", session="client-a",
+        language="Hindi", profile={"lead_name": "Ramesh", "pincode": "411001"},
+    )
+    writer.append(
+        channel="client_app", source="client_app", session="client-b",
+        language="Tamil", profile={"lead_name": "Suresh", "pincode": "600001"},
+    )
+
+    client = TestClient(_app(tmp_path, leads_path=path))
+    hits = client.get(
+        "/admin/api/leads", params={"search": "411001"}, headers=_auth()
+    ).json()
+    assert hits["count"] == 1
+    assert hits["items"][0]["lead_name"] == "Ramesh"
+
+
+def test_leads_stay_intact_while_the_worker_writes(tmp_path):
+    """_write_rows truncates and rewrites the whole file per lead. Without a
+    shared lock the reader catches it mid-rewrite."""
+    import threading
+
+    writer, path = _lead_writer(tmp_path)
+    writer.append(
+        channel="client_app", source="client_app", session="seed",
+        language="Hindi", profile={"lead_name": "Seed"},
+    )
+    client = TestClient(_app(tmp_path, leads_path=path))
+
+    stop = threading.Event()
+
+    def keep_writing():
+        i = 0
+        while not stop.is_set() and i < 40:
+            writer.append(
+                channel="client_app", source="client_app", session=f"c-{i}",
+                language="Hindi", profile={"lead_name": f"Name {i}"},
+            )
+            i += 1
+
+    scribe = threading.Thread(target=keep_writing)
+    scribe.start()
+    try:
+        for _ in range(25):
+            body = client.get("/admin/api/leads", headers=_auth()).json()
+            assert body["count"] >= 1
+            for row in body["items"]:
+                # A torn read yields rows missing columns entirely.
+                assert set(body["columns"]).issuperset(row.keys())
+                assert row.get("session")
+    finally:
+        stop.set()
+        scribe.join()
+
+
+def test_leads_export_is_csv(tmp_path):
+    writer, path = _lead_writer(tmp_path)
+    writer.append(
+        channel="client_app", source="client_app", session="client-a",
+        language="Hindi", profile={"lead_name": "Ramesh"},
+    )
+    client = TestClient(_app(tmp_path, leads_path=path))
+    resp = client.get("/admin/api/leads/export.csv", headers=_auth())
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "Ramesh" in resp.text
+
+
+def test_leads_endpoint_handles_a_missing_file(tmp_path):
+    client = TestClient(_app(tmp_path, leads_path=tmp_path / "nope.csv"))
+    body = client.get("/admin/api/leads", headers=_auth()).json()
+    assert body == {"count": 0, "columns": body["columns"], "items": []}

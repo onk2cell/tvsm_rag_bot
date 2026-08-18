@@ -20,8 +20,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 import config
 import rag
@@ -33,6 +33,7 @@ from admin_config import (
     validate_config,
 )
 from admin_status import StatusReporter
+from leads import read_leads, read_leads_csv
 from session_keys import client_session_key
 
 _PAGE_PATH = Path(__file__).with_name("assets") / "admin.html"
@@ -51,8 +52,22 @@ def create_admin_app(
     key_manager: Any = rag,
     redis_factory: Callable[[], Any] = _default_redis_factory,
     status_reporter: StatusReporter | None = None,
+    interaction_store: Any = None,
+    leads_path: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(title="TVS Bot Admin")
+
+    def interactions() -> Any:
+        """Resolved lazily: opening the DB at import time would create the
+        file in whatever directory the process happened to start in."""
+        if interaction_store is not None:
+            return interaction_store
+        import interactions as interactions_module
+
+        return interactions_module.get_store()
+
+    def leads_file() -> Path:
+        return leads_path or Path(config.LEADS_CSV_PATH)
 
     reporter = status_reporter or StatusReporter(
         redis_factory=redis_factory,
@@ -161,6 +176,119 @@ def create_admin_app(
                 detail=f"Redis unavailable: {exc}",
             ) from exc
         return {"mobile": mobile, "cleared": bool(removed)}
+
+    # --- conversations -----------------------------------------------------
+
+    @app.get("/admin/api/interactions")
+    def list_interactions(
+        mobile: str | None = None,
+        session: str | None = None,
+        channel: str | None = None,
+        language: str | None = None,
+        interaction_status: str | None = Query(default=None, alias="status"),
+        needs_review: bool | None = None,
+        search: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Search conversation turns. `mobile` is the support entry point."""
+        return interactions().list_interactions(
+            mobile=mobile,
+            session=session,
+            channel=channel,
+            language=language,
+            status=interaction_status,
+            needs_review=needs_review,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+
+    @app.get("/admin/api/interactions/export.csv")
+    def export_interactions(
+        mobile: str | None = None,
+        session: str | None = None,
+        channel: str | None = None,
+        language: str | None = None,
+        interaction_status: str | None = Query(default=None, alias="status"),
+        needs_review: bool | None = None,
+        search: str | None = None,
+        _: None = Depends(require_admin),
+    ) -> PlainTextResponse:
+        body = interactions().export_csv(
+            mobile=mobile,
+            session=session,
+            channel=channel,
+            language=language,
+            status=interaction_status,
+            needs_review=needs_review,
+            search=search,
+        )
+        return PlainTextResponse(
+            body,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": 'attachment; filename="interactions.csv"'
+            },
+        )
+
+    @app.get("/admin/api/interactions/{session_id}")
+    def read_conversation(
+        session_id: str,
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Whole transcript for one conversation, oldest turn first."""
+        result = interactions().list_interactions(session=session_id, limit=500)
+        if not result["items"]:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No conversation found for session {session_id}.",
+            )
+        return {"session": session_id, **result}
+
+    @app.post("/admin/api/interactions/{interaction_id}/review")
+    def review_interaction(
+        interaction_id: int,
+        payload: dict[str, Any] | None = None,
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        note = ((payload or {}).get("note") or "").strip()
+        if not interactions().mark_reviewed(interaction_id, note=note):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"Interaction {interaction_id} is not awaiting review "
+                    "(already reviewed, or never flagged)."
+                ),
+            )
+        return {"id": interaction_id, "reviewed": True, "note": note}
+
+    # --- leads -------------------------------------------------------------
+
+    @app.get("/admin/api/leads")
+    def list_leads(
+        search: str = "",
+        limit: int = 100,
+        offset: int = 0,
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Captured leads, newest first. `search` matches any column."""
+        return read_leads(
+            leads_file(),
+            config_store,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+
+    @app.get("/admin/api/leads/export.csv")
+    def export_leads(_: None = Depends(require_admin)) -> PlainTextResponse:
+        return PlainTextResponse(
+            read_leads_csv(leads_file()),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="leads.csv"'},
+        )
 
     @app.get("/admin/api/gemini")
     def gemini_status(_: None = Depends(require_admin)) -> dict[str, Any]:

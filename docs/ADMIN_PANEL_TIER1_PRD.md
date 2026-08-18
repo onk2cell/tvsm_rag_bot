@@ -133,11 +133,13 @@ Added to `config.py` and `.env.example`.
 Per **D8**:
 
 - Add `mobile TEXT NOT NULL DEFAULT ''` via the existing `_add_missing_columns` hook (`interactions.py:289`).
-- Add an index on `(mobile, id)`.
-- Thread `mobile` through `record_exchange` / `record_turn` and pass it at both call sites in `client_processing.py` (≈ lines 2271 and 2288).
+- Add an index on `(mobile, id)` — **inside `_add_missing_columns`, after the `ALTER`**, not in the `CREATE TABLE` script. The create script runs first and is a no-op on an existing table, so indexing `mobile` there raises `no such column` on any database built before this change. That is every production database.
+- Thread `mobile` through `record_exchange` / `record_turn` and pass it at both call sites in `client_processing.py`. **The two sites are indented differently** — one sits inside a `try/except` around reply delivery — so a naive find-and-replace patches only one and silently drops the number on the delivery-failure path, which is the path most worth tracing.
 - Add `mobile` to `CSV_COLUMNS` and to `_filters`.
 
 > **Conversations already recorded in production will have `mobile` empty.** The number was never stored, so no backfill is possible. Only conversations recorded after deployment are findable by phone.
+
+Rehearsed against a copy of the live database: 3,692 rows before, 3,692 after, column and index added, all existing rows blank, queries and exports working.
 
 ### B2. `GET /admin/api/interactions`
 
@@ -156,6 +158,8 @@ Body `{"note": "..."}`. Delegates to `mark_reviewed()` (`interactions.py:208`), 
 ### B5. `GET /admin/api/interactions/export.csv`
 
 CSV download over the same filters as B2, via `export_csv()`. `text/csv` with a `Content-Disposition` filename.
+
+Declare this route **before** `B3`'s `/admin/api/interactions/{session}`, or FastAPI matches the path parameter first and reads `export.csv` as a session id.
 
 ### B6. `GET /admin/api/leads`
 
