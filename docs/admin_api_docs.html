@@ -119,7 +119,7 @@
     letter-spacing: -.03em; line-height: 1.02; margin: 0 0 .7rem;
     text-wrap: balance;
   }
-  .standfirst { margin: 0; color: var(--ink-soft); max-width: 60ch; font-size: 1.06rem; }
+  .standfirst { margin: 0; color: var(--ink-soft); max-width: 62ch; font-size: 1.06rem; }
   .masthead .meta {
     margin: 1.1rem 0 0; display: flex; flex-wrap: wrap; gap: .45rem 1.4rem;
     font-family: "JetBrains Mono", monospace; font-size: .74rem;
@@ -164,22 +164,44 @@
     border-radius: 12px; padding: clamp(1.1rem, 3vw, 1.7rem);
     display: grid; gap: 1.1rem;
   }
-  .band h2, .grp > h2 {
+  .band h2 {
     font-family: "Archivo", sans-serif; font-weight: 700;
     font-size: 1.3rem; letter-spacing: -.02em; margin: 0;
+  }
+  .band h3 {
+    font-family: "Archivo", sans-serif; font-weight: 600;
+    font-size: 1.02rem; letter-spacing: -.01em; margin: .4rem 0 -.4rem;
   }
   .band p { margin: 0; color: var(--ink-soft); }
 
   .grp { display: grid; gap: 1rem; }
   .grp > header { display: grid; gap: .3rem; border-bottom: 1px solid var(--rule-strong); padding-bottom: .7rem; }
   .grp > header h2 { font-family: "Archivo", sans-serif; font-weight: 700; font-size: 1.55rem; letter-spacing: -.025em; margin: 0; }
-  .grp > header p { margin: 0; color: var(--ink-soft); font-size: .95rem; max-width: 68ch; }
+  .grp > header p { margin: 0; color: var(--ink-soft); font-size: .95rem; max-width: 72ch; }
+
+  /* ---------- flow diagram ---------- */
+
+  .flow { display: grid; gap: .55rem; }
+  .flow-row { display: flex; flex-wrap: wrap; align-items: stretch; gap: .4rem; }
+  .node {
+    border: 1px solid var(--rule-strong); border-radius: 8px;
+    padding: .5rem .7rem; background: var(--surface-alt); flex: 1 1 7.5rem; min-width: 7rem;
+  }
+  .node b {
+    display: block; font-family: "Archivo", sans-serif; font-size: .88rem;
+    font-weight: 600; letter-spacing: -.01em;
+  }
+  .node span { font-size: .76rem; color: var(--ink-faint); line-height: 1.35; display: block; }
+  .node.us { border-color: var(--accent); background: var(--accent-soft); }
+  .node.us b { color: var(--accent); }
+  .arrow { align-self: center; color: var(--ink-faint); font-size: .9rem; flex: none; }
+  @media (max-width: 46rem) { .arrow { display: none; } }
 
   /* ---------- endpoint ---------- */
 
   .ep {
     background: var(--surface); border: 1px solid var(--rule);
-    border-radius: 12px; overflow: hidden;
+    border-radius: 12px; overflow: hidden; scroll-margin-top: 1.5rem;
   }
   .ep > .sig {
     display: flex; flex-wrap: wrap; align-items: center; gap: .55rem;
@@ -205,6 +227,24 @@
   .ep .lead { margin: 0; color: var(--ink-soft); font-size: .95rem; }
   .ep .lead strong { color: var(--ink); }
 
+  /* purpose block — what it does / when to reach for it */
+  .why {
+    display: grid; gap: .45rem;
+    border-left: 3px solid var(--rule-strong); padding: .1rem 0 .1rem .8rem;
+  }
+  .why > div { display: grid; grid-template-columns: 5.6rem minmax(0, 1fr); gap: .7rem; align-items: baseline; }
+  .why dt, .why .lbl {
+    font-family: "JetBrains Mono", monospace; font-size: .6rem;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+    font-weight: 500; padding-top: .18rem;
+  }
+  .why p { margin: 0; font-size: .95rem; }
+  .why .does { color: var(--ink); }
+  .why .when { color: var(--ink-soft); }
+  @media (max-width: 34rem) {
+    .why > div { grid-template-columns: 1fr; gap: .1rem; }
+  }
+
   h4 {
     font-family: "JetBrains Mono", monospace;
     font-size: .66rem; letter-spacing: .14em; text-transform: uppercase;
@@ -227,6 +267,16 @@
   .num { font-variant-numeric: tabular-nums; }
   .req { color: var(--del); font-weight: 600; font-size: .78rem; }
   .opt { color: var(--ink-faint); font-size: .78rem; }
+  .wrap, .wrap td:first-child { white-space: normal; }
+
+  /* index table */
+  .idx td:nth-child(1) { width: 4.4rem; }
+  .idx .m {
+    font-family: "JetBrains Mono", monospace; font-size: .64rem; font-weight: 700;
+    padding: .12rem .35rem; border-radius: 3px;
+  }
+  .idx td:nth-child(2) { font-family: "JetBrains Mono", monospace; font-size: .8rem; }
+  .idx td:nth-child(3) { white-space: normal; }
 
   /* ---------- code ---------- */
 
@@ -251,9 +301,46 @@
   .callout strong { color: var(--ink); }
   .callout p { margin: 0; }
   .callout p + p { margin-top: .5rem; }
+  .callout.warn { border-left-color: var(--del); background: var(--del-bg); }
+  .callout.warn strong { color: var(--del); }
 
-  .cols { display: grid; gap: .9rem; }
-  @media (min-width: 52rem) { .cols-2 { grid-template-columns: 1fr 1fr; } }
+  /* ---------- recipes ---------- */
+
+  .recipe {
+    border: 1px solid var(--rule); border-radius: 10px; overflow: hidden;
+  }
+  .recipe > summary {
+    cursor: pointer; padding: .7rem .9rem; background: var(--surface-alt);
+    font-family: "Archivo", sans-serif; font-weight: 600; font-size: .96rem;
+    letter-spacing: -.01em; list-style: none; display: flex; gap: .6rem; align-items: baseline;
+  }
+  .recipe > summary::-webkit-details-marker { display: none; }
+  .recipe > summary::before {
+    content: "+"; font-family: "JetBrains Mono", monospace; color: var(--accent);
+    font-weight: 700; flex: none;
+  }
+  .recipe[open] > summary::before { content: "\2212"; }
+  .recipe > summary:hover { background: var(--accent-soft); }
+  .recipe .body { padding: .9rem; display: grid; gap: .7rem; border-top: 1px solid var(--rule); }
+  .recipe .body p { margin: 0; font-size: .92rem; color: var(--ink-soft); }
+  .steps { margin: 0; padding-left: 1.15rem; display: grid; gap: .35rem; font-size: .92rem; color: var(--ink-soft); }
+  .steps strong { color: var(--ink); }
+
+  /* ---------- glossary ---------- */
+
+  .gloss { display: grid; gap: 0; }
+  .gloss > div {
+    display: grid; grid-template-columns: 10rem minmax(0, 1fr); gap: 1rem;
+    padding: .6rem 0; border-bottom: 1px solid var(--rule); align-items: baseline;
+  }
+  .gloss > div:last-child { border-bottom: none; }
+  .gloss dt {
+    font-family: "JetBrains Mono", monospace; font-size: .8rem;
+    color: var(--accent); font-weight: 500;
+  }
+  .gloss dd { margin: 0; font-size: .92rem; color: var(--ink-soft); }
+  .gloss dd strong { color: var(--ink); }
+  @media (max-width: 40rem) { .gloss > div { grid-template-columns: 1fr; gap: .15rem; } }
 
   footer {
     grid-column: 1 / -1; margin-top: 1rem; padding-top: 1.2rem;
@@ -266,20 +353,25 @@
 <header class="masthead">
   <p class="kicker">TVS Passenger 3W · WhatsApp Assistant</p>
   <h1>Admin API</h1>
-  <p class="standfirst">Every endpoint the control panel is built on — request shape, response shape, and a working <code>curl</code> for each. One shared bearer token; changes reach the bot on the next customer message, with nothing to restart.</p>
+  <p class="standfirst">The complete technical reference for the control panel behind the WhatsApp bot. Every endpoint here answers a question someone on the team actually has — is the bot working, what did it tell this customer, which brochure does it send, what documents does it quote from. Each one is documented with what it does, when to reach for it, its exact request and response, and a <code>curl</code> that runs as written.</p>
   <p class="meta">
     <span><b>23</b> endpoints</span>
     <span><b>7</b> groups</span>
+    <span>Version <b>1.0.0</b></span>
     <span>OpenAPI 3.1 at <b>/openapi.json</b></span>
     <span>Swagger at <b>/docs</b></span>
   </p>
 </header>
 
-<nav class="rail" aria-label="Endpoints">
-  <h2>Getting started</h2>
+<nav class="rail" aria-label="Contents">
+  <h2>Orientation</h2>
   <ul>
+    <li><a href="#overview"><span class="v"></span><span class="n">How it fits together</span></a></li>
     <li><a href="#start"><span class="v"></span><span class="n">Base URL &amp; auth</span></a></li>
+    <li><a href="#conventions"><span class="v"></span><span class="n">Conventions</span></a></li>
     <li><a href="#errors"><span class="v"></span><span class="n">Error responses</span></a></li>
+    <li><a href="#index"><span class="v"></span><span class="n">All endpoints</span></a></li>
+    <li><a href="#tasks"><span class="v"></span><span class="n">Common tasks</span></a></li>
   </ul>
 
   <h2>Operations</h2>
@@ -336,36 +428,127 @@
     <li><a href="#pages"><span class="v">GET</span><span class="n">/admin, /</span></a></li>
   </ul>
 
-  <h2>Building a client</h2>
+  <h2>Appendix</h2>
   <ul>
+    <li><a href="#glossary"><span class="v"></span><span class="n">Glossary</span></a></li>
     <li><a href="#gotchas"><span class="v"></span><span class="n">Things that bite</span></a></li>
+    <li><a href="#spec"><span class="v"></span><span class="n">Machine-readable spec</span></a></li>
   </ul>
 </nav>
 
 <main class="doc">
+
+<!-- ============ OVERVIEW ============ -->
+
+<section class="band" id="overview">
+  <h2>How it fits together</h2>
+  <p>A customer messages the dealership on WhatsApp. JAM's CRM receives it and forwards it to this system, which answers, captures a lead, and sends the reply back through the CRM. The admin API is a <strong>separate service alongside that pipeline</strong> — it reads and writes the same settings, database and Redis the bot uses, but it is never in the path of a customer message.</p>
+
+  <div class="flow">
+    <div class="flow-row">
+      <div class="node"><b>Customer</b><span>WhatsApp message</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><b>JAM CRM</b><span>Receives and forwards; also delivers the reply</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><b>Webhook</b><span>Accepts the message, puts it on the queue</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><b>Queue</b><span>Redis — the buffer if traffic spikes</span></div>
+    </div>
+    <div class="flow-row">
+      <div class="node"><b>Worker</b><span>Runs the conversation, decides what to say</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><b>Gemini</b><span>Answers product questions from the knowledge base</span></div>
+      <span class="arrow">→</span>
+      <div class="node"><b>Storage</b><span>Session state in Redis; leads and transcripts on disk</span></div>
+      <span class="arrow">→</span>
+      <div class="node us"><b>Admin API</b><span>This document. Reads and writes all of the above</span></div>
+    </div>
+  </div>
+
+  <h3>What that means in practice</h3>
+  <div class="tw"><table class="wrap">
+    <thead><tr><th>Property</th><th>Consequence</th></tr></thead>
+    <tbody>
+      <tr><td><strong>No restarts</strong></td><td>Settings are re-read from disk on every customer message. A saved change reaches the bot on its <em>next</em> message — never mid-conversation, and never requiring a deploy.</td></tr>
+      <tr><td><strong>Read-your-writes</strong></td><td>A <code>PUT</code> that returns <code>200</code> is already on disk. There is no propagation delay and no cache to bust.</td></tr>
+      <tr><td><strong>Separate process</strong></td><td>The admin API cannot see the worker directly. Everything it reports about the worker — liveness, queue depth — it learns through Redis.</td></tr>
+      <tr><td><strong>Nothing here can break a live chat</strong></td><td>The one exception is the settings themselves: a bad <code>PUT</code> changes what the bot says. Validation blocks the malformed cases, not the ill-advised ones.</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="callout">
+    <p><strong>One deliberate exception to "separate".</strong> <a href="#reset">Session reset</a> writes into Redis, where the worker keeps live conversation state. That is the only endpoint that reaches into an in-flight conversation, and it is why it exists.</p>
+  </div>
+</section>
 
 <!-- ============ START HERE ============ -->
 
 <section class="band" id="start">
   <h2>Base URL and authentication</h2>
   <p>Set these once and every example on this page runs as written.</p>
-<pre><span class="c"># the admin host — the Cloudflare tunnel hostname in the current setup</span>
+<pre><span class="c"># the admin host — currently a Cloudflare tunnel hostname</span>
 BASE=https://&lt;your-admin-host&gt;
 AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
-  <p>Every endpoint requires the bearer header except the three panel pages. There is <strong>one shared token</strong> — no user accounts, no roles, no per-person access. Anyone holding it can read every customer's name, number and full chat history.</p>
+  <p>Every endpoint requires the bearer header except the health probe and the panel pages. There is <strong>one shared token</strong> — no user accounts, no roles, no per-person access. Anyone holding it can read every customer's name, number and full chat history.</p>
 <pre>Authorization: Bearer &lt;ADMIN_TOKEN&gt;</pre>
   <div class="callout">
-    <p><strong>Token comparison is constant-time</strong> and a missing header is rejected the same way a wrong one is, so the endpoint gives nothing away to a guesser.</p>
+    <p><strong>Token comparison is constant-time,</strong> and a missing header is rejected identically to a wrong one — the endpoint gives a guesser nothing to work with.</p>
   </div>
 </section>
 
+<!-- ============ CONVENTIONS ============ -->
+
+<section class="band" id="conventions">
+  <h2>Conventions</h2>
+  <p>These hold across every endpoint, so they are stated once here rather than repeated below.</p>
+  <div class="tw"><table class="wrap">
+    <thead><tr><th>Topic</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Format</strong></td>
+        <td>JSON in and out, UTF-8, except the two CSV exports and the file uploads, which are <code>multipart/form-data</code>. Send <code>Content-Type: application/json</code> on every body.</td>
+      </tr>
+      <tr>
+        <td><strong>Timestamps</strong></td>
+        <td>Three shapes, and they differ: <code>checked_at</code> on status is UTC with a <code>Z</code> suffix; conversation <code>timestamp</code> is ISO 8601 with a <code>+00:00</code> offset; lead <code>timestamp</code> has <strong>no offset</strong> — it is the server's local time as written to the CSV. Campaign dates are plain <code>YYYY-MM-DD</code> and are evaluated in <strong>India time</strong>.</td>
+      </tr>
+      <tr>
+        <td><strong>Pagination</strong></td>
+        <td><code>limit</code> and <code>offset</code> on the two list endpoints. <code>limit</code> defaults to 100 and is clamped to 1–500; <code>offset</code> clamps negatives to 0. <code>count</code> in the response is the <strong>total matching the filter</strong>, not the page size — so pages are <code>Math.ceil(count / limit)</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Phone numbers</strong></td>
+        <td>Stored and matched exactly as the CRM sends them, normally <code>+91…</code>. In a query string the <code>+</code> <strong>must</strong> be encoded as <code>%2B</code> or it arrives as a space and matches nothing.</td>
+      </tr>
+      <tr>
+        <td><strong>Caching</strong></td>
+        <td>Only <a href="#status">status</a> caches: its outbound probes are held for 60 seconds so polling the page cannot hammer JAM's servers. A reused probe says so in its <code>detail</code>. Everything else reads live.</td>
+      </tr>
+      <tr>
+        <td><strong>Rate limits</strong></td>
+        <td>None. The API is not public and is not throttled — but the knowledge-base endpoints call Gemini, which has its own quota.</td>
+      </tr>
+      <tr>
+        <td><strong>Versioning</strong></td>
+        <td>The spec reports <code>1.0.0</code>. There is no version in the URL and no negotiation; the OpenAPI document is generated from the routes, so it is always the truth about what is deployed.</td>
+      </tr>
+      <tr>
+        <td><strong>Idempotency</strong></td>
+        <td>Every <code>GET</code> is safe. <code>PUT /config</code> is idempotent — sending the same document twice is the same as once. <code>POST /kb</code> is <strong>not</strong>: sending the same file twice indexes it twice (see <a href="#kb-post">replace</a>).</td>
+      </tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ ERRORS ============ -->
+
 <section class="band" id="errors">
   <h2>Error responses</h2>
-  <p>Every failure is a JSON body with a single <code>detail</code> string. No error codes to map.</p>
-  <div class="tw"><table>
-    <thead><tr><th>Status</th><th>When</th><th>Body</th></tr></thead>
+  <p>Every failure is a JSON body with a single <code>detail</code> string. There are no error codes to map and no nested error objects.</p>
+  <div class="tw"><table class="wrap">
+    <thead><tr><th>Status</th><th>Means</th><th>Body</th></tr></thead>
     <tbody>
-      <tr><td class="num">400</td><td>Validation failed</td><td><code>{"detail": "&lt;what was wrong, naming the field&gt;"}</code></td></tr>
+      <tr><td class="num">400</td><td>Validation failed — the message names the field</td><td><code>{"detail": "&lt;what was wrong&gt;"}</code></td></tr>
       <tr><td class="num">401</td><td>Header missing or wrong</td><td><code>{"detail": "Invalid or missing admin token."}</code></td></tr>
       <tr><td class="num">404</td><td>No such record, or not applicable</td><td><code>{"detail": "…"}</code></td></tr>
       <tr><td class="num">502</td><td>Gemini unreachable <span class="opt">(knowledge base only)</span></td><td><code>{"detail": "…"}</code></td></tr>
@@ -374,8 +557,162 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
     </tbody>
   </table></div>
   <div class="callout">
-    <p><strong>An unset token disables the panel, it does not open it.</strong> Every request gets <code>503</code> until <code>ADMIN_TOKEN</code> is set — there is no state in which the API answers without one.</p>
+    <p><strong>An unset token disables the panel; it does not open it.</strong> Every request gets <code>503</code> until <code>ADMIN_TOKEN</code> is set — there is no state in which this API answers without one.</p>
   </div>
+</section>
+
+<!-- ============ INDEX ============ -->
+
+<section class="band" id="index">
+  <h2>All endpoints at a glance</h2>
+  <p>What each one is for, in one line. Click through for the full shape.</p>
+  <div class="tw"><table class="idx">
+    <thead><tr><th>Method</th><th>Path</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#health">/admin/health</a></td><td>Answers only "is the admin service itself alive" — for uptime monitors</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#status">/admin/api/status</a></td><td>One verdict on whether the bot can serve customers right now, across six checks</td></tr>
+      <tr><td><span class="m v-post">POST</span></td><td><a href="#reset">/admin/api/session/reset</a></td><td>Wipes one customer's remembered state so their next message starts fresh</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#interactions">/admin/api/interactions</a></td><td>Searches every message either side has ever sent, by number, phrase or status</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#interactions-csv">/admin/api/interactions/export.csv</a></td><td>The same search as a spreadsheet, with no page limit</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#transcript">/admin/api/interactions/{session}</a></td><td>One conversation start to finish, in order</td></tr>
+      <tr><td><span class="m v-post">POST</span></td><td><a href="#review">/admin/api/interactions/{id}/review</a></td><td>Closes a flagged turn so nobody works it twice</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#leads">/admin/api/leads</a></td><td>The qualified-lead table the bot fills in, searchable across every column</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#leads-csv">/admin/api/leads/export.csv</a></td><td>The whole leads file, for the dealer network or a CRM import</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#media-list">/admin/api/media/{kind}</a></td><td>What is published on the media host, with the upload limits</td></tr>
+      <tr><td><span class="m v-post">POST</span></td><td><a href="#media-post">/admin/api/media/{kind}</a></td><td>Publishes a brochure PDF or a WhatsApp image and returns its URL</td></tr>
+      <tr><td><span class="m v-del">DELETE</span></td><td><a href="#media-del">/admin/api/media/{kind}/{filename}</a></td><td>Removes a published file</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#kb">/admin/api/kb</a></td><td>Lists the documents the bot's product answers are grounded in</td></tr>
+      <tr><td><span class="m v-post">POST</span></td><td><a href="#kb-post">/admin/api/kb</a></td><td>Adds a document the bot can quote from</td></tr>
+      <tr><td><span class="m v-del">DELETE</span></td><td><a href="#kb-del">/admin/api/kb/{document_id}</a></td><td>Stops the bot grounding on a document — the fix for a stale copy</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#config">/admin/api/config</a></td><td>Every setting the bot runs on, as one document</td></tr>
+      <tr><td><span class="m v-put">PUT</span></td><td><a href="#config-put">/admin/api/config</a></td><td>Saves settings — campaign dates, brochures, capture fields, flow</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#meta">/admin/api/meta</a></td><td>Allowed values and factory defaults, for building a form</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#gemini">/admin/api/gemini</a></td><td>Whether the AI key is set, and where it came from</td></tr>
+      <tr><td><span class="m v-post">POST</span></td><td><a href="#gemini-post">/admin/api/gemini</a></td><td>Sets or rotates the key, validating it before saving</td></tr>
+      <tr><td><span class="m v-del">DELETE</span></td><td><a href="#gemini-del">/admin/api/gemini</a></td><td>Drops the runtime key and falls back to the deployed one</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#pages">/admin</a></td><td>The control panel page itself</td></tr>
+      <tr><td><span class="m v-get">GET</span></td><td><a href="#pages">/</a></td><td>Redirects to the panel</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ COMMON TASKS ============ -->
+
+<section class="band" id="tasks">
+  <h2>Common tasks</h2>
+  <p>The jobs people actually arrive with, and the calls that do them. Every one assumes <code>BASE</code> and <code>AUTH</code> are set.</p>
+
+  <details class="recipe">
+    <summary>A customer says the bot told them something wrong</summary>
+    <div class="body">
+      <ol class="steps">
+        <li><strong>Find the conversation.</strong> Search by their number — this covers every session they have ever had, not just the latest.
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions?mobile=%2B919371062202"</span></pre></li>
+        <li><strong>Read it in context.</strong> Take the <code>session</code> from the turn in question and pull the whole conversation.
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions/client-e622c23876cc45a"</span></pre></li>
+        <li><strong>Check what it was quoting.</strong> If the wrong answer was a product fact, look at what the bot is grounded on — a superseded document still in the store is the usual cause.
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/kb"</span></pre>
+        Look at <code>duplicate_display_names</code> first. Anything listed there means two copies are live and the bot may have quoted the old one.</li>
+      </ol>
+    </div>
+  </details>
+
+  <details class="recipe">
+    <summary>What did this number talk about three days ago?</summary>
+    <div class="body">
+      <p>There is no date filter on the API yet. Two ways round it, depending on volume:</p>
+      <ol class="steps">
+        <li><strong>Small history</strong> — pull everything for the number and read the <code>timestamp</code> on each turn. Under a few hundred turns this is instant.
+<pre>curl -s -H <span class="s">"$AUTH"</span> \
+  <span class="s">"$BASE/admin/api/interactions?mobile=%2B919371062202&amp;limit=500"</span></pre></li>
+        <li><strong>Large history</strong> — export to CSV and filter by date in a spreadsheet.
+<pre>curl -s -H <span class="s">"$AUTH"</span> -o cust.csv \
+  <span class="s">"$BASE/admin/api/interactions/export.csv?mobile=%2B919371062202"</span></pre></li>
+      </ol>
+      <p>A date filter is a known gap and is on the list.</p>
+    </div>
+  </details>
+
+  <details class="recipe">
+    <summary>Change which brochure the bot sends for a model</summary>
+    <div class="body">
+      <p>Settings are replaced whole, so this is always read, edit, write back.</p>
+      <ol class="steps">
+        <li><strong>Read the current settings.</strong>
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/config"</span> &gt; cfg.json</pre></li>
+        <li><strong>Edit <code>documents</code>.</strong> Change <code>brochure</code> for the default, or a key under <code>fuel</code> to override it when the customer names a fuel type.</li>
+        <li><strong>Write it back.</strong>
+<pre>curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Type: application/json"</span> \
+  --data @cfg.json <span class="s">"$BASE/admin/api/config"</span></pre></li>
+      </ol>
+      <p>The next customer to ask gets the new file. Nothing restarts.</p>
+    </div>
+  </details>
+
+  <details class="recipe">
+    <summary>Publish a brand-new brochure and point the bot at it</summary>
+    <div class="body">
+      <p>Two deliberate steps — uploading a file never changes what the bot sends, so a draft can be staged safely.</p>
+      <ol class="steps">
+        <li><strong>Upload it</strong> and keep the <code>url</code> from the response.
+<pre>curl -s -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX_2027.pdf"</span> \
+  <span class="s">"$BASE/admin/api/media/brochures"</span></pre></li>
+        <li><strong>Point the settings at it</strong> — read <code>/admin/api/config</code>, paste the URL into <code>documents</code>, <code>PUT</code> it back.</li>
+      </ol>
+      <div class="callout"><p>Most product PDFs are hosted on JAM's own CDN rather than uploaded here. Either works — <code>brochure</code> takes any URL the bot can reach.</p></div>
+    </div>
+  </details>
+
+  <details class="recipe">
+    <summary>A campaign is ending — stop the bot promoting it</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>Read the settings, set <code>campaign_ends_on</code> to the last valid day, <code>PUT</code> back.</li>
+        <li>Nothing else to do. The bound is <strong>inclusive</strong> and evaluated in India time, so <code>"2026-10-31"</code> stops it after that day in IST.</li>
+      </ol>
+      <p>Outside the window the campaign is not merely left unmentioned — the offer text, the goal, and the campaign step are all removed from the bot's instructions. Leaving any one of them in was enough for it to keep pitching an expired scheme.</p>
+    </div>
+  </details>
+
+  <details class="recipe">
+    <summary>Teach the bot about a new document</summary>
+    <div class="body">
+      <ol class="steps">
+        <li><strong>Index it.</strong> Use <code>replace=true</code> when it supersedes an existing document with the same name.
+<pre>curl -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX-English.pdf"</span> \
+  -F <span class="s">"display_name=King EV MAX specs"</span> -F <span class="s">"replace=true"</span> \
+  <span class="s">"$BASE/admin/api/kb"</span></pre></li>
+        <li><strong>Wait for it.</strong> The call returns in seconds but indexing takes minutes. Poll until the document reads <code>STATE_ACTIVE</code>.
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/kb"</span></pre></li>
+      </ol>
+      <div class="callout warn"><p><strong>Without <code>replace=true</code> you get two copies,</strong> both retrievable, and no way to tell which one the bot quoted. That is the single most common mistake with this API.</p></div>
+    </div>
+  </details>
+
+  <details class="recipe">
+    <summary>A customer is stuck mid-conversation</summary>
+    <div class="body">
+      <ol class="steps">
+        <li>Reset them by number. Their next message starts from language selection.
+<pre>curl -s -X POST -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Type: application/json"</span> \
+  -d <span class="s">'{"mobile":"+919371062202"}'</span> <span class="s">"$BASE/admin/api/session/reset"</span></pre></li>
+      </ol>
+      <p>This clears language, captured answers, the confirmed dealer and which brochures were already sent. Their transcript and any captured lead are <strong>not</strong> deleted — this only clears live conversation state.</p>
+    </div>
+  </details>
+
+  <details class="recipe">
+    <summary>The bot has stopped replying</summary>
+    <div class="body">
+      <ol class="steps">
+        <li><strong>Ask it what is wrong.</strong>
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/status"</span></pre></li>
+        <li><strong>Read the six checks.</strong> Worker <code>down</code> means nothing is processing messages — they are queuing, not lost. Gemini key <code>degraded</code> means it cannot compose answers. JAM <code>degraded</code> means it cannot deliver them.</li>
+        <li><strong>If the key is the problem</strong>, confirm where it came from and rotate it.
+<pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/gemini"</span></pre></li>
+      </ol>
+    </div>
+  </details>
 </section>
 
 <!-- ============ OPERATIONS ============ -->
@@ -389,7 +726,10 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
   <article class="ep" id="health">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/health</span><span class="free">No auth</span></div>
     <div class="in">
-      <p class="lead">Liveness only — deliberately dependency-free, so it still answers when Redis and the CRM are down. Point your uptime monitor here; use <a href="#status">the status endpoint</a> for real health.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Confirms the admin service itself is running and answering. Nothing more — it checks no dependency at all.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Configuring an uptime monitor or a container health check. For "is the bot working", use <a href="#status">status</a> instead — this endpoint answers <code>ok</code> even when every dependency is down, and that is deliberate.</p></div>
+      </div>
 <pre>curl -s <span class="s">"$BASE/admin/health"</span>
 
 <span class="k">{"status"</span>: <span class="s">"ok"</span>}</pre>
@@ -399,7 +739,11 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
   <article class="ep" id="status">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/status</span></div>
     <div class="in">
-      <p class="lead">One rolled-up verdict over six checks. No parameters. Live probes are cached for 60 seconds so polling this page cannot hammer the CRM.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Runs six checks across everything the bot needs — Redis, the worker, the queue, the AI key and JAM's two endpoints — and rolls them into a single verdict.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Somebody says "the bot isn't replying". This is the first thing to open, and usually the last: it distinguishes <em>not processing</em> from <em>not composing</em> from <em>not delivering</em>, which are three different problems with three different owners.</p></div>
+      </div>
+      <p class="lead">No parameters. Outbound probes are cached for 60 seconds, so polling this cannot hammer JAM's servers.</p>
 <pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/status"</span></pre>
 <pre>{
   <span class="k">"status"</span>: <span class="s">"degraded"</span>,
@@ -414,16 +758,28 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
   ]
 }</pre>
       <h4>Fields</h4>
-      <div class="tw"><table>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>status</code></td><td><code>ok</code> / <code>degraded</code> / <code>down</code> — the worst individual check</td></tr>
           <tr><td><code>checked_at</code></td><td>UTC, ISO 8601, <code>Z</code> suffix</td></tr>
-          <tr><td><code>checks[].name</code></td><td>Fixed set — always these six, always this order</td></tr>
-          <tr><td><code>checks[].detail</code></td><td>Human-readable. Reused probes append <code>(cached Ns ago)</code></td></tr>
+          <tr><td><code>checks[].name</code></td><td>Fixed set — always these six, always this order, so a UI can lay them out statically</td></tr>
+          <tr><td><code>checks[].detail</code></td><td>Human-readable and safe to show as-is. Reused probes append <code>(cached Ns ago)</code></td></tr>
         </tbody>
       </table></div>
-      <h4>What turns each check red or amber</h4>
+      <h4>What each check means, in plain terms</h4>
+      <div class="tw"><table class="wrap">
+        <thead><tr><th>Check</th><th>Watching</th><th>If it is bad</th></tr></thead>
+        <tbody>
+          <tr><td>Redis</td><td>The shared memory holding live conversations and the queue</td><td>Nothing works. Everything below becomes unknowable</td></tr>
+          <tr><td>Worker</td><td>The process that actually answers messages</td><td>Messages are <em>queuing</em>, not lost — they run when it returns</td></tr>
+          <tr><td>Queue</td><td>How many messages are waiting, and how many have failed</td><td>A backlog means replies are slow; failures mean some never landed</td></tr>
+          <tr><td>Gemini key</td><td>Whether the bot can compose an answer at all</td><td>It can receive messages but cannot reply to product questions</td></tr>
+          <tr><td>JAM CRM</td><td>Customer lookup</td><td>The bot cannot tell who it is talking to</td></tr>
+          <tr><td>JAM dispose</td><td>Where qualified leads are posted</td><td>Conversations still work; leads are not reaching the CRM</td></tr>
+        </tbody>
+      </table></div>
+      <h4>Exact thresholds</h4>
       <div class="tw"><table>
         <thead><tr><th>Check</th><th>down</th><th>degraded</th></tr></thead>
         <tbody>
@@ -436,7 +792,7 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
       </table></div>
       <div class="callout">
         <p><strong>Absence is not a fault.</strong> A dependency that isn't configured reports <code>ok</code> with <code>"Not configured"</code>. When Redis is down, Worker and Queue report <code>down</code> with <code>"Unknown — Redis unreachable"</code>, because their true state cannot be known from here.</p>
-        <p>A 4xx from the CRM counts as <em>reachable</em> — the check proves the host answers, not that the credentials are right.</p>
+        <p>A <code>4xx</code> from JAM counts as <em>reachable</em>. The check proves the host answers — not that the credentials are right.</p>
       </div>
     </div>
   </article>
@@ -444,9 +800,13 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
   <article class="ep" id="reset">
     <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/session/reset</span></div>
     <div class="in">
-      <p class="lead">Hard-resets one customer. Their next WhatsApp message starts from language selection — language, captured answers, confirmed dealer and brochures-already-sent are all cleared.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Erases one customer's remembered conversation state, so their next WhatsApp message starts over from language selection.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Someone is stuck in a loop, picked the wrong language, wants to start again, or is testing and needs a clean run.</p></div>
+      </div>
+      <p class="lead">Clears language, captured answers, the confirmed dealer and which brochures were already sent. <strong>Their transcript and any captured lead survive</strong> — this only touches live state, not the record.</p>
       <h4>Request body</h4>
-      <div class="tw"><table>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><code>mobile</code></td><td>string</td><td><span class="req">required</span></td><td>Non-blank; whitespace trimmed. Use the format the CRM sends, normally <code>+91…</code></td></tr>
@@ -456,7 +816,8 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
   -d <span class="s">'{"mobile":"+919371062202"}'</span> <span class="s">"$BASE/admin/api/session/reset"</span>
 
 {<span class="k">"mobile"</span>: <span class="s">"+919371062202"</span>, <span class="k">"cleared"</span>: true}</pre>
-      <p class="lead"><code>cleared</code> is <code>false</code> when there was nothing to clear. Both are success. Deduplication keys are left alone — they're keyed per message, not per customer.</p>
+      <p class="lead"><code>cleared</code> is <code>false</code> when there was nothing to clear. Both are success — a customer with no live session is already in the state you asked for.</p>
+      <p class="lead">Deduplication keys are left alone; they are keyed per message, not per customer, so a reset cannot cause a replay.</p>
       <p class="lead"><strong>Errors</strong> — <code>400</code> blank or missing <code>mobile</code>; <code>503</code> Redis unavailable.</p>
     </div>
   </article>
@@ -467,15 +828,19 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
 <section class="grp">
   <header>
     <h2>Conversations</h2>
-    <p>Every row is <strong>one turn</strong> — a customer message or a bot reply — not a whole conversation. Turns are stored the moment they happen, so this is the record of what the bot actually said.</p>
+    <p>Every row is <strong>one turn</strong> — a single customer message or a single bot reply, not a whole conversation. Turns are written the moment they happen, so this is the authoritative record of what the bot actually said, independent of anything the model might report later.</p>
   </header>
 
   <article class="ep" id="interactions">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/interactions</span></div>
     <div class="in">
-      <p class="lead">Search conversation turns. All parameters are optional and combine with AND.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Searches every message either side has ever sent — by phone number, by conversation, by language, by delivery status, or by phrase.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">A complaint arrives and you need to see what was actually said; you are checking whether a specific phrasing is going out; or you are working the queue of turns flagged for human review.</p></div>
+      </div>
+      <p class="lead">All parameters are optional and combine with AND.</p>
       <h4>Query parameters</h4>
-      <div class="tw"><table>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><code>mobile</code></td><td>string</td><td>—</td><td>Exact match. URL-encode <code>+</code> as <code>%2B</code></td></tr>
@@ -483,8 +848,8 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
           <tr><td><code>channel</code></td><td>string</td><td>—</td><td>e.g. <code>client_app</code></td></tr>
           <tr><td><code>language</code></td><td>string</td><td>—</td><td>e.g. <code>Hindi</code></td></tr>
           <tr><td><code>status</code></td><td>string</td><td>—</td><td><code>ok</code>, <code>delivery_failed</code>, …</td></tr>
-          <tr><td><code>needs_review</code></td><td>bool</td><td>—</td><td><code>true</code> = flagged and not yet reviewed</td></tr>
-          <tr><td><code>search</code></td><td>string</td><td>—</td><td>Substring across <code>message</code>, <code>error</code>, <code>session</code></td></tr>
+          <tr><td><code>needs_review</code></td><td>bool</td><td>—</td><td><code>true</code> = flagged and not yet reviewed; <code>false</code> = everything else</td></tr>
+          <tr><td><code>search</code></td><td>string</td><td>—</td><td>Substring across <code>message</code>, <code>error</code> and <code>session</code></td></tr>
           <tr><td><code>limit</code></td><td>int</td><td class="num">100</td><td>Clamped to 1–500</td></tr>
           <tr><td><code>offset</code></td><td>int</td><td class="num">0</td><td>Negatives clamp to 0</td></tr>
         </tbody>
@@ -516,14 +881,28 @@ AUTH=<span class="s">"Authorization: Bearer $ADMIN_TOKEN"</span></pre>
     }
   ]
 }</pre>
-      <p class="lead"><code>count</code> is the total matching the filter, not the page size — so pagination is <code>Math.ceil(count / limit)</code>. <code>items</code> is one page, ordered <strong>oldest first within the page</strong>, while pages walk backwards from the newest: <code>offset=0</code> is the most recent page and reads top-to-bottom like a transcript.</p>
-      <p class="lead"><code>role</code> is <code>user</code> or <code>assistant</code>. On a user turn, <code>latency_ms</code>, <code>model</code>, <code>citations</code> and the token counts are empty — they belong to the assistant turn.</p>
+      <h4>Field reference</h4>
+      <div class="tw"><table class="wrap">
+        <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>id</code></td><td>The handle for <a href="#review">marking a turn reviewed</a></td></tr>
+          <tr><td><code>role</code></td><td><code>user</code> or <code>assistant</code>. On a user turn, <code>latency_ms</code>, <code>model</code>, <code>citations</code> and the token counts are empty — they belong to the reply</td></tr>
+          <tr><td><code>status</code></td><td><code>ok</code>, or a failure such as <code>delivery_failed</code> when JAM would not accept the reply</td></tr>
+          <tr><td><code>citations</code></td><td>Which knowledge-base documents the answer drew on — the audit trail for a product claim</td></tr>
+          <tr><td><code>needs_review</code></td><td>The bot flagged this turn as needing a human</td></tr>
+          <tr><td><code>latency_ms</code></td><td>How long the reply took to compose</td></tr>
+        </tbody>
+      </table></div>
+      <p class="lead"><code>count</code> is the total matching the filter, not the page size. <code>items</code> is one page, ordered <strong>oldest first within the page</strong>, while pages walk backwards from the newest — so <code>offset=0</code> is the most recent page and reads top-to-bottom like a transcript.</p>
       <h4>Examples</h4>
 <pre><span class="c"># everything this customer ever said, across all their sessions</span>
 curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions?mobile=%2B919371062202"</span>
 
 <span class="c"># what still needs a human</span>
 curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions?needs_review=true&amp;limit=50"</span>
+
+<span class="c"># every reply JAM refused to deliver</span>
+curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions?status=delivery_failed"</span>
 
 <span class="c"># find a phrase</span>
 curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions?search=EMI"</span></pre>
@@ -536,20 +915,29 @@ curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/inter
   <article class="ep" id="interactions-csv">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/interactions/export.csv</span></div>
     <div class="in">
-      <p class="lead">The same filters as above — <code>mobile</code>, <code>session</code>, <code>channel</code>, <code>language</code>, <code>status</code>, <code>needs_review</code>, <code>search</code> — with no pagination. Returns every match.</p>
-      <p class="lead"><code>Content-Type: text/csv</code>, <code>Content-Disposition: attachment; filename="interactions.csv"</code>.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Runs the same search and returns every match as a spreadsheet, with no page limit.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Sharing with people who do not have panel access, doing bulk quality review, or filtering by date — which the API cannot do yet, but a spreadsheet can.</p></div>
+      </div>
+      <p class="lead">Accepts the same filters: <code>mobile</code>, <code>session</code>, <code>channel</code>, <code>language</code>, <code>status</code>, <code>needs_review</code>, <code>search</code>. Returns <code>Content-Type: text/csv</code> with <code>Content-Disposition: attachment; filename="interactions.csv"</code>.</p>
 <pre>id,timestamp,session,mobile,channel,source,language,role,message,
 latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pre>
-      <p class="lead"><code>citations</code> is a JSON array encoded as a string.</p>
+      <p class="lead"><code>citations</code> is a JSON array encoded as a string. The token-count columns are not in the export.</p>
 <pre>curl -s -H <span class="s">"$AUTH"</span> -o interactions.csv \
   <span class="s">"$BASE/admin/api/interactions/export.csv?mobile=%2B919371062202"</span></pre>
+      <div class="callout warn">
+        <p><strong>This file is customer data.</strong> Names, numbers and everything said. Treat the download the way you would treat the CRM itself.</p>
+      </div>
     </div>
   </article>
 
   <article class="ep" id="transcript">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/interactions/<em>{session}</em></span></div>
     <div class="in">
-      <p class="lead">One conversation in full, oldest turn first, up to 500 turns.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Returns one conversation start to finish, oldest turn first, up to 500 turns.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">You have found a single turn through search and need the surrounding context — what was asked just before, and what the bot said next.</p></div>
+      </div>
 <pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/interactions/client-e622c23876cc45a"</span>
 
 {
@@ -559,7 +947,7 @@ latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pr
 }</pre>
       <p class="lead"><code>404</code> when the session has no turns.</p>
       <div class="callout">
-        <p><strong>A session is not a customer.</strong> Someone who comes back after their 1-hour session lapses gets a brand-new <code>session</code> id. To see everything one person ever said, search by <code>mobile</code> instead.</p>
+        <p><strong>A session is not a customer.</strong> Conversation state expires after an hour of silence, and a customer who comes back gets a brand-new <code>session</code> id. One person who messages across three days will have three or more sessions. To see everything they ever said, search by <code>mobile</code>.</p>
       </div>
     </div>
   </article>
@@ -567,8 +955,12 @@ latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pr
   <article class="ep" id="review">
     <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/interactions/<em>{id}</em>/review</span></div>
     <div class="in">
-      <p class="lead">Mark one flagged turn as handled. <code>{id}</code> is the numeric <code>id</code> from the search endpoint. The body is optional — <code>{}</code> is valid.</p>
-      <div class="tw"><table>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Closes one flagged turn, optionally recording what was done about it.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Working through the turns the bot flagged for a human, so the same item is not handled twice by two people.</p></div>
+      </div>
+      <p class="lead"><code>{id}</code> is the numeric <code>id</code> from the search endpoint. The body is optional — <code>{}</code> is valid.</p>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><code>note</code></td><td>string</td><td><span class="opt">optional</span></td><td>Trimmed. Defaults to <code>""</code></td></tr>
@@ -579,7 +971,7 @@ latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pr
 
 {<span class="k">"id"</span>: 4101, <span class="k">"reviewed"</span>: true, <span class="k">"note"</span>: <span class="s">"dealer called back"</span>}</pre>
       <div class="callout">
-        <p><strong><code>404</code> here is normal, not an error to surface loudly.</strong> It means the turn isn't awaiting review — either never flagged, or somebody already claimed it. That's deliberate, so two people can't both work the same item.</p>
+        <p><strong><code>404</code> here is normal, not an error to surface loudly.</strong> It means the turn is not awaiting review — either it was never flagged, or somebody already claimed it. That is deliberate: it is what stops two people working the same item.</p>
       </div>
     </div>
   </article>
@@ -590,14 +982,17 @@ latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pr
 <section class="grp">
   <header>
     <h2>Leads</h2>
-    <p>Captured lead rows, read under a shared file lock — a page is never a half-written file.</p>
+    <p>What the bot captured, as opposed to what it said. One row per qualified customer, read under a shared file lock so a page is never a half-written file.</p>
   </header>
 
   <article class="ep" id="leads">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/leads</span></div>
     <div class="in">
-      <p class="lead">Newest first.</p>
-      <div class="tw"><table>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Returns the qualified-lead table the bot fills in as it talks — name, product interest, timeline, pincode, quality and disposition — newest first.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Checking what came in today, finding a specific lead by pincode or name, or verifying that a conversation you just watched actually produced a captured record.</p></div>
+      </div>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Name</th><th>Type</th><th>Default</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><code>search</code></td><td>string</td><td><code>""</code></td><td>Case-insensitive substring across <strong>every</strong> column — one box covers mobile, name and pincode</td></tr>
@@ -627,7 +1022,7 @@ latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pr
   ]
 }</pre>
       <div class="callout">
-        <p><strong>Render from <code>columns</code>, not a hard-coded list.</strong> It's the authoritative order, taken from the live config — so it changes the moment somebody edits the capture fields. Every value is a string; empty means not captured.</p>
+        <p><strong>Render from <code>columns</code>, never a hard-coded list.</strong> It is the authoritative order, taken from the live settings — so it changes the moment somebody edits the capture fields. Every value is a string; empty means not captured, which is normal for a conversation that ended early.</p>
       </div>
 <pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/leads?search=411001"</span></pre>
     </div>
@@ -636,7 +1031,11 @@ latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pr
   <article class="ep" id="leads-csv">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/leads/export.csv</span></div>
     <div class="in">
-      <p class="lead">The whole leads file, same lock discipline. <code>text/csv</code>, <code>filename="leads.csv"</code>. No parameters.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Downloads the entire leads file as a spreadsheet. No parameters, no filtering.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Handing the day's leads to the dealer network, or importing into another system.</p></div>
+      </div>
+      <p class="lead">Same lock discipline as the list endpoint. <code>text/csv</code>, <code>filename="leads.csv"</code>.</p>
     </div>
   </article>
 </section>
@@ -646,27 +1045,31 @@ latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pr
 <section class="grp">
   <header>
     <h2>Media</h2>
-    <p><code>data/media</code> is a shared volume: the admin container writes to it, and the media host serves the same directory read-only at <code>/media/</code>. Publishing is a file write — no CDN account, no third party, no long-running job.</p>
+    <p>Files the bot sends to customers on WhatsApp. <code>data/media</code> is a shared volume: the admin service writes to it, and the media host serves the same directory read-only. Publishing is therefore a file write — no CDN account, no third party, no long-running job.</p>
   </header>
 
   <div class="band">
     <h2>The two kinds</h2>
-    <div class="tw"><table>
+    <div class="tw"><table class="wrap">
       <thead><tr><th>kind</th><th>Directory</th><th>Accepts</th><th>Limit</th><th>Used for</th></tr></thead>
       <tbody>
-        <tr><td><code>brochures</code></td><td><code>data/media/brochures</code></td><td><code>.pdf</code></td><td class="num">25 MB</td><td>Product brochures, warranty and PMS PDFs</td></tr>
-        <tr><td><code>images</code></td><td><code>data/media/share_location</code></td><td><code>.jpg</code> <code>.jpeg</code> <code>.png</code></td><td class="num">5 MB</td><td>The how-to-share-location cards</td></tr>
+        <tr><td><code>brochures</code></td><td><code>data/media/brochures</code></td><td><code>.pdf</code></td><td class="num">25 MB</td><td>Product brochures, warranty and service-schedule PDFs</td></tr>
+        <tr><td><code>images</code></td><td><code>data/media/share_location</code></td><td><code>.jpg</code> <code>.jpeg</code> <code>.png</code></td><td class="num">5 MB</td><td>The how-to-share-your-location cards sent to customers who do not know their pincode</td></tr>
       </tbody>
     </table></div>
     <p>Any other <code>{kind}</code> returns <code>404</code>.</p>
     <div class="callout">
-      <p><strong>Uploading does not change what the bot sends.</strong> Publishing a draft must never start delivering it — so after upload, point <code>documents.&lt;product&gt;.brochure</code> or <code>share_location_image.url</code> at the returned URL as a separate, deliberate step.</p>
+      <p><strong>Uploading does not change what the bot sends.</strong> Publishing a draft must never start delivering it — so pointing the settings at a new file is always a separate, deliberate second step.</p>
     </div>
   </div>
 
   <article class="ep" id="media-list">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/media/<em>{kind}</em></span></div>
     <div class="in">
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Lists what is already published for that kind, with each file's public URL and size, plus the limits the upload endpoint will enforce.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Before uploading — to check a name is free and see the size limit — or to copy a URL to paste into the settings.</p></div>
+      </div>
 <pre>{
   <span class="k">"kind"</span>: <span class="s">"brochures"</span>,
   <span class="k">"base_url"</span>: <span class="s">"https://media.example.com/media/brochures"</span>,
@@ -677,14 +1080,19 @@ latency_ms,status,error,model,citations,needs_review,reviewed_at,review_note</pr
      <span class="k">"url"</span>: <span class="s">"https://media.example.com/media/brochures/King_EV_MAX_2027.pdf"</span>}
   ]
 }</pre>
+      <p class="lead"><code>max_upload_bytes</code> and <code>allowed_suffixes</code> come from the server, so a form can validate before uploading rather than after.</p>
     </div>
   </article>
 
   <article class="ep" id="media-post">
     <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/media/<em>{kind}</em></span></div>
     <div class="in">
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Publishes a file to the media host and returns the URL it is now reachable at.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">A new model-year brochure arrives, or a share-location card needs replacing — and you do not want to wait on someone else's CDN to host it.</p></div>
+      </div>
       <p class="lead"><code>multipart/form-data</code>.</p>
-      <div class="tw"><table>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><code>file</code></td><td>file</td><td><span class="req">required</span></td><td>The PDF or image</td></tr>
@@ -700,9 +1108,9 @@ curl -s -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@how_to.jpg"<
 {<span class="k">"kind"</span>: <span class="s">"brochures"</span>, <span class="k">"filename"</span>: <span class="s">"King_EV_MAX_2027.pdf"</span>,
  <span class="k">"size_bytes"</span>: 3215592, <span class="k">"url"</span>: <span class="s">"https://media.example.com/media/brochures/King_EV_MAX_2027.pdf"</span>}</pre>
       <h4>Rejected with 400 when</h4>
-      <p class="lead">The extension is wrong for the kind · the file is empty or over the limit · the content doesn't match its type (leading bytes are checked, so a PDF renamed <code>.jpg</code> is refused) · the name already exists without <code>overwrite=true</code>.</p>
+      <p class="lead">The extension is wrong for the kind · the file is empty or over the limit · the content does not match its type (the leading bytes are checked, so a PDF renamed <code>.jpg</code> is refused) · the name already exists and <code>overwrite=true</code> was not sent.</p>
       <div class="callout">
-        <p>Filenames are reduced to a single path component and the resolved parent is asserted, so an upload cannot write outside its directory. Writes are staged and then moved into place — the media host can never serve a half-uploaded file.</p>
+        <p>Filenames are reduced to a single path component and the resolved parent directory is asserted, so an upload cannot write outside its own directory. Writes are staged and then moved into place atomically — the media host can never serve a half-uploaded file.</p>
       </div>
     </div>
   </article>
@@ -710,8 +1118,15 @@ curl -s -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@how_to.jpg"<
   <article class="ep" id="media-del">
     <div class="sig"><span class="v-tag v-del">DELETE</span><span class="path">/admin/api/media/<em>{kind}</em>/<em>{filename}</em></span></div>
     <div class="in">
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Removes one published file from the media host.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Retiring a superseded document, or clearing a bad upload.</p></div>
+      </div>
 <pre>{<span class="k">"kind"</span>: <span class="s">"brochures"</span>, <span class="k">"filename"</span>: <span class="s">"King_EV_MAX_2026.pdf"</span>, <span class="k">"deleted"</span>: true}</pre>
       <p class="lead"><code>404</code> for an unknown kind, or no such file.</p>
+      <div class="callout warn">
+        <p><strong>Check the settings first.</strong> Deleting a file the settings still point at does not fail here — it fails later, silently, when a customer asks for that brochure and the send has nothing to attach. Update <code>documents</code> before deleting, not after.</p>
+      </div>
     </div>
   </article>
 </section>
@@ -721,19 +1136,22 @@ curl -s -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@how_to.jpg"<
 <section class="grp">
   <header>
     <h2>Knowledge base</h2>
-    <p>The documents Gemini File Search retrieves from when the bot answers a product question. The prompt tells the model to use <strong>only</strong> these — anything not indexed here, it cannot ground on.</p>
+    <p>The documents the bot's product answers are grounded in. When a customer asks about specs, pricing, warranty or service, the bot searches these files and answers from what it finds. The prompt instructs it to use <strong>only</strong> these — anything not indexed here, it cannot ground on.</p>
   </header>
 
   <div class="band">
-    <h2>Indexing has no upsert</h2>
-    <p>Re-indexing a corrected document <strong>adds a second copy</strong> rather than replacing the first, and both stay retrievable — so the model may cite either. <code>duplicate_display_names</code> exists to make that visible, and <code>replace=true</code> on upload is how you avoid it.</p>
-    <p>Changes take effect on the <strong>next customer message</strong>. The store is resolved server-side per request, so there is nothing to restart.</p>
+    <h2>The one thing to understand: indexing has no upsert</h2>
+    <p>Re-indexing a corrected document <strong>adds a second copy</strong> rather than replacing the first, and both stay retrievable — so the bot may quote either, with nothing in the answer to say which. <code>duplicate_display_names</code> exists to make that visible, and <code>replace=true</code> on upload is how you avoid creating it.</p>
+    <p>Changes take effect on the <strong>next customer message</strong>. The store is resolved per request, so there is nothing to restart and no cache to clear.</p>
   </div>
 
   <article class="ep" id="kb">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/kb</span></div>
     <div class="in">
-      <p class="lead">Exactly what the bot grounds its answers on right now.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Lists every document the bot can currently quote from, newest first, and flags any name that appears more than once.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Answering "why did the bot say that" — a stale duplicate is the usual culprit — or confirming that a document you just uploaded has finished indexing.</p></div>
+      </div>
 <pre>{
   <span class="k">"store"</span>: <span class="s">"fileSearchStores/tvsmanual-ur9gkjpgkxyh"</span>,
   <span class="k">"document_count"</span>: 1,
@@ -757,28 +1175,33 @@ curl -s -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@how_to.jpg"<
     }
   ]
 }</pre>
-      <div class="tw"><table>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>document_count</code></td><td>Documents actually listed</td></tr>
-          <tr><td><code>duplicate_display_names</code></td><td>Names appearing more than once — <strong>each one means a stale copy is still live</strong></td></tr>
-          <tr><td><code>state</code></td><td><code>STATE_PENDING</code> (indexing) · <code>STATE_ACTIVE</code> (searchable) · <code>STATE_FAILED</code></td></tr>
+          <tr><td><code>duplicate_display_names</code></td><td>Names appearing more than once — <strong>each one means a stale copy is still live</strong>. An empty list is the healthy state</td></tr>
+          <tr><td><code>state</code></td><td><code>STATE_PENDING</code> (still indexing) · <code>STATE_ACTIVE</code> (searchable) · <code>STATE_FAILED</code></td></tr>
           <tr><td><code>document_id</code></td><td>URL-safe handle for <code>DELETE</code> — the last segment of <code>name</code></td></tr>
+          <tr><td><code>store</code></td><td>Which Gemini File Search store this instance is pointed at</td></tr>
         </tbody>
       </table></div>
-      <p class="lead">Documents come back newest first. <code>pending_documents</code> and <code>failed_documents</code> come straight from Gemini and may be <code>null</code>.</p>
+      <p class="lead"><code>pending_documents</code> and <code>failed_documents</code> come straight from Gemini and may be <code>null</code>.</p>
     </div>
   </article>
 
   <article class="ep" id="kb-post">
     <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/kb</span></div>
     <div class="in">
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Adds a document to what the bot can quote from, optionally removing the version it supersedes.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">A new spec sheet, price list or warranty policy arrives — this is what makes the bot able to answer questions about it. Before this endpoint existed the only route was SSH and a command-line script.</p></div>
+      </div>
       <p class="lead"><code>multipart/form-data</code>.</p>
-      <div class="tw"><table>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Field</th><th>Type</th><th></th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td><code>file</code></td><td>file</td><td><span class="req">required</span></td><td>Up to 30 MB</td></tr>
-          <tr><td><code>display_name</code></td><td>string</td><td><span class="opt">optional</span></td><td>Defaults to the filename. Worth setting — the CLI indexer names documents after the raw path</td></tr>
+          <tr><td><code>display_name</code></td><td>string</td><td><span class="opt">optional</span></td><td>Defaults to the filename. Worth setting — the command-line indexer names documents after the raw file path, which produced entries like <code>/home/user/Downloads/x.pdf</code></td></tr>
           <tr><td><code>replace</code></td><td>bool</td><td><span class="opt">optional</span></td><td>Defaults <code>false</code>. Deletes existing documents with the same display name, <strong>after</strong> the new one is accepted</td></tr>
         </tbody>
       </table></div>
@@ -795,16 +1218,20 @@ curl -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX-Eng
   <span class="k">"replaced_document_ids"</span>: [<span class="s">"oldid-abc123"</span>]
 }</pre>
       <div class="callout">
-        <p><strong>This returns before the document is searchable.</strong> The upload takes seconds, indexing runs for minutes — holding the request open for the whole operation would be dropped by the tunnel in front of this app. Poll <code>GET /admin/api/kb</code> and wait for <code>STATE_ACTIVE</code>.</p>
-        <p>If <code>replace</code> was asked for but the cleanup failed, the upload still succeeds and <code>replaced_document_ids</code> comes back short — the new document is live, and the leftover is a duplicate to remove by hand.</p>
+        <p><strong>This returns before the document is searchable.</strong> The upload takes seconds; indexing runs for minutes. Holding the request open for the whole operation would be dropped by the tunnel in front of this service, so it returns early by design. Poll <code>GET /admin/api/kb</code> and wait for <code>STATE_ACTIVE</code>.</p>
+        <p>If <code>replace</code> was asked for but the cleanup failed, the upload still succeeds and <code>replaced_document_ids</code> comes back short — the new document is live, and the leftover is a duplicate to remove by hand. The order is deliberate: deleting first would leave the bot with no source at all if the upload then failed.</p>
       </div>
-      <p class="lead"><strong>Errors</strong> — <code>400</code> for an empty file, one over 30 MB, or a missing name. <code>502</code> when Gemini can't be reached, the API key is unset, or <code>FILE_SEARCH_STORE</code> is empty.</p>
+      <p class="lead"><strong>Errors</strong> — <code>400</code> for an empty file, one over 30 MB, or a missing name. <code>502</code> when Gemini cannot be reached, the API key is unset, or no store is configured.</p>
     </div>
   </article>
 
   <article class="ep" id="kb-del">
     <div class="sig"><span class="v-tag v-del">DELETE</span><span class="path">/admin/api/kb/<em>{document_id}</em></span></div>
     <div class="in">
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Stops the bot grounding on one document.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">A superseded price list is still being quoted, or a document was indexed in error. This is the fix for a name showing up in <code>duplicate_display_names</code>.</p></div>
+      </div>
 <pre>{<span class="k">"document_id"</span>: <span class="s">"tvsthreewheelerskbpdf-qkm24fandaqq"</span>, <span class="k">"deleted"</span>: true}</pre>
       <p class="lead"><code>404</code> if there is no such document <strong>in this store</strong>. The id is reduced to its last path segment and recombined with the configured store, so a full resource name pointing somewhere else cannot be used to reach another store's documents.</p>
     </div>
@@ -816,13 +1243,16 @@ curl -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX-Eng
 <section class="grp">
   <header>
     <h2>Configuration</h2>
-    <p>The live bot configuration. Read it, edit it, write the whole document back — changes reach the worker on its next message, with no restart.</p>
+    <p>Everything about how the bot behaves that is not code: what it is called, which questions it asks, which brochures it sends, and which campaign it promotes. Read it, edit it, write the whole document back — changes reach the bot on its next message, with no restart.</p>
   </header>
 
   <article class="ep" id="config">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/config</span></div>
     <div class="in">
-      <p class="lead">The exact document <code>PUT</code> expects back.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Returns every setting the bot is running on right now, as a single document.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Before any edit — <code>PUT</code> replaces the whole document, so you always start from what is live. Also the fastest way to answer "what is it configured to do at the moment".</p></div>
+      </div>
 <pre>{
   <span class="k">"bot_name"</span>: <span class="s">"TVS Passenger 3W Assistant"</span>,
   <span class="k">"welcome_text"</span>: <span class="s">"Welcome! Choose your language to start …"</span>,
@@ -849,8 +1279,21 @@ curl -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX-Eng
   <span class="k">"intro"</span>: {<span class="k">"English"</span>: {<span class="k">"text"</span>: <span class="s">"Hi! I'm TVS Motor's assistant …"</span>, <span class="k">"audio_url"</span>: null}},
   <span class="k">"entry_sources"</span>: {<span class="k">"whatsapp"</span>: {<span class="k">"welcome_override"</span>: null}}
 }</pre>
-      <div class="callout">
-        <p><strong>Not every field is wired up.</strong> Only <code>bot_name</code>, <code>campaign_text</code>, <code>campaign_starts_on</code>, <code>campaign_ends_on</code>, <code>flow_steps</code>, <code>capture_fields</code> and <code>documents</code> currently affect the WhatsApp bot. <code>welcome_text</code>, <code>intro</code>, <code>languages</code>, <code>voice_policy</code> and <code>entry_sources</code> are stored and returned but not read on the WhatsApp path — that copy is hardcoded.</p>
+      <h4>What each setting controls</h4>
+      <div class="tw"><table class="wrap">
+        <thead><tr><th>Setting</th><th>Controls</th></tr></thead>
+        <tbody>
+          <tr><td><code>bot_name</code></td><td>How the assistant refers to itself</td></tr>
+          <tr><td><code>capture_fields</code></td><td>Which details the bot tries to collect — and, as a direct consequence, the columns in the leads file</td></tr>
+          <tr><td><code>flow_steps</code></td><td>The order of the conversation: greet, ask about the model, mention the campaign, ask timeline, ask location, and so on</td></tr>
+          <tr><td><code>campaign_text</code></td><td>The scheme the bot promotes, in its own words</td></tr>
+          <tr><td><code>campaign_starts_on</code> / <code>_ends_on</code></td><td>When that promotion is live. Both optional; <code>null</code> means open-ended</td></tr>
+          <tr><td><code>documents</code></td><td>Which PDF is sent for which model and fuel type, and which extra documents go out for warranty or servicing questions</td></tr>
+          <tr><td><code>voice_policy</code></td><td>Whether replies include voice notes</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout warn">
+        <p><strong>Not every field is wired up.</strong> Only <code>bot_name</code>, <code>campaign_text</code>, the two campaign dates, <code>flow_steps</code>, <code>capture_fields</code> and <code>documents</code> currently affect the WhatsApp bot. <code>welcome_text</code>, <code>intro</code>, <code>languages</code>, <code>voice_policy</code> and <code>entry_sources</code> are stored and returned faithfully but are <strong>not read</strong> on the WhatsApp path — that copy is still in code. Editing them changes nothing a customer sees.</p>
       </div>
     </div>
   </article>
@@ -858,7 +1301,11 @@ curl -H <span class="s">"$AUTH"</span> -F <span class="s">"file=@King_EV_MAX-Eng
   <article class="ep" id="config-put">
     <div class="sig"><span class="v-tag v-put">PUT</span><span class="path">/admin/api/config</span></div>
     <div class="in">
-      <p class="lead">Replaces the <strong>entire</strong> document. There is no partial update and no version history — always <code>GET</code> first, edit, then <code>PUT</code> back.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Saves the settings. Replaces the <strong>entire</strong> document — there is no partial update.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Changing campaign dates, swapping a brochure URL, adding a capture field, or reordering the conversation.</p></div>
+      </div>
+      <p class="lead">Always read, edit, write back. There is no version history, so a blind write loses whatever another admin saved in the meantime.</p>
 <pre>curl -s -H <span class="s">"$AUTH"</span> <span class="s">"$BASE/admin/api/config"</span> &gt; cfg.json
 <span class="c"># edit cfg.json</span>
 curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Type: application/json"</span> \
@@ -867,7 +1314,7 @@ curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Typ
       <h4>Required fields</h4>
       <p class="lead"><code>bot_name</code> · <code>welcome_text</code> · <code>languages</code> · <code>capture_fields</code> · <code>flow_steps</code> · <code>voice_policy</code> · <code>campaign_text</code> · <code>intro</code></p>
       <h4>Validation rules — each returns 400 naming the field</h4>
-      <div class="tw"><table>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Field</th><th>Rule</th></tr></thead>
         <tbody>
           <tr><td><code>bot_name</code></td><td>Non-empty string. <code>welcome_text</code> and <code>campaign_text</code> must be strings</td></tr>
@@ -875,18 +1322,18 @@ curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Typ
           <tr><td><code>capture_fields</code></td><td>Non-empty; every entry needs a unique non-empty <code>id</code>; <code>required</code> must be boolean</td></tr>
           <tr><td><code>flow_steps</code></td><td>Non-empty list of non-empty strings</td></tr>
           <tr><td><code>voice_policy</code></td><td>One of <code>always</code>, <code>intro_only</code>, <code>never</code>, <code>mirror_user</code></td></tr>
-          <tr><td><code>intro</code></td><td>An entry for <strong>every</strong> language <code>code</code>, each <code>{text: string, audio_url: string|null}</code></td></tr>
+          <tr><td><code>intro</code></td><td>An entry for <strong>every</strong> language <code>code</code>, each <code>{text: string, audio_url: string|null}</code>. Adding a language means adding its <code>intro</code> in the same request</td></tr>
           <tr><td><code>campaign_*_on</code></td><td><code>YYYY-MM-DD</code> or <code>null</code>; the end must not precede the start</td></tr>
           <tr><td><code>documents</code></td><td>Optional. Each product needs a non-empty <code>brochure</code> URL; <code>fuel</code> keys must be <code>cng</code>, <code>lpg</code> or <code>petrol</code>; each <code>support</code> entry needs a <code>url</code> and a <code>kind</code> of <code>warranty</code> or <code>pms</code></td></tr>
         </tbody>
       </table></div>
       <h4>Product documents</h4>
-      <p class="lead"><code>documents</code> replaces what used to be a hardcoded table, so a new model year is a config edit rather than a redeploy. <code>brochure</code> is the default; <code>fuel</code> overrides it when the customer names a fuel type; <code>support</code> PDFs are sent <strong>only</strong> when they ask about warranty or servicing — so asking for "the brochure" delivers one file, not three.</p>
-      <p class="lead">Removing a product stops the bot offering its brochure at all. If the key is absent, or the config can't be read, the built-in defaults apply — a config problem can never stop a customer getting a brochure.</p>
+      <p class="lead"><code>documents</code> replaces what used to be a hardcoded table, so a new model year is a settings edit rather than a software release. <code>brochure</code> is the default; <code>fuel</code> overrides it when the customer names a fuel type; <code>support</code> PDFs are sent <strong>only</strong> when they ask about warranty or servicing — so asking for "the brochure" delivers one file, not three.</p>
+      <p class="lead">Removing a product stops the bot offering its brochure at all. If the key is absent, or the settings cannot be read, built-in defaults apply — a settings problem can never stop a customer getting a brochure.</p>
       <h4>Campaign scheduling</h4>
-      <p class="lead">Both date fields are optional and default to <code>null</code>, meaning open-ended — a config with neither set behaves exactly as it did before scheduling existed. Bounds are <strong>inclusive</strong> and evaluated in <strong>India time</strong>, so a campaign ending <code>2026-10-31</code> stops after that day in IST rather than 5h30m out.</p>
+      <p class="lead">Both dates are optional and default to <code>null</code>, meaning open-ended — a configuration with neither set behaves exactly as it did before scheduling existed. Bounds are <strong>inclusive</strong> and evaluated in <strong>India time</strong>, so a campaign ending <code>2026-10-31</code> stops after that day in IST rather than five and a half hours out.</p>
       <div class="callout">
-        <p>Outside the window the bot doesn't merely omit the offer: the <code>CAMPAIGN</code> section, the "make them aware of the active campaign" goal, and the <code>campaign_awareness</code> flow step are <strong>all</strong> removed from the prompt, and <code>campaign_shown</code> is instructed to stay empty. Leaving any one of them in was enough for the model to keep pitching a scheme that had expired.</p>
+        <p>Outside the window the bot does not merely omit the offer: the campaign section, the "make them aware of the active campaign" goal, and the campaign step are <strong>all</strong> removed from its instructions, and it is told to record no campaign as shown. Leaving any one of them in was enough for it to keep pitching a scheme that had expired.</p>
       </div>
     </div>
   </article>
@@ -894,10 +1341,13 @@ curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Typ
   <article class="ep" id="meta">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/meta</span></div>
     <div class="in">
-      <p class="lead">Allowed values and factory defaults, for building a form.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Returns the allowed values for constrained fields and a complete factory-default settings document.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Building a form — populate the dropdowns from here rather than hard-coding them — or resetting a field to its original value.</p></div>
+      </div>
 <pre>{
   <span class="k">"voice_policies"</span>: [<span class="s">"always"</span>, <span class="s">"intro_only"</span>, <span class="s">"mirror_user"</span>, <span class="s">"never"</span>],
-  <span class="k">"default_config"</span>: { <span class="c">/* a full config document */</span> },
+  <span class="k">"default_config"</span>: { <span class="c">/* a full settings document */</span> },
   <span class="k">"gemini"</span>: {<span class="k">"configured"</span>: true, <span class="k">"source"</span>: <span class="s">"env"</span>,
              <span class="k">"model"</span>: <span class="s">"gemini-3.5-flash-lite"</span>,
              <span class="k">"file_search_store"</span>: <span class="s">"fileSearchStores/…"</span>}
@@ -911,44 +1361,57 @@ curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Typ
 <section class="grp">
   <header>
     <h2>Credentials</h2>
-    <p>The Gemini key the bot answers with. A runtime key set here overrides the one in <code>.env</code>.</p>
+    <p>The Gemini API key the bot composes answers with. A key set through this API is stored on the server and overrides the one baked into the deployment.</p>
   </header>
 
   <article class="ep" id="gemini">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin/api/gemini</span></div>
     <div class="in">
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Reports whether a usable AI key exists and where it came from. The key itself is never returned.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">The bot has stopped answering product questions, or before rotating a key — you need to know whether removing the runtime key would leave anything behind it.</p></div>
+      </div>
 <pre>{
   <span class="k">"configured"</span>: true,
   <span class="k">"source"</span>: <span class="s">"env"</span>,
   <span class="k">"model"</span>: <span class="s">"gemini-3.5-flash-lite"</span>,
   <span class="k">"file_search_store"</span>: <span class="s">"fileSearchStores/tvsmanual-ur9gkjpgkxyh"</span>
 }</pre>
-      <div class="tw"><table>
+      <div class="tw"><table class="wrap">
         <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>configured</code></td><td>Whether a usable client exists. <code>false</code> means <strong>the bot cannot answer</strong></td></tr>
-          <tr><td><code>source</code></td><td><code>runtime</code> (set through this API) · <code>env</code> (from <code>.env</code>) · <code>null</code> (none)</td></tr>
+          <tr><td><code>source</code></td><td><code>runtime</code> (set through this API) · <code>env</code> (from the deployment) · <code>null</code> (none at all)</td></tr>
+          <tr><td><code>model</code></td><td>Which Gemini model is in use</td></tr>
+          <tr><td><code>file_search_store</code></td><td>Which knowledge-base store answers are grounded in</td></tr>
         </tbody>
       </table></div>
-      <p class="lead">The key itself is never returned.</p>
     </div>
   </article>
 
   <article class="ep" id="gemini-post">
     <div class="sig"><span class="v-tag v-post">POST</span><span class="path">/admin/api/gemini</span></div>
     <div class="in">
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Sets or rotates the AI key — testing it against Gemini <em>before</em> saving it.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">A key has expired, hit its quota, or needs rotating, and you would rather not redeploy to change it.</p></div>
+      </div>
 <pre>{<span class="k">"api_key"</span>: <span class="s">"AIza…"</span>}</pre>
-      <p class="lead">The key is <strong>validated with a live Gemini call before it is saved</strong>. On success it's written to <code>data/gemini_key.txt</code> (mode 600) and overrides the <code>.env</code> key; the worker picks it up on its next message. Returns the same shape as <code>GET</code>, with <code>source</code> now <code>runtime</code>.</p>
-      <p class="lead"><strong>Errors</strong> — <code>400</code> on a blank key, or <code>{"detail": "Key rejected: …"}</code> when Gemini refuses it. A rejected key is never saved, so a bad paste cannot take the bot down.</p>
+      <p class="lead">The key is <strong>validated with a live Gemini call before it is saved</strong>. On success it is written to the server with restricted permissions and overrides the deployed key; the bot picks it up on its next message. Returns the same shape as <code>GET</code>, with <code>source</code> now <code>runtime</code>.</p>
+      <p class="lead"><strong>Errors</strong> — <code>400</code> on a blank key, or <code>{"detail": "Key rejected: …"}</code> when Gemini refuses it. A rejected key is never saved, so a mistyped paste cannot take the bot down.</p>
     </div>
   </article>
 
   <article class="ep" id="gemini-del">
     <div class="sig"><span class="v-tag v-del">DELETE</span><span class="path">/admin/api/gemini</span></div>
     <div class="in">
-      <p class="lead">Removes the runtime key and falls back to <code>.env</code>. Returns the same shape as <code>GET</code>.</p>
-      <div class="callout">
-        <p><strong>Check <code>source</code> first.</strong> If <code>GEMINI_API_KEY</code> is empty in <code>.env</code>, this leaves the bot with no key at all and it stops answering.</p>
+      <div class="why">
+        <div><span class="lbl">What it does</span><p class="does">Removes the runtime key, falling back to whatever key the deployment carries.</p></div>
+        <div><span class="lbl">Use it when</span><p class="when">Undoing a temporary key — reverting to the one managed with the deployment.</p></div>
+      </div>
+      <p class="lead">Returns the same shape as <code>GET</code>.</p>
+      <div class="callout warn">
+        <p><strong>Check <code>source</code> first.</strong> If the deployment has no key of its own, this leaves the bot with nothing and it stops answering product questions immediately.</p>
       </div>
     </div>
   </article>
@@ -964,7 +1427,7 @@ curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Typ
 
   <article class="ep">
     <div class="sig"><span class="v-tag v-get">GET</span><span class="path">/admin</span><span class="free">No auth</span></div>
-    <div class="in"><p class="lead">The panel's HTML shell. Carries no secrets.</p></div>
+    <div class="in"><p class="lead">The control panel page itself. Carries no secrets.</p></div>
   </article>
 
   <article class="ep">
@@ -973,34 +1436,61 @@ curl -s -X PUT -H <span class="s">"$AUTH"</span> -H <span class="s">"Content-Typ
   </article>
 </section>
 
+<!-- ============ GLOSSARY ============ -->
+
+<section class="band" id="glossary">
+  <h2>Glossary</h2>
+  <p>Terms that appear in responses and mean something specific here.</p>
+  <dl class="gloss">
+    <div><dt>turn</dt><dd>One message in one direction — either a customer message or a bot reply. The unit every conversation endpoint returns.</dd></div>
+    <div><dt>session</dt><dd>One continuous conversation. State expires after an hour of silence, so <strong>one customer has many sessions over time</strong>. Never treat a session id as a person.</dd></div>
+    <div><dt>mobile</dt><dd>The customer's phone number, exactly as JAM's CRM sends it. The only stable identifier for a person across sessions.</dd></div>
+    <div><dt>lead</dt><dd>A row of details the bot captured during a conversation. Written to a file separate from the transcript, and posted to the CRM.</dd></div>
+    <div><dt>disposition</dt><dd>The outcome the bot assigned to a conversation, posted to JAM's CRM — how the lead is classified for follow-up.</dd></div>
+    <div><dt>capture field</dt><dd>A detail the bot is configured to collect. Adding one changes both what the bot asks and the columns in the leads file.</dd></div>
+    <div><dt>flow step</dt><dd>One stage of the scripted conversation order, e.g. <code>model_interest</code> or <code>timeline</code>.</dd></div>
+    <div><dt>campaign</dt><dd>The scheme the bot promotes, with an optional start and end date. Outside those dates it is stripped from the bot's instructions entirely.</dd></div>
+    <div><dt>knowledge base</dt><dd>The set of documents the bot's product answers are grounded in. Also called the <em>store</em>.</dd></div>
+    <div><dt>display name</dt><dd>A document's human-readable name in the knowledge base. Two documents sharing one is what <code>duplicate_display_names</code> reports.</dd></div>
+    <div><dt>runtime key</dt><dd>A Gemini API key set through this API and stored on the server, overriding the one deployed with the code.</dd></div>
+    <div><dt>kind</dt><dd>Which media directory an upload belongs to — <code>brochures</code> or <code>images</code>. Each has its own file types and size limit.</dd></div>
+    <div><dt>worker</dt><dd>The background process that actually runs conversations. Separate from this API, which only observes it through Redis.</dd></div>
+    <div><dt>queue</dt><dd>Messages accepted but not yet answered. A backlog means slow replies, not lost ones.</dd></div>
+  </dl>
+</section>
+
 <!-- ============ CLIENT NOTES ============ -->
 
 <section class="band" id="gotchas">
   <h2>Building a client: the things that bite</h2>
-  <div class="tw"><table>
+  <p>Each of these is a bug somebody writes before they read the prose explaining it.</p>
+  <div class="tw"><table class="wrap">
     <thead><tr><th>Watch for</th><th>Why</th></tr></thead>
     <tbody>
       <tr><td>Render leads from <code>columns</code></td><td>Admins can add and reorder capture fields at any time; a hard-coded column list goes stale silently</td></tr>
-      <tr><td>Group conversations by <code>mobile</code>, not <code>session</code></td><td>One customer produces a fresh <code>session</code> every time their 1-hour window lapses</td></tr>
-      <tr><td>Encode <code>+</code> as <code>%2B</code></td><td>Otherwise it arrives as a space and the <code>mobile</code> filter matches nothing</td></tr>
+      <tr><td>Group conversations by <code>mobile</code>, not <code>session</code></td><td>One customer produces a fresh <code>session</code> every time their hour of silence lapses</td></tr>
+      <tr><td>Encode <code>+</code> as <code>%2B</code></td><td>Otherwise it arrives as a space and the <code>mobile</code> filter matches nothing — silently, with a <code>200</code> and an empty list</td></tr>
       <tr><td><code>count</code> is the filtered total</td><td>Pagination is <code>Math.ceil(count / limit)</code>, not the length of <code>items</code></td></tr>
-      <tr><td><code>404</code> from review is normal</td><td>Someone else already handled it — don't surface it as a failure</td></tr>
-      <tr><td><code>PUT /config</code> is read-modify-write</td><td>There's no history, so a blind write silently loses whatever another admin just saved</td></tr>
+      <tr><td><code>404</code> from review is normal</td><td>Someone else already handled it — do not surface it as a failure</td></tr>
+      <tr><td><code>PUT /config</code> is read-modify-write</td><td>There is no history, so a blind write silently loses whatever another admin just saved</td></tr>
       <tr><td>KB upload returns before indexing finishes</td><td>Show "indexing" and poll for <code>STATE_ACTIVE</code> rather than reporting success immediately</td></tr>
+      <tr><td>Half the settings document is inert</td><td>An editor that presents every field equally will let someone change <code>welcome_text</code> and wonder why nothing happened</td></tr>
     </tbody>
   </table></div>
+</section>
 
+<section class="band" id="spec">
   <h2>Machine-readable spec</h2>
   <p>The OpenAPI 3.1 document is generated from the routes themselves, so it cannot drift from the code — a test fails if it goes stale. Import it straight into Postman, Insomnia, or a client generator.</p>
 <pre><span class="c"># regenerate after changing a route</span>
 ./venv/bin/python scripts/export_openapi.py</pre>
-  <p>The same spec is served live at <code>$BASE/openapi.json</code>, with interactive views at <code>$BASE/docs</code> (Swagger) and <code>$BASE/redoc</code>. Swagger's <strong>Authorize</strong> button works — the spec declares an <code>HTTPBearer</code> scheme, so paste the token once and every "Try it out" carries it.</p>
+  <p>The same spec is served live at <code>$BASE/openapi.json</code>, with interactive views at <code>$BASE/docs</code> (Swagger) and <code>$BASE/redoc</code>. Swagger's <strong>Authorize</strong> button works — the spec declares a bearer scheme, so paste the token once and every "Try it out" carries it.</p>
 </section>
 
 </main>
 
 <footer>
-  Generated from <code>web.py</code> · 23 endpoints · matches <code>docs/openapi.json</code> and <code>docs/ADMIN_API_REFERENCE.md</code> as at 18 August 2026.
+  Generated from the deployed routes · 23 endpoints · version 1.0.0 · matches <code>docs/openapi.json</code> as at 18 August 2026.
 </footer>
 
 </div>
