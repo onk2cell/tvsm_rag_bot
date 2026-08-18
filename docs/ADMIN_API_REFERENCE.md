@@ -366,6 +366,8 @@ The live bot configuration. This is the exact document `PUT` expects back.
                  "location", "feature_awareness", "documents", "wrap_up"],
   "voice_policy": "intro_only",
   "campaign_text": "ACTIVE CAMPAIGN — \"Vaada\" scheme …",
+  "campaign_starts_on": "2026-08-01",
+  "campaign_ends_on": "2026-10-31",
   "intro": {"English": {"text": "Hi! I'm TVS Motor's assistant …", "audio_url": null}},
   "entry_sources": {"whatsapp": {"welcome_override": null}}
 }
@@ -396,6 +398,11 @@ Returns the saved document on `200`. Changes reach the worker on its next messag
 - `flow_steps` non-empty list of non-empty strings
 - `voice_policy` one of `always`, `intro_only`, `never`, `mirror_user`
 - `intro` must contain an entry for **every** language `code`, each `{text: string, audio_url: string|null}`
+- `campaign_starts_on` / `campaign_ends_on` must be `YYYY-MM-DD` or `null`, and the end must not precede the start
+
+**Campaign scheduling.** Both date fields are optional and default to `null`, which means open-ended — a config with neither set behaves exactly as before scheduling existed, always on. Bounds are **inclusive** and evaluated in **India time**, so a campaign ending `2026-10-31` stops after that day in IST rather than 5h30m out.
+
+Outside the window the bot does not merely omit the offer: the `CAMPAIGN` section, the "make them aware of the active campaign" goal, and the `campaign_awareness` flow step are all removed from the prompt, and `campaign_shown` is instructed to stay empty. Leaving any of them in was enough for the model to keep pitching a scheme that had expired.
 
 Adding a language therefore means adding its `intro` entry in the same request.
 

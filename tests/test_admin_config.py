@@ -97,3 +97,69 @@ def test_csv_columns_order(store):
 def test_validate_config_rejects_non_object():
     with pytest.raises(ValueError, match="must be a JSON object"):
         validate_config([])
+
+
+# --- campaign scheduling ----------------------------------------------------
+
+from datetime import date  # noqa: E402
+
+from admin_config import (  # noqa: E402
+    active_campaign_text,
+    campaign_is_active,
+    default_config,
+    validate_config,
+)
+
+
+def _cfg(**overrides):
+    config = default_config()
+    config.update(overrides)
+    return config
+
+
+def test_campaign_with_no_dates_is_always_on():
+    """Existing configs predate scheduling and must not change behaviour."""
+    config = _cfg()
+    assert campaign_is_active(config, date(2020, 1, 1))
+    assert campaign_is_active(config, date(2099, 1, 1))
+    assert active_campaign_text(config, date(2099, 1, 1)).startswith("ACTIVE CAMPAIGN")
+
+
+def test_campaign_window_is_inclusive_at_both_ends():
+    config = _cfg(campaign_starts_on="2026-08-01", campaign_ends_on="2026-08-31")
+    assert not campaign_is_active(config, date(2026, 7, 31))
+    assert campaign_is_active(config, date(2026, 8, 1))
+    assert campaign_is_active(config, date(2026, 8, 31))
+    assert not campaign_is_active(config, date(2026, 9, 1))
+
+
+def test_expired_campaign_yields_no_text():
+    config = _cfg(campaign_ends_on="2026-08-01")
+    assert active_campaign_text(config, date(2026, 8, 2)) == ""
+
+
+def test_open_ended_bounds():
+    starts_only = _cfg(campaign_starts_on="2026-08-10")
+    assert not campaign_is_active(starts_only, date(2026, 8, 9))
+    assert campaign_is_active(starts_only, date(2130, 1, 1))
+
+    ends_only = _cfg(campaign_ends_on="2026-08-10")
+    assert campaign_is_active(ends_only, date(1990, 1, 1))
+    assert not campaign_is_active(ends_only, date(2026, 8, 11))
+
+
+def test_reject_a_backwards_window():
+    config = _cfg(campaign_starts_on="2026-09-01", campaign_ends_on="2026-08-01")
+    with pytest.raises(ValueError, match="before campaign_starts_on"):
+        validate_config(config)
+
+
+def test_reject_a_malformed_date():
+    with pytest.raises(ValueError, match="YYYY-MM-DD"):
+        validate_config(_cfg(campaign_starts_on="31/08/2026"))
+
+
+def test_blank_string_means_unset():
+    config = _cfg(campaign_starts_on="", campaign_ends_on="")
+    validate_config(config)
+    assert campaign_is_active(config, date(2026, 8, 18))

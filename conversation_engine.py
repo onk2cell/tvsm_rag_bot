@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from admin_config import AdminConfigStore
+from admin_config import AdminConfigStore, active_campaign_text
 from leads import LeadWriter
 
 PROFILE_JSON_RE = re.compile(
@@ -163,6 +163,30 @@ def _step_guidance(
     return FLOW_STEP_GUIDANCE.get(step, step.replace("_", " "))
 
 
+def _campaign_goal(campaign_text: str) -> str:
+    """Only tell the bot to pitch a campaign when one is actually live."""
+    return "make them aware of the active campaign, " if campaign_text.strip() else ""
+
+
+def _campaign_shown_hint(campaign_text: str) -> str:
+    """Naming a past scheme here is enough for the model to mention it, even
+    with no CAMPAIGN section — so the example goes when the campaign does."""
+    if campaign_text.strip():
+        return 'the campaign NAME you mentioned (e.g. "Vaada"), or "" if none.'
+    return 'always "" — no campaign is running, so do not mention one.'
+
+
+def _campaign_block(campaign_text: str) -> str:
+    """The CAMPAIGN section, or nothing at all when no campaign is live.
+
+    Omitted rather than left empty: a bare "CAMPAIGN:" heading invites the
+    model to invent an offer to put under it.
+    """
+    if not campaign_text.strip():
+        return ""
+    return f"\nCAMPAIGN:\n{campaign_text}\n"
+
+
 def build_system_instruction(
     config: dict[str, Any],
     language: str,
@@ -172,20 +196,27 @@ def build_system_instruction(
 ) -> str:
     """Assemble the qualification system prompt from admin config."""
     profile_keys = capture_field_ids(config)
+    campaign = active_campaign_text(config)
     flow_lines = []
-    for i, step in enumerate(config["flow_steps"], start=1):
+    step_number = 0
+    for step in config["flow_steps"]:
+        # With no live campaign there is nothing to be aware of: keeping the
+        # step would have the bot announce a scheme that has expired.
+        if step == "campaign_awareness" and not campaign:
+            continue
+        step_number += 1
         guidance = _step_guidance(
             step,
             product_hint=product_hint,
             confirm_crm_dealer=confirm_crm_dealer,
         )
-        flow_lines.append(f"   {i}. {guidance}")
+        flow_lines.append(f"   {step_number}. {guidance}")
 
     return f"""You are {config["bot_name"]} for TVS PASSENGER three-wheelers \
 (King EV MAX, King Deluxe, King Duramax Plus).
 
 YOUR GOAL is NOT to answer every question in depth. Your goal is to QUALIFY and PROFILE \
-the lead in a short, friendly chat, make them aware of the active campaign, then hand \
+the lead in a short, friendly chat, {_campaign_goal(campaign)}then hand \
 them to the dealership.
 
 RULES
@@ -224,7 +255,7 @@ Field formats:
 - timeline_bucket: one of immediate, <=30d, 30-90d, exploring.
 - feature_awareness: "high" if they already knew the features, else "low".
 - doc_license / doc_permit / doc_badge: "yes", "no", or "unknown".
-- campaign_shown: the campaign NAME you mentioned (e.g. "Vaada"), or "" if none.
+- campaign_shown: {_campaign_shown_hint(campaign)}
 - lead_quality: HOT (near-term timeline + location + >=2/3 docs yes), WARM, or COLD.
 - disposition: one of interested, not_interested, already_purchased_tvs_motor, not_enquired. \
 If they named any TVS passenger model they want, use interested. Ask briefly if unclear \
@@ -233,10 +264,7 @@ If they named any TVS passenger model they want, use interested. Ask briefly if 
 - delivery_location: where they want the vehicle if out of town, else "".
 - purchase_timeline: keep their words; include a DD/MM/YYYY when they gave one.
 Do not output PROFILE_JSON until you are wrapping up.
-
-CAMPAIGN:
-{config["campaign_text"]}
-"""
+{_campaign_block(campaign)}"""
 
 
 def _extract_usage(response: Any) -> tuple[int | None, int | None]:

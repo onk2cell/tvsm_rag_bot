@@ -259,3 +259,42 @@ def test_csv_columns_update_when_config_changes(stores, tmp_path):
     with leads_path.open(encoding="utf-8-sig") as f:
         header = f.readline().strip().split(",")
     assert "custom_field" in header
+
+
+def test_expired_campaign_leaves_the_prompt_entirely(stores):
+    """An expired scheme must not be pitched — and a bare CAMPAIGN heading
+    would invite the model to invent an offer to fill it."""
+    from datetime import date
+
+    import admin_config
+
+    config_store, _, _ = stores
+    cfg = config_store.get()
+    cfg["campaign_ends_on"] = "2020-01-01"
+    config_store.update(cfg)
+
+    system = build_system_instruction(config_store.get(), "English")
+    # The CAMPAIGN *section* is gone. ("CAMPAIGN" still appears in the static
+    # pricing rule, which is fine — it now points at nothing.)
+    assert "CAMPAIGN:" not in system
+    assert "Vaada" not in system
+    # the campaign_awareness step goes too, and numbering stays contiguous
+    assert "current campaign" not in system
+    numbers = [
+        line.strip().split(".")[0]
+        for line in system.splitlines()
+        if line.strip()[:1].isdigit() and line.startswith("   ")
+    ]
+    assert numbers == [str(i) for i in range(1, len(numbers) + 1)]
+
+
+def test_live_campaign_still_reaches_the_prompt(stores):
+    config_store, _, _ = stores
+    cfg = config_store.get()
+    cfg["campaign_starts_on"] = "2020-01-01"
+    cfg["campaign_ends_on"] = "2099-01-01"
+    config_store.update(cfg)
+
+    system = build_system_instruction(config_store.get(), "English")
+    assert "CAMPAIGN:" in system
+    assert "Vaada" in system

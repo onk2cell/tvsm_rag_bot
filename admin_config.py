@@ -9,6 +9,7 @@ import json
 import os
 import threading
 from copy import deepcopy
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +90,61 @@ SYSTEM_CSV_COLUMNS = [
 ]
 
 
+# Campaign windows are inclusive calendar dates read in India time. Evaluating
+# them in UTC would start and end a campaign 5h30m off the day the business
+# means, which around a launch or expiry is a whole evening of wrong pitches.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def today_ist() -> date:
+    return datetime.now(IST).date()
+
+
+def _parse_campaign_date(value: Any, field: str) -> date | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a YYYY-MM-DD string or null")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a YYYY-MM-DD date, got {value!r}") from exc
+
+
+def campaign_window(config: dict[str, Any]) -> tuple[date | None, date | None]:
+    return (
+        _parse_campaign_date(config.get("campaign_starts_on"), "campaign_starts_on"),
+        _parse_campaign_date(config.get("campaign_ends_on"), "campaign_ends_on"),
+    )
+
+
+def campaign_is_active(config: dict[str, Any], on: date | None = None) -> bool:
+    """Is the campaign live on this date? Both bounds are inclusive.
+
+    An unset bound means open-ended, so a config with neither set behaves
+    exactly as it did before scheduling existed: always on.
+    """
+    starts, ends = campaign_window(config)
+    day = on or today_ist()
+    if starts and day < starts:
+        return False
+    if ends and day > ends:
+        return False
+    return True
+
+
+def active_campaign_text(config: dict[str, Any], on: date | None = None) -> str:
+    """The campaign copy if it is live today, otherwise empty.
+
+    Empty means the prompt omits the CAMPAIGN section entirely, so the bot
+    stops pitching a scheme that has expired instead of announcing benefits
+    the dealership will not honour.
+    """
+    if not campaign_is_active(config, on):
+        return ""
+    return config.get("campaign_text") or ""
+
+
 def default_config() -> dict[str, Any]:
     """Return a fresh copy of the TVS passenger 3W default configuration."""
     intro = {lang["code"]: {"text": DEFAULT_INTRO_TEXT, "audio_url": None} for lang in DEFAULT_LANGUAGES}
@@ -103,6 +159,9 @@ def default_config() -> dict[str, Any]:
         "flow_steps": list(DEFAULT_FLOW_STEPS),
         "voice_policy": "intro_only",
         "campaign_text": DEFAULT_CAMPAIGN_TEXT.strip(),
+        "campaign_starts_on": None,   # null = no start bound
+        "campaign_ends_on": None,     # null = never expires
+
         "intro": intro,
         "entry_sources": {
             "web": {"welcome_override": None},
@@ -193,6 +252,12 @@ def validate_config(config: dict[str, Any]) -> None:
         audio = entry.get("audio_url")
         if audio is not None and not isinstance(audio, str):
             raise ValueError(f"intro[{code}].audio_url must be a string or null")
+
+    starts, ends = campaign_window(config)
+    if starts and ends and ends < starts:
+        raise ValueError(
+            f"campaign_ends_on ({ends}) is before campaign_starts_on ({starts})"
+        )
 
     entry_sources = config.get("entry_sources")
     if entry_sources is not None:
