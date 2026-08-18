@@ -68,6 +68,13 @@ CLIENT_MEDIA_BASE_URL = os.environ.get(
 # --- Admin ---
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")    # empty = admin endpoints disabled
 ADMIN_CONFIG_PATH = os.environ.get("ADMIN_CONFIG_PATH", "data/admin_config.json")
+# Queue depth above which /admin/api/status reports "degraded". Tune this once
+# real peak volume is known — a threshold guessed too low turns the status page
+# permanently amber, which is how status pages get ignored.
+ADMIN_QUEUE_WARN_DEPTH = int(os.environ.get("ADMIN_QUEUE_WARN_DEPTH", "20"))
+# How long a live JAM probe result is reused, so polling the status endpoint
+# cannot become standing traffic against the client's production CRM.
+ADMIN_PROBE_CACHE_SEC = int(os.environ.get("ADMIN_PROBE_CACHE_SEC", "60"))
 
 # --- Redis / behaviour ---
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")

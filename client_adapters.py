@@ -17,6 +17,7 @@ from client_language import (
     language_from_remark,
 )
 from client_processing import ClientSession, Customer
+from session_keys import client_session_key
 
 
 class CustomerLookupError(RuntimeError):
@@ -626,4 +627,4 @@ class RedisClientState:
 
     @staticmethod
     def _key(mobile: str) -> str:
-        return f"client:session:{mobile}"
+        return client_session_key(mobile)

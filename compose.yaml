@@ -49,6 +49,12 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       CLIENT_ENV: production
+      # /admin/api/status inspects the worker's queue and probes the same JAM
+      # endpoints the worker calls, so these must match client-worker exactly.
+      # Without them the status page would watch an empty "default" queue and
+      # report JAM as "not configured".
+      CLIENT_QUEUE_NAME: client
+      CLIENT_CRM_CUSTOMER_URL: https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/customer
     volumes:
       - ./data:/app/data
     ports:
