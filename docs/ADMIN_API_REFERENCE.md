@@ -49,7 +49,17 @@ There is one shared token. No roles, no per-user access.
 | 16 | `POST` | `/admin/api/gemini` | Set / rotate the key |
 | 17 | `DELETE` | `/admin/api/gemini` | Clear the runtime key |
 
-Interactive versions of all of these are at `$BASE/docs` (Swagger) and `$BASE/redoc`. The raw spec is `$BASE/openapi.json`.
+### Machine-readable spec
+
+The OpenAPI 3.1 document is committed at [`docs/openapi.json`](openapi.json) — generated from the routes themselves, so it cannot drift from the code. A test fails if it goes stale.
+
+```bash
+./venv/bin/python scripts/export_openapi.py   # regenerate after changing a route
+```
+
+Import that file straight into Postman, Insomnia, or a client generator. The same spec is served live at `$BASE/openapi.json`, with interactive views at `$BASE/docs` (Swagger) and `$BASE/redoc`.
+
+Swagger's **Authorize** button works: the spec declares an `HTTPBearer` scheme, so paste the `ADMIN_TOKEN` once and every "Try it out" carries it.
 
 ---
 

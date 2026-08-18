@@ -17,11 +17,13 @@ the browser prompts for the token and sends it as ``Authorization: Bearer``.
 """
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 import config
 import rag
@@ -37,6 +39,42 @@ from leads import read_leads, read_leads_csv
 from session_keys import client_session_key
 
 _PAGE_PATH = Path(__file__).with_name("assets") / "admin.html"
+
+API_VERSION = "1.0.0"
+
+API_DESCRIPTION = """\
+Every endpoint except the health probe and the panel HTML requires
+`Authorization: Bearer <ADMIN_TOKEN>`. One shared token, no roles.
+
+If `ADMIN_TOKEN` is unset on the server every admin endpoint returns **503** —
+the panel is disabled, not open.
+
+Two things to know before building a client:
+
+* **Conversations group by `mobile`, not `session`.** A returning customer gets
+  a fresh `session` id whenever their hour-long window lapses. Turns recorded
+  before the `mobile` column shipped have `mobile: ""` and cannot be found by
+  number; there is no backfill.
+* **`PUT /admin/api/config` replaces the whole document.** There is no partial
+  update and no version history, so read, edit, then write back.
+"""
+
+API_TAGS = [
+    {"name": "operations", "description": "Is the bot working, and unstick customers."},
+    {"name": "conversations", "description": "What the bot and customers said."},
+    {"name": "leads", "description": "Qualified leads captured for the dealership."},
+    {"name": "configuration", "description": "What the bot says and asks."},
+    {"name": "credentials", "description": "The Gemini API key backing the bot."},
+]
+
+_UNAUTHORIZED = {
+    401: {"description": "Missing or invalid admin token."},
+    503: {"description": "Admin panel disabled (ADMIN_TOKEN unset)."},
+}
+
+# auto_error=False so a missing header reaches require_admin, which returns the
+# same 401 body as a wrong one — and 503 when the panel is switched off.
+_bearer_scheme = HTTPBearer(auto_error=False, description="ADMIN_TOKEN")
 
 
 def _default_redis_factory() -> Any:
@@ -55,7 +93,13 @@ def create_admin_app(
     interaction_store: Any = None,
     leads_path: Path | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="TVS Bot Admin")
+    app = FastAPI(
+        title="TVS Bot Admin",
+        version=API_VERSION,
+        summary="Configure the TVS WhatsApp bot and inspect what it is doing.",
+        description=API_DESCRIPTION,
+        openapi_tags=API_TAGS,
+    )
 
     def interactions() -> Any:
         """Resolved lazily: opening the DB at import time would create the
@@ -80,15 +124,17 @@ def create_admin_app(
     )
 
     def require_admin(
-        authorization: str | None = Header(default=None),
+        credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     ) -> None:
         if not admin_token:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Admin panel is disabled (ADMIN_TOKEN is not set).",
             )
-        expected = f"Bearer {admin_token}"
-        if not authorization or authorization != expected:
+        # compare_digest so a wrong token cannot be narrowed down by timing.
+        if credentials is None or not secrets.compare_digest(
+            credentials.credentials, admin_token
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or missing admin token.",
@@ -113,7 +159,7 @@ def create_admin_app(
     def root() -> RedirectResponse:
         return RedirectResponse(url="/admin")
 
-    @app.get("/admin/health")
+    @app.get("/admin/health", tags=["operations"], summary="Liveness probe")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
@@ -121,7 +167,7 @@ def create_admin_app(
     def admin_page() -> HTMLResponse:
         return HTMLResponse(_PAGE_PATH.read_text(encoding="utf-8"))
 
-    @app.get("/admin/api/meta")
+    @app.get("/admin/api/meta", tags=["configuration"], summary="Allowed values and factory defaults", responses=_UNAUTHORIZED)
     def meta(_: None = Depends(require_admin)) -> dict[str, Any]:
         return {
             "voice_policies": sorted(VOICE_POLICIES),
@@ -129,11 +175,11 @@ def create_admin_app(
             "gemini": _gemini_status(),
         }
 
-    @app.get("/admin/api/config")
+    @app.get("/admin/api/config", tags=["configuration"], summary="Read the live bot configuration", responses=_UNAUTHORIZED)
     def read_config(_: None = Depends(require_admin)) -> dict[str, Any]:
         return config_store.get()
 
-    @app.put("/admin/api/config")
+    @app.put("/admin/api/config", tags=["configuration"], summary="Replace the bot configuration", responses={**_UNAUTHORIZED, 400: {"description": "Validation failed; detail names the field."}})
     def write_config(
         payload: dict[str, Any],
         _: None = Depends(require_admin),
@@ -145,12 +191,12 @@ def create_admin_app(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
 
-    @app.get("/admin/api/status")
+    @app.get("/admin/api/status", tags=["operations"], summary="Is the bot working?", responses=_UNAUTHORIZED)
     def operational_status(_: None = Depends(require_admin)) -> dict[str, Any]:
         """Is the bot working? One verdict plus the six checks behind it."""
         return reporter.snapshot()
 
-    @app.post("/admin/api/session/reset")
+    @app.post("/admin/api/session/reset", tags=["operations"], summary="Hard-reset one customer's session", responses={**_UNAUTHORIZED, 400: {"description": "mobile missing or blank."}, 503: {"description": "Redis unavailable."}})
     def reset_session(
         payload: dict[str, Any],
         _: None = Depends(require_admin),
@@ -179,7 +225,7 @@ def create_admin_app(
 
     # --- conversations -----------------------------------------------------
 
-    @app.get("/admin/api/interactions")
+    @app.get("/admin/api/interactions", tags=["conversations"], summary="Search conversation turns", responses=_UNAUTHORIZED)
     def list_interactions(
         mobile: str | None = None,
         session: str | None = None,
@@ -205,7 +251,7 @@ def create_admin_app(
             offset=offset,
         )
 
-    @app.get("/admin/api/interactions/export.csv")
+    @app.get("/admin/api/interactions/export.csv", tags=["conversations"], summary="Download conversations as CSV", response_class=PlainTextResponse, responses=_UNAUTHORIZED)
     def export_interactions(
         mobile: str | None = None,
         session: str | None = None,
@@ -233,7 +279,7 @@ def create_admin_app(
             },
         )
 
-    @app.get("/admin/api/interactions/{session_id}")
+    @app.get("/admin/api/interactions/{session_id}", tags=["conversations"], summary="Read one full transcript", responses={**_UNAUTHORIZED, 404: {"description": "No turns for that session."}})
     def read_conversation(
         session_id: str,
         _: None = Depends(require_admin),
@@ -247,7 +293,7 @@ def create_admin_app(
             )
         return {"session": session_id, **result}
 
-    @app.post("/admin/api/interactions/{interaction_id}/review")
+    @app.post("/admin/api/interactions/{interaction_id}/review", tags=["conversations"], summary="Mark a flagged turn reviewed", responses={**_UNAUTHORIZED, 404: {"description": "Not awaiting review — already handled, or never flagged."}})
     def review_interaction(
         interaction_id: int,
         payload: dict[str, Any] | None = None,
@@ -266,7 +312,7 @@ def create_admin_app(
 
     # --- leads -------------------------------------------------------------
 
-    @app.get("/admin/api/leads")
+    @app.get("/admin/api/leads", tags=["leads"], summary="List captured leads, newest first", responses=_UNAUTHORIZED)
     def list_leads(
         search: str = "",
         limit: int = 100,
@@ -282,7 +328,7 @@ def create_admin_app(
             offset=offset,
         )
 
-    @app.get("/admin/api/leads/export.csv")
+    @app.get("/admin/api/leads/export.csv", tags=["leads"], summary="Download all leads as CSV", response_class=PlainTextResponse, responses=_UNAUTHORIZED)
     def export_leads(_: None = Depends(require_admin)) -> PlainTextResponse:
         return PlainTextResponse(
             read_leads_csv(leads_file()),
@@ -290,11 +336,11 @@ def create_admin_app(
             headers={"Content-Disposition": 'attachment; filename="leads.csv"'},
         )
 
-    @app.get("/admin/api/gemini")
+    @app.get("/admin/api/gemini", tags=["credentials"], summary="Gemini key state", responses=_UNAUTHORIZED)
     def gemini_status(_: None = Depends(require_admin)) -> dict[str, Any]:
         return _gemini_status()
 
-    @app.post("/admin/api/gemini")
+    @app.post("/admin/api/gemini", tags=["credentials"], summary="Set or rotate the Gemini key", responses={**_UNAUTHORIZED, 400: {"description": "Key missing, or rejected by Gemini."}})
     def set_gemini_key(
         payload: dict[str, Any],
         _: None = Depends(require_admin),
@@ -314,7 +360,7 @@ def create_admin_app(
             ) from exc
         return _gemini_status()
 
-    @app.delete("/admin/api/gemini")
+    @app.delete("/admin/api/gemini", tags=["credentials"], summary="Clear the runtime Gemini key", responses=_UNAUTHORIZED)
     def clear_gemini_key(_: None = Depends(require_admin)) -> dict[str, Any]:
         key_manager.clear_persisted_key()
         return _gemini_status()

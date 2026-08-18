@@ -724,3 +724,46 @@ def test_leads_endpoint_handles_a_missing_file(tmp_path):
     client = TestClient(_app(tmp_path, leads_path=tmp_path / "nope.csv"))
     body = client.get("/admin/api/leads", headers=_auth()).json()
     assert body == {"count": 0, "columns": body["columns"], "items": []}
+
+
+# --- OpenAPI contract -------------------------------------------------------
+
+
+def test_spec_declares_bearer_auth_so_swagger_can_authorize(tmp_path):
+    spec = _app(tmp_path).openapi()
+    assert "HTTPBearer" in spec["components"]["securitySchemes"]
+    assert spec["info"]["title"] == "TVS Bot Admin"
+    assert {t["name"] for t in spec["tags"]} == {
+        "operations",
+        "conversations",
+        "leads",
+        "configuration",
+        "credentials",
+    }
+
+
+def test_spec_marks_health_public_and_everything_else_protected(tmp_path):
+    paths = _app(tmp_path).openapi()["paths"]
+    for path, operations in paths.items():
+        for method, operation in operations.items():
+            secured = bool(operation.get("security"))
+            if path == "/admin/health":
+                assert not secured, "health must stay probe-friendly"
+            else:
+                assert secured, f"{method.upper()} {path} is missing auth in the spec"
+
+
+def test_committed_openapi_json_matches_the_code(tmp_path):
+    """docs/openapi.json is the published contract — re-export it when routes
+    change: ./venv/bin/python scripts/export_openapi.py"""
+    import json
+    import pathlib
+
+    committed = pathlib.Path(__file__).resolve().parent.parent / "docs" / "openapi.json"
+    assert committed.exists(), "run scripts/export_openapi.py"
+
+    from scripts.export_openapi import build_spec
+
+    assert json.loads(committed.read_text(encoding="utf-8")) == build_spec(), (
+        "docs/openapi.json is stale — re-run scripts/export_openapi.py"
+    )

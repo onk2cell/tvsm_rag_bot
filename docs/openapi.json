@@ -1,0 +1,1037 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TVS Bot Admin",
+    "summary": "Configure the TVS WhatsApp bot and inspect what it is doing.",
+    "description": "Every endpoint except the health probe and the panel HTML requires\n`Authorization: Bearer <ADMIN_TOKEN>`. One shared token, no roles.\n\nIf `ADMIN_TOKEN` is unset on the server every admin endpoint returns **503** —\nthe panel is disabled, not open.\n\nTwo things to know before building a client:\n\n* **Conversations group by `mobile`, not `session`.** A returning customer gets\n  a fresh `session` id whenever their hour-long window lapses. Turns recorded\n  before the `mobile` column shipped have `mobile: \"\"` and cannot be found by\n  number; there is no backfill.\n* **`PUT /admin/api/config` replaces the whole document.** There is no partial\n  update and no version history, so read, edit, then write back.\n",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/admin/health": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Liveness probe",
+        "operationId": "health_admin_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Admin Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/meta": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Allowed values and factory defaults",
+        "operationId": "meta_admin_api_meta_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Meta Admin Api Meta Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/config": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Read the live bot configuration",
+        "operationId": "read_config_admin_api_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Read Config Admin Api Config Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Replace the bot configuration",
+        "operationId": "write_config_admin_api_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Write Config Admin Api Config Put"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "400": {
+            "description": "Validation failed; detail names the field."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/status": {
+      "get": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Is the bot working?",
+        "description": "Is the bot working? One verdict plus the six checks behind it.",
+        "operationId": "operational_status_admin_api_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Operational Status Admin Api Status Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/session/reset": {
+      "post": {
+        "tags": [
+          "operations"
+        ],
+        "summary": "Hard-reset one customer's session",
+        "description": "Hard-reset one customer: their next message starts from scratch.\n\nDeduplication keys are deliberately untouched — they are keyed per\nmessage, not per customer, and any new inbound message carries a\nfresh id.",
+        "operationId": "reset_session_admin_api_session_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Reset Session Admin Api Session Reset Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Redis unavailable."
+          },
+          "400": {
+            "description": "mobile missing or blank."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/interactions": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Search conversation turns",
+        "description": "Search conversation turns. `mobile` is the support entry point.",
+        "operationId": "list_interactions_admin_api_interactions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mobile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mobile"
+            }
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session"
+            }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "needs_review",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Needs Review"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Interactions Admin Api Interactions Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/interactions/export.csv": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Download conversations as CSV",
+        "operationId": "export_interactions_admin_api_interactions_export_csv_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mobile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Mobile"
+            }
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session"
+            }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Language"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "needs_review",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Needs Review"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/interactions/{session_id}": {
+      "get": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Read one full transcript",
+        "description": "Whole transcript for one conversation, oldest turn first.",
+        "operationId": "read_conversation_admin_api_interactions__session_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Read Conversation Admin Api Interactions  Session Id  Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "404": {
+            "description": "No turns for that session."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/interactions/{interaction_id}/review": {
+      "post": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Mark a flagged turn reviewed",
+        "operationId": "review_interaction_admin_api_interactions__interaction_id__review_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interaction_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Interaction Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Review Interaction Admin Api Interactions  Interaction Id  Review Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "404": {
+            "description": "Not awaiting review — already handled, or never flagged."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/leads": {
+      "get": {
+        "tags": [
+          "leads"
+        ],
+        "summary": "List captured leads, newest first",
+        "description": "Captured leads, newest first. `search` matches any column.",
+        "operationId": "list_leads_admin_api_leads_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Leads Admin Api Leads Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/leads/export.csv": {
+      "get": {
+        "tags": [
+          "leads"
+        ],
+        "summary": "Download all leads as CSV",
+        "operationId": "export_leads_admin_api_leads_export_csv_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/gemini": {
+      "get": {
+        "tags": [
+          "credentials"
+        ],
+        "summary": "Gemini key state",
+        "operationId": "gemini_status_admin_api_gemini_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Gemini Status Admin Api Gemini Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "credentials"
+        ],
+        "summary": "Set or rotate the Gemini key",
+        "operationId": "set_gemini_key_admin_api_gemini_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Set Gemini Key Admin Api Gemini Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "400": {
+            "description": "Key missing, or rejected by Gemini."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "credentials"
+        ],
+        "summary": "Clear the runtime Gemini key",
+        "operationId": "clear_gemini_key_admin_api_gemini_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Clear Gemini Key Admin Api Gemini Delete"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "ADMIN_TOKEN",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "operations",
+      "description": "Is the bot working, and unstick customers."
+    },
+    {
+      "name": "conversations",
+      "description": "What the bot and customers said."
+    },
+    {
+      "name": "leads",
+      "description": "Qualified leads captured for the dealership."
+    },
+    {
+      "name": "configuration",
+      "description": "What the bot says and asks."
+    },
+    {
+      "name": "credentials",
+      "description": "The Gemini API key backing the bot."
+    }
+  ]
+}
