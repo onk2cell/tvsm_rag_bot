@@ -238,7 +238,9 @@ class KnowledgeBase:
             # Only after the new copy is safely in: deleting first would leave
             # the bot with no source at all if the upload then failed.
             try:
-                client.file_search_stores.documents.delete(name=stale.name)
+                client.file_search_stores.documents.delete(
+                    name=stale.name, config={"force": True}
+                )
                 replaced.append(stale.document_id)
             except Exception:
                 # The new document is live; a failed cleanup is a duplicate to
@@ -271,7 +273,13 @@ class KnowledgeBase:
         if target is None:
             return False
         try:
-            self._client().file_search_stores.documents.delete(name=target.name)
+            # force=True because an indexed document owns Chunks, and the API
+            # refuses to delete a non-empty one ("Cannot delete non-empty
+            # Document", FAILED_PRECONDITION). Every document we list here has
+            # been indexed, so the unforced call can only ever fail.
+            self._client().file_search_stores.documents.delete(
+                name=target.name, config={"force": True}
+            )
         except Exception as exc:
             raise KnowledgeBaseError(f"Could not delete {wanted}: {exc}") from exc
         return True

@@ -39,6 +39,7 @@ class FakeClient:
         self._list_raises = list_raises
         self._delete_raises = delete_raises
         self.deleted = []
+        self.delete_configs = []
         outer = self
 
         class _Documents:
@@ -48,9 +49,18 @@ class FakeClient:
                 assert parent == STORE
                 return iter(outer._documents)
 
-            def delete(self, *, name):
+            def delete(self, *, name, config=None):
+                outer.delete_configs.append(config)
                 if outer._delete_raises:
                     raise outer._delete_raises
+                # The real API refuses an unforced delete of an indexed
+                # document ("Cannot delete non-empty Document"), so the fake
+                # refuses it too — an earlier version of this fake accepted
+                # one, and the endpoint 502'd in production while green here.
+                if not (config or {}).get("force"):
+                    raise RuntimeError(
+                        "400 FAILED_PRECONDITION. Cannot delete non-empty Document"
+                    )
                 outer.deleted.append(name)
                 outer._documents = [d for d in outer._documents if d.name != name]
 
@@ -121,6 +131,18 @@ def test_delete_removes_the_stale_copy():
     assert kb.delete("old") is True
     assert client.deleted == [f"{STORE}/documents/old"]
     assert kb.summary()["document_count"] == 1
+
+
+def test_delete_forces_because_an_indexed_document_is_never_empty():
+    """Every document here owns Chunks, so an unforced delete always fails.
+
+    Without ``force`` the API answers 400 FAILED_PRECONDITION ("Cannot delete
+    non-empty Document") and the admin endpoint turns that into a 502 — which
+    is exactly what it did in production.
+    """
+    kb, client = _kb([FakeDocument("a1", "price_list.pdf")])
+    assert kb.delete("a1") is True
+    assert client.delete_configs == [{"force": True}]
 
 
 def test_delete_reports_a_document_that_is_not_there():
