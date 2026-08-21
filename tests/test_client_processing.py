@@ -225,6 +225,21 @@ def _processor(**overrides):
     return ClientMessageProcessor(**dependencies), dependencies
 
 
+def _classifiers(**overrides):
+    """A classifier bundle with specific LLM-branch answers pinned.
+
+    conftest already routes every classifier through its real regex fast
+    path, so those are exercised for real. This overrides only what the model
+    would have decided, letting a test assert an LLM-decided branch without
+    depending on a live API key or on what the model happens to answer.
+    """
+    from dataclasses import replace
+
+    from client_processing import default_classifiers
+
+    return replace(default_classifiers(), **overrides)
+
+
 def _event(**overrides):
     event = {
         "message_id": "incoming-1",
@@ -1066,7 +1081,6 @@ def test_callback_retry_reuses_pending_reply_without_regenerating():
     assert sender.calls[0]["text"] == sender.calls[1]["text"]
 
 
-@pytest.mark.live
 def test_pincode_message_asks_nearest_dealer_confirm_once():
     dealer = Dealer(
         dealer_code="11689",
@@ -1081,7 +1095,12 @@ def test_pincode_message_asks_nearest_dealer_confirm_once():
         distance_km=2.5,
     )
     directory = FakeDealerDirectory(dealer)
-    processor, deps = _processor(dealer_directory=directory)
+    processor, deps = _processor(
+        dealer_directory=directory,
+        # "yes please" falls past the affirmative regex, so consent is an
+        # LLM decision; pin it rather than calling the real model.
+        classifiers=_classifiers(share_consent=lambda _message: "yes"),
+    )
     deps["engine"].reply = "Thanks, we noted your pincode."
 
     processor.process(_event(content="My pincode is 411001"))
@@ -1495,7 +1514,6 @@ def test_location_sets_dealer_and_syncs_dispose():
     assert dispose.calls[0]["product_name"] == "King EV MAX"
 
 
-@pytest.mark.live
 def test_crm_dealer_confirm_yes_sets_last_dealer_code_and_skips_nearest():
     crm_dealer = Dealer(
         dealer_code="11982",
@@ -1519,7 +1537,15 @@ def test_crm_dealer_confirm_yes_sets_last_dealer_code_and_skips_nearest():
         longitude=73.85,
     )
     directory = FakeDealerDirectory(nearest, by_code={"11982": crm_dealer})
-    processor, deps = _processor(dealer_directory=directory)
+    processor, deps = _processor(
+        dealer_directory=directory,
+        # The Marathi affirmatives here ("हो, दाखवा", "होय") fall past the
+        # regexes, so both decisions are the model's; pin them.
+        classifiers=_classifiers(
+            share_consent=lambda _message: "yes",
+            dealer_confirm=lambda _message: "yes",
+        ),
+    )
     deps["directory"].customer = Customer(
         "307569",
         "Ajit",
@@ -1565,7 +1591,10 @@ def test_dealer_confirm_natural_phrasing_resolves_via_classifier(monkeypatch):
     (Hinglish "yes, I have this dealership") doesn't match the strict
     single-word _is_affirmative regex, so it used to re-attach the same
     dealer card forever instead of resolving as a confirmation."""
-    from bot.graph import DealerConfirmClassification
+    from bot.graph import (
+        DealerConfirmClassification,
+        classify_dealer_confirm_reply,
+    )
 
     class _FakeYesLLM:
         def with_structured_output(self, schema):
@@ -1575,6 +1604,13 @@ def test_dealer_confirm_natural_phrasing_resolves_via_classifier(monkeypatch):
             return DealerConfirmClassification(result="yes")
 
     monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": _FakeYesLLM())
+    # conftest stubs the classifier out to keep the suite hermetic, but the
+    # point of THIS test is the graph's LLM branch — and _FakeYesLLM already
+    # makes it deterministic. Put the real one back so the call reaches it.
+    monkeypatch.setattr(
+        "client_processing.classify_dealer_confirm_reply",
+        classify_dealer_confirm_reply,
+    )
 
     crm_dealer = Dealer(
         dealer_code="15188",

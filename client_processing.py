@@ -322,6 +322,47 @@ class DocumentRecognizer(Protocol):
     def recognize(self, data: bytes, mime_type: str) -> DocumentRecognition: ...
 
 
+@dataclass(frozen=True)
+class Classifiers:
+    """The bot.graph guard-clause classifiers, as one injectable dependency.
+
+    These used to be called as module-level functions, so a test whose input
+    fell past a classifier's regex fast path reached the real Gemini API with
+    no seam to stub it. Passing them in lets a caller supply deterministic
+    answers, so every guard-clause branch can be exercised hermetically.
+    """
+
+    still_interested: Callable[[str], bool]
+    dealer_confirm: Callable[[str], str]
+    brochure_offer: Callable[[str], str]
+    brochure_request: Callable[[str], bool]
+    product_info_request: Callable[[str], bool]
+    share_consent: Callable[[str], str]
+    language_switch: Callable[[str], str]
+    location_reply: Callable[[str, str], str]
+
+
+def default_classifiers() -> Classifiers:
+    """The real classifiers, resolved at call time.
+
+    Deliberately a function rather than dataclass field defaults: field
+    defaults are bound when the class is created, which would silently ignore
+    a test that monkeypatches these names on this module (tests/conftest.py
+    does exactly that). Looking them up here means a patch applied before the
+    processor is built is still honoured.
+    """
+    return Classifiers(
+        still_interested=classify_still_interested_reply,
+        dealer_confirm=classify_dealer_confirm_reply,
+        brochure_offer=classify_brochure_offer_reply,
+        brochure_request=classify_brochure_request,
+        product_info_request=classify_product_info_request,
+        share_consent=classify_share_consent_reply,
+        language_switch=classify_language_switch,
+        location_reply=classify_location_reply,
+    )
+
+
 class ClientMessageProcessor:
     """Process one accepted event and deliver its customer-facing reply."""
 
@@ -341,6 +382,7 @@ class ClientMessageProcessor:
         dispose_client: DisposeClient | None = None,
         sleep: Callable[[float], None] = time.sleep,
         retry_wait: float = 30,
+        classifiers: Classifiers | None = None,
     ):
         self._state = state
         self._directory = directory
@@ -355,6 +397,7 @@ class ClientMessageProcessor:
         self._dispose_client = dispose_client
         self._sleep = sleep
         self._retry_wait = retry_wait
+        self._classifiers = classifiers or default_classifiers()
 
     def process(self, event: dict) -> None:
         started = perf_counter()
@@ -725,7 +768,7 @@ class ClientMessageProcessor:
         message, brochure_offer_product = self._prepare_brochure_info_context(
             session, message, user_message=raw_user_text
         )
-        brochure_requested = classify_brochure_request(raw_user_text)
+        brochure_requested = self._classifiers.brochure_request(raw_user_text)
         message, brochure_needs_product = self._prepare_brochure_request_context(
             session,
             message,
@@ -1073,7 +1116,7 @@ class ClientMessageProcessor:
         """
         if session.awaiting_brochure_offer:
             return message, ""
-        if wants_product_brochure(user_message) or not classify_product_info_request(
+        if wants_product_brochure(user_message) or not self._classifiers.product_info_request(
             user_message
         ):
             return message, ""
@@ -1121,7 +1164,7 @@ class ClientMessageProcessor:
         session.awaiting_brochure_offer = False
         product = session.pending_brochure_product
         session.pending_brochure_product = ""
-        decision = classify_brochure_offer_reply(message)
+        decision = self._classifiers.brochure_offer(message)
         if decision == "yes":
             _, hints = self._resolve_brochure_product(session, message)
             sent = self._send_brochure_pack(
@@ -1231,7 +1274,7 @@ class ClientMessageProcessor:
             or self._returning_product(session.customer)
             or "TVS King"
         )
-        if not classify_still_interested_reply(user_message):
+        if not self._classifiers.still_interested(user_message):
             session.awaiting_still_interested = False
             if _is_still_interested_yes(user_message):
                 note = f"Customer confirmed they are still interested in {product}."
@@ -1481,7 +1524,7 @@ class ClientMessageProcessor:
         if not session.awaiting_dealer_confirm:
             return None
         customer = session.customer
-        confirm_result = classify_dealer_confirm_reply(message)
+        confirm_result = self._classifiers.dealer_confirm(message)
         if confirm_result == "yes":
             session.awaiting_dealer_confirm = False
             session.dealer_confirmed = True
@@ -1543,7 +1586,7 @@ class ClientMessageProcessor:
         """
         if session.dealer_confirmed or session.awaiting_dealer_confirm:
             return "other"
-        return classify_location_reply(
+        return self._classifiers.location_reply(
             user_message, self._last_bot_message(session)
         )
 
@@ -1658,7 +1701,7 @@ class ClientMessageProcessor:
         session.awaiting_dealer_share_consent = False
         code = session.pending_dealer_share_code
         session.pending_dealer_share_code = ""
-        decision = classify_share_consent_reply(message)
+        decision = self._classifiers.share_consent(message)
         if decision == "yes":
             session.last_dealer_code = code or session.last_dealer_code
             session.awaiting_dealer_confirm = True
@@ -2202,7 +2245,7 @@ class ClientMessageProcessor:
         in a voice note got one English reply and then Marathi again,
         because only typed text ever reached this path (bug 010802).
         """
-        switched = classify_language_switch(text or "")
+        switched = self._classifiers.language_switch(text or "")
         if (
             switched
             and switched in SUPPORTED_LANGUAGES
