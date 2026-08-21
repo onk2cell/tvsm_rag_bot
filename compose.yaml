@@ -183,6 +183,13 @@ services:
       # Real JAM dispose (from host .env) — lookup/replies stay on mock-client.
       CLIENT_DISPOSE_URL: ${CLIENT_DISPOSE_URL:-https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/dispose}
       CLIENT_REPLY_API_KEY: ${CLIENT_REPLY_API_KEY:-}
+      # Which client this lab run is. Its own config file, so trying a seed
+      # never clobbers the config the local client stack is using:
+      #   ADMIN_CONFIG_SEED=seeds/acme.json ./test_mock_stack.sh
+      # Delete data/lab_admin_config.json to re-seed — the store only seeds
+      # when the file is absent.
+      ADMIN_CONFIG_PATH: ${ADMIN_CONFIG_PATH:-data/lab_admin_config.json}
+      ADMIN_CONFIG_SEED: ${ADMIN_CONFIG_SEED:-seeds/tvs.json}
     volumes:
       - ./data:/app/data
     depends_on:
