@@ -163,8 +163,14 @@ def _documents_config(monkeypatch, documents):
     )
 
 
-def test_defaults_are_used_when_config_has_no_documents(monkeypatch):
-    """An existing config predates this feature and must behave as before."""
+def test_no_documents_configured_means_no_brochure(monkeypatch):
+    """A bot with no documents configured sends nothing.
+
+    This used to fall back to the TVS brochures, which on any other client's
+    stack meant sending that client's customers a TVS King PDF. Sending
+    nothing is the safe answer; client_processing turns it into "the team
+    will share it" rather than a silent non-delivery.
+    """
     import client_media_assets
 
     class EmptyStore:
@@ -174,8 +180,8 @@ def test_defaults_are_used_when_config_has_no_documents(monkeypatch):
     monkeypatch.setattr(
         client_media_assets.admin_config, "get_store", lambda: EmptyStore()
     )
-    url = client_media_assets.product_brochure_url("King EV MAX")
-    assert url.endswith("King_EV_MAX-English.pdf")
+    assert client_media_assets.product_brochure_url("King EV MAX") == ""
+    assert client_media_assets.configured_products() == []
 
 
 def test_a_new_model_year_needs_only_a_config_edit(monkeypatch):
@@ -253,17 +259,24 @@ def test_a_product_removed_from_config_sends_nothing(monkeypatch):
     assert client_media_assets.brochure_product_from_text("king deluxe") == ""
 
 
-def test_an_unreadable_config_still_sends_the_default_brochure(monkeypatch):
-    """A config problem must never stop a customer getting a brochure."""
+def test_an_unreadable_config_sends_nothing_rather_than_the_wrong_brochure(
+    monkeypatch,
+):
+    """A config problem must not send another client's document.
+
+    This deliberately reverses the earlier trade-off. It used to send the TVS
+    brochure so that a corrupt config never cost a customer their PDF — a
+    reasonable call while TVS was the only client. With more than one, the
+    same code would send TVS documents to somebody else's customers, so a
+    broken config now yields no document at all.
+    """
     import client_media_assets
 
     def explode():
         raise RuntimeError("config file is corrupt")
 
     monkeypatch.setattr(client_media_assets.admin_config, "get_store", explode)
-    assert client_media_assets.product_brochure_url("King EV MAX").endswith(
-        "King_EV_MAX-English.pdf"
-    )
+    assert client_media_assets.product_brochure_url("King EV MAX") == ""
 
 
 # --- share-location card ----------------------------------------------------

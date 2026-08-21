@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 
 import pytest
 
@@ -9,6 +10,20 @@ import pytest
 os.environ.setdefault("FILE_SEARCH_STORE", "fileSearchStores/test")
 os.environ.setdefault("ADMIN_TOKEN", "admin-test-token")
 os.environ.setdefault("ADMIN_CONFIG_PATH", "data/test_admin_config.json")
+
+# This suite is the TVS regression suite: it asserts TVS products, TVS wording
+# and the TVS flow. default_config() is neutral now, so say which client these
+# tests are about rather than relying on a default. The second-client suite
+# points at its own seed.
+os.environ.setdefault("ADMIN_CONFIG_SEED", "seeds/tvs.json")
+
+# Reseed every run. The config store only seeds when the file is absent, so a
+# leftover file silently drove the suite — the one checked in on this machine
+# was months old and had no documents at all, which is why brochure tests were
+# passing on a fallback rather than on configuration.
+_TEST_CONFIG = pathlib.Path(os.environ["ADMIN_CONFIG_PATH"])
+if _TEST_CONFIG.exists():
+    _TEST_CONFIG.unlink()
 
 
 @pytest.fixture(autouse=True)

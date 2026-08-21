@@ -57,67 +57,18 @@ DEFAULT_FLOW_STEPS = [
     "wrap_up",
 ]
 
-DEFAULT_CAMPAIGN_TEXT = """\
-ACTIVE CAMPAIGN — "Vaada" scheme (mention proactively, briefly):
-- 2-year warranty + 3 free maintenance services
-- 1 year free RSA (roadside assistance, towing to showroom)
-- Accident coverage package up to Rs 10 lakh
-- Education benefit up to Rs 1 lakh per child (max 2 children)
-- Hospitalization cash Rs 4,000/day up to 30 days
-- Ambulance coverage up to Rs 5,000
-"""
+# Neutral placeholders. A client's real name, welcome, campaign, products and
+# documents live in a seed file under seeds/ — see seed_config(). Nothing here
+# names a client, so a stack that has not been configured yet cannot pass
+# itself off as one.
+DEFAULT_BOT_NAME = "Qualification Assistant"
+
+DEFAULT_WELCOME_TEXT = "Welcome! Choose your language to get started."
 
 DEFAULT_INTRO_TEXT = (
-    "Hi! I'm TVS Motor's assistant for passenger three-wheelers. "
-    "I'll ask a few quick questions and share accurate product information "
-    "and connect you with your nearest dealership."
+    "Hi! I'll ask a few quick questions, share the information you need, "
+    "and connect you with the right team."
 )
-
-# Product documents sent over WhatsApp. These live on JAM's own CDN, not the
-# media host — CLIENT_MEDIA_BASE_URL serves only the share-location card.
-#
-# Admin-editable so a new model year is a config edit, not a redeploy:
-#   brochure — the default PDF for the product
-#   fuel     — overrides when the customer names CNG / LPG / petrol
-#   support  — warranty and PMS schedules, sent only when they ask about
-#              servicing or warranty (one request must not deliver three files)
-JAM_PDF_BASE = "https://1.jamoutsourcing.com/f"
-
-DEFAULT_PRODUCT_DOCUMENTS = {
-    "King EV MAX": {
-        "brochure": f"{JAM_PDF_BASE}/King_EV_MAX-English.pdf",
-        "fuel": {},
-        "support": [
-            {"url": f"{JAM_PDF_BASE}/TVS_King_EV_MAX_Warranty_Policy.pdf",
-             "kind": "warranty"},
-        ],
-    },
-    "King Deluxe": {
-        "brochure": f"{JAM_PDF_BASE}/King_Deluxe_Petrol-English.pdf",
-        "fuel": {
-            "cng": f"{JAM_PDF_BASE}/King_Deluxe_CNG-English.pdf",
-            "lpg": f"{JAM_PDF_BASE}/King_Deluxe_LPG-English.pdf",
-            "petrol": f"{JAM_PDF_BASE}/King_Deluxe_Petrol-English.pdf",
-        },
-        "support": [
-            {"url": f"{JAM_PDF_BASE}/Deluxe-PMS-Schedule.pdf", "kind": "pms"},
-            {"url": f"{JAM_PDF_BASE}/Deluxe-Warranty-Policy-new.pdf",
-             "kind": "warranty"},
-        ],
-    },
-    "King Duramax Plus": {
-        "brochure": f"{JAM_PDF_BASE}/King_Duramax_Plus_Petrol-English.pdf",
-        "fuel": {
-            "cng": f"{JAM_PDF_BASE}/King_Duramax_Plus_CNG-English.pdf",
-            "petrol": f"{JAM_PDF_BASE}/King_Duramax_Plus_Petrol-English.pdf",
-        },
-        "support": [
-            {"url": f"{JAM_PDF_BASE}/Duramaxplus-PMS-Schedule.pdf", "kind": "pms"},
-            {"url": f"{JAM_PDF_BASE}/Duramaxplus-Warranty-Policy.pdf",
-             "kind": "warranty"},
-        ],
-    },
-}
 
 SUPPORT_DOC_KINDS = frozenset({"warranty", "pms"})
 FUEL_KINDS = frozenset({"cng", "lpg", "petrol"})
@@ -261,22 +212,31 @@ def active_campaign_text(config: dict[str, Any], on: date | None = None) -> str:
 
 
 def default_config() -> dict[str, Any]:
-    """Return a fresh copy of the TVS passenger 3W default configuration."""
-    intro = {lang["code"]: {"text": DEFAULT_INTRO_TEXT, "audio_url": None} for lang in DEFAULT_LANGUAGES}
+    """A neutral, client-agnostic configuration.
+
+    This used to return the TVS configuration, which meant a freshly deployed
+    stack for any other client *was* a TVS bot until somebody edited it: TVS
+    name, TVS welcome text, TVS products, TVS campaign — and TVS brochure PDFs
+    sent to that client's customers.
+
+    Real client configurations are seed files under seeds/, selected per
+    deployment with ADMIN_CONFIG_SEED. See seed_config().
+    """
+    intro = {
+        lang["code"]: {"text": DEFAULT_INTRO_TEXT, "audio_url": None}
+        for lang in DEFAULT_LANGUAGES
+    }
     return {
-        "bot_name": "TVS Passenger 3W Assistant",
-        "welcome_text": (
-            "Welcome! Choose your language to start — we'll help you explore "
-            "TVS King passenger three-wheelers and capture your details for the dealership."
-        ),
+        "bot_name": DEFAULT_BOT_NAME,
+        "welcome_text": DEFAULT_WELCOME_TEXT,
         "languages": deepcopy(DEFAULT_LANGUAGES),
         "capture_fields": deepcopy(DEFAULT_CAPTURE_FIELDS),
         "flow_steps": list(DEFAULT_FLOW_STEPS),
         "voice_policy": "intro_only",
-        "campaign_text": DEFAULT_CAMPAIGN_TEXT.strip(),
+        "campaign_text": "",          # no campaign until one is configured
         "campaign_starts_on": None,   # null = no start bound
         "campaign_ends_on": None,     # null = never expires
-        "documents": deepcopy(DEFAULT_PRODUCT_DOCUMENTS),
+        "documents": {},              # no products until they are configured
         "share_location_image": deepcopy(DEFAULT_SHARE_LOCATION_IMAGE),
         "intro": intro,
         "entry_sources": {
@@ -286,6 +246,38 @@ def default_config() -> dict[str, Any]:
             "client_app": {"welcome_override": None},
         },
     }
+
+
+def seed_path() -> Path | None:
+    """The seed file a brand-new stack should start from, if one is named."""
+    raw = os.environ.get("ADMIN_CONFIG_SEED", "").strip()
+    return Path(raw) if raw else None
+
+
+def seed_config() -> dict[str, Any]:
+    """The configuration used when a stack has no config file yet.
+
+    ADMIN_CONFIG_SEED names a JSON file (seeds/tvs.json, seeds/acme.json), so
+    standing up a client is a deployment setting rather than a code change.
+    With no seed named, a stack starts neutral instead of as somebody else's
+    bot.
+
+    A named-but-unusable seed raises: a deployment that says which client it
+    is and then cannot load it should fail loudly, not quietly serve
+    placeholders to that client's customers.
+    """
+    path = seed_path()
+    if path is None:
+        return default_config()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as e:
+        raise ValueError(f"ADMIN_CONFIG_SEED points at a missing file: {path}") from e
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in seed file {path}: {e}") from e
+    data = fill_missing_defaults(data)
+    validate_config(data)
+    return data
 
 
 def fill_missing_defaults(config: dict[str, Any]) -> dict[str, Any]:
@@ -427,7 +419,7 @@ class AdminConfigStore:
         """Create default config file if missing; return current config."""
         with self._lock:
             if not self._path.exists():
-                cfg = default_config()
+                cfg = seed_config()
                 self._write(cfg)
                 return deepcopy(cfg)
             return self.load()

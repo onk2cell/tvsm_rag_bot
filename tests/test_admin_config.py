@@ -118,8 +118,13 @@ def _cfg(**overrides):
 
 
 def test_campaign_with_no_dates_is_always_on():
-    """Existing configs predate scheduling and must not change behaviour."""
-    config = _cfg()
+    """Existing configs predate scheduling and must not change behaviour.
+
+    The campaign text is supplied here because default_config() no longer
+    carries one — a neutral config has no campaign to run. What is under test
+    is the date window, not where the text came from.
+    """
+    config = _cfg(campaign_text="ACTIVE CAMPAIGN — test scheme")
     assert campaign_is_active(config, date(2020, 1, 1))
     assert campaign_is_active(config, date(2099, 1, 1))
     assert active_campaign_text(config, date(2099, 1, 1)).startswith("ACTIVE CAMPAIGN")
@@ -224,7 +229,9 @@ def test_a_config_written_before_a_feature_gains_its_key(tmp_path):
     loaded = AdminConfigStore(path).get()
     assert "documents" in loaded
     assert "campaign_starts_on" in loaded and loaded["campaign_starts_on"] is None
-    assert loaded["documents"]["King EV MAX"]["brochure"].endswith(".pdf")
+    # Backfilled to the neutral default, not to some other client's products:
+    # the point is that the key exists so the admin API can edit it.
+    assert loaded["documents"] == {}
 
 
 def test_backfill_never_overwrites_an_existing_value(tmp_path):

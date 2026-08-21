@@ -51,7 +51,11 @@ def product_documents() -> dict:
         configured = None
     if isinstance(configured, dict) and configured:
         return configured
-    return admin_config.DEFAULT_PRODUCT_DOCUMENTS
+    # Empty means "this bot has no products configured", never "fall back to
+    # TVS". The old fallback would have sent TVS King brochures to another
+    # client's customers. With no documents, brochure_product_from_text
+    # returns "" and the callers' `if not product` guards do the rest.
+    return {}
 
 
 def configured_products() -> list[str]:

@@ -43,6 +43,7 @@ from dispose import (
 )
 from client_media_assets import (
     brochure_product_from_text,
+    configured_products,
     doesnt_know_pincode,
     is_bare_dont_know,
     product_document_pack,
@@ -1048,6 +1049,17 @@ class ClientMessageProcessor:
                 "will send the document(s) separately after your reply. "
                 "Acknowledge briefly that you are sending it. "
                 "Do not invent download links.)"
+            ), False
+        if not configured_products():
+            # No products configured at all, so there is nothing to choose
+            # between: asking "which model?" would loop forever, because the
+            # choice can never resolve. Say so plainly instead. This state was
+            # unreachable while an empty config silently fell back to the TVS
+            # documents.
+            return (
+                f"{message}\n\n(No brochure files are configured for this "
+                "bot. Do NOT say you are sending or have sent one. Say the "
+                "team will share it, then continue.)"
             ), False
         session.awaiting_brochure_product_choice = True
         return (

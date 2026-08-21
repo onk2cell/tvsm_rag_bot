@@ -1,0 +1,235 @@
+{
+  "bot_name": "TVS Passenger 3W Assistant",
+  "welcome_text": "Welcome! Choose your language to start — we'll help you explore TVS King passenger three-wheelers and capture your details for the dealership.",
+  "languages": [
+    {
+      "code": "English",
+      "label": "English"
+    },
+    {
+      "code": "Hindi",
+      "label": "हिंदी (Hindi)"
+    },
+    {
+      "code": "Marathi",
+      "label": "मराठी (Marathi)"
+    },
+    {
+      "code": "Telugu",
+      "label": "తెలుగు (Telugu)"
+    },
+    {
+      "code": "Tamil",
+      "label": "தமிழ் (Tamil)"
+    },
+    {
+      "code": "Kannada",
+      "label": "ಕನ್ನಡ (Kannada)"
+    },
+    {
+      "code": "Malayalam",
+      "label": "മലയാളം (Malayalam)"
+    }
+  ],
+  "capture_fields": [
+    {
+      "id": "lead_name",
+      "label": "Lead name",
+      "required": false
+    },
+    {
+      "id": "product_interest",
+      "label": "Product interest",
+      "required": true
+    },
+    {
+      "id": "purchase_timeline",
+      "label": "Purchase timeline",
+      "required": true
+    },
+    {
+      "id": "timeline_bucket",
+      "label": "Timeline bucket",
+      "required": false
+    },
+    {
+      "id": "pincode",
+      "label": "Pincode",
+      "required": true
+    },
+    {
+      "id": "area",
+      "label": "Area",
+      "required": false
+    },
+    {
+      "id": "district",
+      "label": "District",
+      "required": false
+    },
+    {
+      "id": "delivery_location",
+      "label": "Delivery location",
+      "required": false
+    },
+    {
+      "id": "feature_awareness",
+      "label": "Feature awareness",
+      "required": false
+    },
+    {
+      "id": "doc_license",
+      "label": "Driving licence",
+      "required": false
+    },
+    {
+      "id": "doc_permit",
+      "label": "Permit",
+      "required": false
+    },
+    {
+      "id": "doc_badge",
+      "label": "Commercial badge",
+      "required": false
+    },
+    {
+      "id": "campaign_shown",
+      "label": "Campaign shown",
+      "required": false
+    },
+    {
+      "id": "lead_quality",
+      "label": "Lead quality",
+      "required": false
+    },
+    {
+      "id": "disposition",
+      "label": "Disposition",
+      "required": false
+    },
+    {
+      "id": "blockers",
+      "label": "Blockers",
+      "required": false
+    },
+    {
+      "id": "next_step",
+      "label": "Next step",
+      "required": false
+    },
+    {
+      "id": "notes",
+      "label": "Notes",
+      "required": false
+    }
+  ],
+  "flow_steps": [
+    "intro",
+    "model_interest",
+    "campaign_awareness",
+    "timeline",
+    "location",
+    "feature_awareness",
+    "documents",
+    "wrap_up"
+  ],
+  "voice_policy": "intro_only",
+  "campaign_text": "ACTIVE CAMPAIGN — \"Vaada\" scheme (mention proactively, briefly):\n- 2-year warranty + 3 free maintenance services\n- 1 year free RSA (roadside assistance, towing to showroom)\n- Accident coverage package up to Rs 10 lakh\n- Education benefit up to Rs 1 lakh per child (max 2 children)\n- Hospitalization cash Rs 4,000/day up to 30 days\n- Ambulance coverage up to Rs 5,000",
+  "campaign_starts_on": null,
+  "campaign_ends_on": null,
+  "documents": {
+    "King EV MAX": {
+      "brochure": "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+      "fuel": {},
+      "support": [
+        {
+          "url": "https://1.jamoutsourcing.com/f/TVS_King_EV_MAX_Warranty_Policy.pdf",
+          "kind": "warranty"
+        }
+      ]
+    },
+    "King Deluxe": {
+      "brochure": "https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf",
+      "fuel": {
+        "cng": "https://1.jamoutsourcing.com/f/King_Deluxe_CNG-English.pdf",
+        "lpg": "https://1.jamoutsourcing.com/f/King_Deluxe_LPG-English.pdf",
+        "petrol": "https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf"
+      },
+      "support": [
+        {
+          "url": "https://1.jamoutsourcing.com/f/Deluxe-PMS-Schedule.pdf",
+          "kind": "pms"
+        },
+        {
+          "url": "https://1.jamoutsourcing.com/f/Deluxe-Warranty-Policy-new.pdf",
+          "kind": "warranty"
+        }
+      ]
+    },
+    "King Duramax Plus": {
+      "brochure": "https://1.jamoutsourcing.com/f/King_Duramax_Plus_Petrol-English.pdf",
+      "fuel": {
+        "cng": "https://1.jamoutsourcing.com/f/King_Duramax_Plus_CNG-English.pdf",
+        "petrol": "https://1.jamoutsourcing.com/f/King_Duramax_Plus_Petrol-English.pdf"
+      },
+      "support": [
+        {
+          "url": "https://1.jamoutsourcing.com/f/Duramaxplus-PMS-Schedule.pdf",
+          "kind": "pms"
+        },
+        {
+          "url": "https://1.jamoutsourcing.com/f/Duramaxplus-Warranty-Policy.pdf",
+          "kind": "warranty"
+        }
+      ]
+    }
+  },
+  "share_location_image": {
+    "url": "",
+    "by_language": {}
+  },
+  "intro": {
+    "English": {
+      "text": "Hi! I'm TVS Motor's assistant for passenger three-wheelers. I'll ask a few quick questions and share accurate product information and connect you with your nearest dealership.",
+      "audio_url": null
+    },
+    "Hindi": {
+      "text": "Hi! I'm TVS Motor's assistant for passenger three-wheelers. I'll ask a few quick questions and share accurate product information and connect you with your nearest dealership.",
+      "audio_url": null
+    },
+    "Marathi": {
+      "text": "Hi! I'm TVS Motor's assistant for passenger three-wheelers. I'll ask a few quick questions and share accurate product information and connect you with your nearest dealership.",
+      "audio_url": null
+    },
+    "Telugu": {
+      "text": "Hi! I'm TVS Motor's assistant for passenger three-wheelers. I'll ask a few quick questions and share accurate product information and connect you with your nearest dealership.",
+      "audio_url": null
+    },
+    "Tamil": {
+      "text": "Hi! I'm TVS Motor's assistant for passenger three-wheelers. I'll ask a few quick questions and share accurate product information and connect you with your nearest dealership.",
+      "audio_url": null
+    },
+    "Kannada": {
+      "text": "Hi! I'm TVS Motor's assistant for passenger three-wheelers. I'll ask a few quick questions and share accurate product information and connect you with your nearest dealership.",
+      "audio_url": null
+    },
+    "Malayalam": {
+      "text": "Hi! I'm TVS Motor's assistant for passenger three-wheelers. I'll ask a few quick questions and share accurate product information and connect you with your nearest dealership.",
+      "audio_url": null
+    }
+  },
+  "entry_sources": {
+    "web": {
+      "welcome_override": null
+    },
+    "whatsapp": {
+      "welcome_override": null
+    },
+    "ricshow": {
+      "welcome_override": null
+    },
+    "client_app": {
+      "welcome_override": null
+    }
+  }
+}
