@@ -1066,6 +1066,7 @@ def test_callback_retry_reuses_pending_reply_without_regenerating():
     assert sender.calls[0]["text"] == sender.calls[1]["text"]
 
 
+@pytest.mark.live
 def test_pincode_message_asks_nearest_dealer_confirm_once():
     dealer = Dealer(
         dealer_code="11689",
@@ -1494,6 +1495,7 @@ def test_location_sets_dealer_and_syncs_dispose():
     assert dispose.calls[0]["product_name"] == "King EV MAX"
 
 
+@pytest.mark.live
 def test_crm_dealer_confirm_yes_sets_last_dealer_code_and_skips_nearest():
     crm_dealer = Dealer(
         dealer_code="11982",

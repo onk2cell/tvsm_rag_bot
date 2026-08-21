@@ -1,0 +1,35 @@
+name: tests
+
+# A green suite is the net under the multi-client refactor: production and every
+# client stack are built from this repo, so a regression here reaches all of them.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the Dockerfile (python:3.12-slim) so CI cannot pass on a
+          # version production never runs.
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        env:
+          # config.py reads this at import; the admin meta endpoint reports
+          # where the key came from, so it must be present. It is never used to
+          # call anything — tests needing a working key are marked `live` and
+          # deselected below.
+          GEMINI_API_KEY: placeholder-for-ci
+        run: pytest -q -m "not live"
