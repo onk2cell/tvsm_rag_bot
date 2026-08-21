@@ -11,7 +11,7 @@ from google import genai
 
 load_dotenv()
 
-DISPLAY_NAME = "tvs-manual"
+DISPLAY_NAME = "kb-manual"
 MAX_WAIT_SEC = 600
 
 client = genai.Client()

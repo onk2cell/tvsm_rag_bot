@@ -381,8 +381,22 @@ class GeminiDocumentRecognizer:
 
 
 class DeterministicAudioTranscriber:
+    """Stand-in transcriber for CLIENT_TEST_MODE.
+
+    Names a product the configured bot actually sells, so a test-mode voice
+    note drives the flow forward on any client's stack. The old hardcoded
+    "King EV MAX" made every deployment's test runs talk about TVS.
+    """
+
     def transcribe(self, data: bytes, mime_type: str, language: str) -> str:
-        return "I am interested in King EV MAX"
+        # Local import: client_media_assets reads admin config, and importing
+        # it at module scope would pull the config store into every media path.
+        from client_media_assets import configured_products
+
+        products = configured_products()
+        if products:
+            return f"I am interested in {products[0]}"
+        return "I am interested in your product"
 
 
 class DeterministicDocumentRecognizer:

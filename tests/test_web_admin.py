@@ -780,7 +780,7 @@ def test_leads_endpoint_handles_a_missing_file(tmp_path):
 def test_spec_declares_bearer_auth_so_swagger_can_authorize(tmp_path):
     spec = _app(tmp_path).openapi()
     assert "HTTPBearer" in spec["components"]["securitySchemes"]
-    assert spec["info"]["title"] == "TVS Bot Admin"
+    assert spec["info"]["title"] == "JAM Bot Admin"
     assert {t["name"] for t in spec["tags"]} == {
         "operations",
         "conversations",

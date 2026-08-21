@@ -165,7 +165,7 @@ def create_app(
     publisher: EventPublisher,
     rate_limiter: RateLimiter,
 ) -> FastAPI:
-    app = FastAPI(title="TVS Client App Webhook")
+    app = FastAPI(title="JAM Client App Webhook")
     security = HTTPBasic(auto_error=True)
 
     def authenticate(

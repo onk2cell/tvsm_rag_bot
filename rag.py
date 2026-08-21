@@ -118,17 +118,6 @@ if config.GEMINI_API_KEY:
     set_api_key(config.GEMINI_API_KEY)
 _maybe_load_runtime_key()   # a persisted admin key overrides the env key
 
-SYSTEM = (
-    "You are TVS Motor's helpful assistant for TVS three-wheelers. You help with their "
-    "specifications, features, colours, warranty, AND loan / financing document requirements "
-    "and eligibility. Answer using ONLY the provided documents (the knowledge base). "
-    "Loan and finance questions ARE in scope when the documents cover them - answer them "
-    "normally; do NOT refuse them. Only if the specific answer is genuinely not in the "
-    "documents, say you don't have that detail and suggest contacting TVS support or the dealer. "
-    "Keep replies short and clear for WhatsApp. Reply in the same language the user used."
-)
-
-
 def _build_contents(history: list, question: str) -> list:
     """Turn stored history + the new question into Gemini 'contents'."""
     contents = []

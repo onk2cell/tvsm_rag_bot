@@ -119,9 +119,9 @@ def create_admin_app(
     knowledge_base: KnowledgeBase | None = None,
 ) -> FastAPI:
     app = FastAPI(
-        title="TVS Bot Admin",
+        title="JAM Bot Admin",
         version=API_VERSION,
-        summary="Configure the TVS WhatsApp bot and inspect what it is doing.",
+        summary="Configure the WhatsApp qualification bot and inspect what it is doing.",
         description=API_DESCRIPTION,
         openapi_tags=API_TAGS,
     )

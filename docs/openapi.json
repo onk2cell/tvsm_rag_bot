@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "TVS Bot Admin",
-    "summary": "Configure the TVS WhatsApp bot and inspect what it is doing.",
+    "title": "JAM Bot Admin",
+    "summary": "Configure the WhatsApp qualification bot and inspect what it is doing.",
     "description": "Every endpoint except the health probe and the panel HTML requires\n`Authorization: Bearer <ADMIN_TOKEN>`. One shared token, no roles.\n\nIf `ADMIN_TOKEN` is unset on the server every admin endpoint returns **503** —\nthe panel is disabled, not open.\n\nTwo things to know before building a client:\n\n* **Conversations group by `mobile`, not `session`.** A returning customer gets\n  a fresh `session` id whenever their hour-long window lapses. Turns recorded\n  before the `mobile` column shipped have `mobile: \"\"` and cannot be found by\n  number; there is no backfill.\n* **`PUT /admin/api/config` replaces the whole document.** There is no partial\n  update and no version history, so read, edit, then write back.\n",
     "version": "1.0.0"
   },

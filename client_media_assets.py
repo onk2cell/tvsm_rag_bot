@@ -58,13 +58,6 @@ def configured_products() -> list[str]:
     return list(product_documents())
 
 
-# Kept for callers/tests that still check configured products.
-PRODUCT_BROCHURE_SLUG = {
-    "King EV MAX": "King_EV_MAX-English",
-    "King Deluxe": "King_Deluxe_Petrol-English",
-    "King Duramax Plus": "King_Duramax_Plus_Petrol-English",
-}
-
 # Literal document requests only — these get the PDF/document sent
 # immediately. General info questions (PRODUCT_INFO_ASK_RE below) get a text
 # answer and an offer to send the brochure instead, not an automatic send.
