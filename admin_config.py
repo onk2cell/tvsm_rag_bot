@@ -355,9 +355,24 @@ def validate_config(config: dict[str, Any]) -> None:
 
     if not isinstance(config["flow_steps"], list) or not config["flow_steps"]:
         raise ValueError("flow_steps must be a non-empty list")
+    step_ids: set[str] = set()
     for i, step in enumerate(config["flow_steps"]):
-        if not isinstance(step, str) or not step.strip():
-            raise ValueError(f"flow_steps[{i}] must be a non-empty string")
+        if isinstance(step, str):
+            step_id, guidance = step, ""
+        elif isinstance(step, dict):
+            step_id = step.get("id")
+            guidance = step.get("guidance", "")
+            if not isinstance(guidance, str):
+                raise ValueError(f"flow_steps[{i}].guidance must be a string")
+        else:
+            raise ValueError(
+                f"flow_steps[{i}] must be a string or an object with an id"
+            )
+        if not isinstance(step_id, str) or not step_id.strip():
+            raise ValueError(f"flow_steps[{i}] must have a non-empty id")
+        if step_id in step_ids:
+            raise ValueError(f"Duplicate flow step id: {step_id}")
+        step_ids.add(step_id)
 
     if config["voice_policy"] not in VOICE_POLICIES:
         raise ValueError(
@@ -397,6 +412,28 @@ def validate_config(config: dict[str, Any]) -> None:
         for source, meta in entry_sources.items():
             if not isinstance(meta, dict):
                 raise ValueError(f"entry_sources[{source}] must be an object")
+
+
+def flow_steps(config: dict[str, Any]) -> list[tuple[str, str]]:
+    """The configured steps as (id, guidance) pairs.
+
+    Steps used to be bare id strings, with the wording for each held in a
+    hardcoded dict in conversation_engine. That meant an admin could add a step
+    through the panel and it would reach the model as a bare label with no
+    instruction — looking configured while doing almost nothing. A step can now
+    carry its own guidance.
+
+    Plain strings are still accepted, and still resolve to the built-in wording
+    for the steps that have it, so a config written before this change keeps
+    working untouched.
+    """
+    pairs: list[tuple[str, str]] = []
+    for step in config.get("flow_steps") or []:
+        if isinstance(step, str):
+            pairs.append((step, ""))
+        elif isinstance(step, dict) and isinstance(step.get("id"), str):
+            pairs.append((step["id"], str(step.get("guidance") or "")))
+    return pairs
 
 
 def csv_columns(config: dict[str, Any]) -> list[str]:

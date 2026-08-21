@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from admin_config import AdminConfigStore, active_campaign_text
+from admin_config import AdminConfigStore, active_campaign_text, flow_steps
 from leads import LeadWriter
+
+log = logging.getLogger(__name__)
 
 PROFILE_JSON_RE = re.compile(
     r"PROFILE_JSON:\s*(?:```(?:json)?\s*)?(\{.*\})", re.DOTALL
@@ -137,19 +140,45 @@ def capture_field_ids(config: dict[str, Any]) -> list[str]:
     return [f["id"] for f in config["capture_fields"]]
 
 
+def _product_list(config: dict[str, Any]) -> str:
+    """Configured product names as prose, for prompts that offer a choice."""
+    names = list((config.get("documents") or {}).keys())
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f", or {names[-1]}"
+
+
 def _step_guidance(
     step: str,
+    configured: str = "",
     *,
+    config: dict[str, Any] | None = None,
     product_hint: str = "",
     confirm_crm_dealer: bool = False,
 ) -> str:
+    """The wording the model receives for one qualification step.
+
+    Order: the two CRM-driven overrides, then whatever the config supplies for
+    this step, then the built-in wording for the steps that ship with the
+    engine. A step with none of those is returned as a humanised id — which is
+    almost useless to the model, so build_system_instruction logs it rather
+    than letting it pass unnoticed.
+    """
+    config = config or {}
     if step == "model_interest" and product_hint:
+        products = _product_list(config)
+        fallback = (
+            f" If they say no or name another product, ask which of {products} "
+            "they want."
+            if products
+            else " If they say no, ask which product they are interested in."
+        )
         return (
-            f'Soft-ask naturally whether they are interested in the {product_hint} '
-            '(e.g. "Are you interested in the King EV MAX?"). '
-            "Do NOT mention CRM, records, or any system. "
-            "If they say no or name another model, ask which of "
-            "King EV MAX, King Deluxe, or King Duramax Plus they want."
+            f"Soft-ask naturally whether they are interested in the {product_hint} "
+            f'(e.g. "Are you interested in the {product_hint}?"). '
+            "Do NOT mention CRM, records, or any system." + fallback
         )
     if step == "location" and confirm_crm_dealer:
         return (
@@ -160,6 +189,8 @@ def _step_guidance(
             "Do NOT ask for city, area, town, or district. "
             "Do not invent dealer names yourself."
         )
+    if configured.strip():
+        return configured.strip()
     return FLOW_STEP_GUIDANCE.get(step, step.replace("_", " "))
 
 
@@ -199,7 +230,7 @@ def build_system_instruction(
     campaign = active_campaign_text(config)
     flow_lines = []
     step_number = 0
-    for step in config["flow_steps"]:
+    for step, configured in flow_steps(config):
         # With no live campaign there is nothing to be aware of: keeping the
         # step would have the bot announce a scheme that has expired.
         if step == "campaign_awareness" and not campaign:
@@ -207,9 +238,19 @@ def build_system_instruction(
         step_number += 1
         guidance = _step_guidance(
             step,
+            configured,
+            config=config,
             product_hint=product_hint,
             confirm_crm_dealer=confirm_crm_dealer,
         )
+        if guidance == step.replace("_", " "):
+            # No configured guidance and no built-in wording: the model is
+            # being handed a heading, not an instruction. Silent before.
+            log.warning(
+                "flow step %r has no guidance — the model receives only its "
+                "name. Add a `guidance` string to this step in the config.",
+                step,
+            )
         flow_lines.append(f"   {step_number}. {guidance}")
 
     return f"""You are {config["bot_name"]} for TVS PASSENGER three-wheelers \

@@ -26,10 +26,14 @@ from admin_config import (  # noqa: E402
     campaign_is_active,
     csv_columns,
     fill_missing_defaults,
+    flow_steps,
     today_ist,
     validate_config,
 )
-from conversation_engine import build_system_instruction  # noqa: E402
+from conversation_engine import (  # noqa: E402
+    FLOW_STEP_GUIDANCE,
+    build_system_instruction,
+)
 
 
 def rule(title: str) -> None:
@@ -111,7 +115,20 @@ def main() -> int:
             guidance, width=88, initial_indent="", subsequent_indent=" " * 6
         )
         print(f"  {number:>2}. {wrapped}")
-    print(f"\n  configured ids: {', '.join(config['flow_steps'])}")
+    ids = [step_id for step_id, _ in flow_steps(config)]
+    print(f"\n  configured ids: {', '.join(ids)}")
+    missing = [
+        step_id
+        for step_id, guidance in flow_steps(config)
+        if not guidance.strip() and step_id not in FLOW_STEP_GUIDANCE
+    ]
+    if missing:
+        print(
+            "\n  \033[31mno guidance\033[0m: "
+            + ", ".join(missing)
+            + "\n  These reach the model as a bare name. Give each a `guidance` "
+            "string."
+        )
 
     rule("Lead CSV columns")
     columns = csv_columns(config)

@@ -124,14 +124,38 @@
     }
   ],
   "flow_steps": [
-    "intro",
-    "model_interest",
-    "campaign_awareness",
-    "timeline",
-    "location",
-    "feature_awareness",
-    "documents",
-    "wrap_up"
+    {
+      "id": "intro",
+      "guidance": "Greet briefly, then begin qualification."
+    },
+    {
+      "id": "model_interest",
+      "guidance": "Ask which TVS passenger model they want (King EV MAX, King Deluxe, or King Duramax Plus)."
+    },
+    {
+      "id": "campaign_awareness",
+      "guidance": "Proactively mention the current campaign in 1-2 lines (CAMPAIGN section only)."
+    },
+    {
+      "id": "timeline",
+      "guidance": "Ask when they want to buy or take delivery. Prefer a concrete date (DD/MM/YYYY) but do not force it. If they say something like 'in the next 10 days' / within ~10 days, ask for an exact date. If they say 'next month', accept it — the system will use the 7th of next month. If they give a farther range (e.g. in 20 days), accept it."
+    },
+    {
+      "id": "location",
+      "guidance": "Ask for their 6-digit pincode to route to the nearest dealership. It may arrive across several messages. If they do not know the pincode, ask them to share WhatsApp current/live location only. Do NOT ask for city, area, town, or district. If they are out of town, still use pincode or live location for routing — do not ask city names. After a valid pincode or location is shared, the system attaches nearest-dealer details (name, address, phone, map) — do NOT invent dealer names, addresses, or phone numbers yourself. Never claim a dealership exists unless the system attached it."
+    },
+    {
+      "id": "feature_awareness",
+      "guidance": "Ask if they already know the vehicle features. If not, give a SHORT accurate pitch from the KNOWLEDGE BASE only (max ~5 points)."
+    },
+    {
+      "id": "documents",
+      "guidance": "Ask whether they have a driving LICENCE, a PERMIT, and a commercial BADGE."
+    },
+    {
+      "id": "wrap_up",
+      "guidance": "Confirm what you captured, say the nearest dealership will contact them, and thank them."
+    }
   ],
   "voice_policy": "intro_only",
   "campaign_text": "ACTIVE CAMPAIGN — \"Vaada\" scheme (mention proactively, briefly):\n- 2-year warranty + 3 free maintenance services\n- 1 year free RSA (roadside assistance, towing to showroom)\n- Accident coverage package up to Rs 10 lakh\n- Education benefit up to Rs 1 lakh per child (max 2 children)\n- Hospitalization cash Rs 4,000/day up to 30 days\n- Ambulance coverage up to Rs 5,000",
