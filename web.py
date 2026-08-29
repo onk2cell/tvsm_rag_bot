@@ -35,11 +35,13 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 import config
+import dispose
 import rag
 from admin_config import (
     VOICE_POLICIES,
     AdminConfigStore,
     default_config,
+    derive_aliases,
     get_store,
     validate_config,
 )
@@ -243,6 +245,252 @@ def create_admin_app(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
+
+    # --- vehicles ----------------------------------------------------------
+    #
+    # A view over config["documents"], never a second store. The bot reads
+    # documents to decide what it offers, recognises and sends, so a separate
+    # vehicle table would be a copy that silently drifts from what runs. These
+    # endpoints exist so a UI can edit one vehicle without PUTting whole config.
+
+    def _documents() -> tuple[dict[str, Any], dict[str, Any]]:
+        cfg = config_store.get()
+        docs = cfg.get("documents")
+        return cfg, (dict(docs) if isinstance(docs, dict) else {})
+
+    def _save_documents(cfg: dict[str, Any], docs: dict[str, Any]) -> None:
+        cfg["documents"] = docs
+        try:
+            config_store.update(cfg)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+    def _vehicle_view(name: str, entry: dict[str, Any]) -> dict[str, Any]:
+        """One vehicle, showing the aliases actually in force.
+
+        A vehicle with no "aliases" key has never been edited here, so it still
+        matches on this build's built-in spellings. Showing those is what lets
+        an operator edit or drop them rather than guess at what already matches.
+        """
+        aliases = entry.get("aliases")
+        seeded = aliases is None
+        if seeded:
+            aliases = list(dispose.builtin_aliases_for(name))
+        return {
+            "name": name,
+            "brochure": entry.get("brochure", ""),
+            "fuel": entry.get("fuel") or {},
+            "support": entry.get("support") or [],
+            "aliases": list(aliases),
+            "aliases_seeded_from_builtins": seeded,
+        }
+
+    def _claimed_spellings(docs: dict[str, Any], exclude: str) -> set[str]:
+        """Every spelling the other vehicles already answer to."""
+        claimed: set[str] = set()
+        for other, entry in docs.items():
+            if other == exclude:
+                continue
+            claimed.add(" ".join(other.lower().split()))
+            for alias in _vehicle_view(other, entry or {})["aliases"]:
+                claimed.add(" ".join(alias.lower().split()))
+        return claimed
+
+    def _resolve_aliases(
+        payload: dict[str, Any], name: str, docs: dict[str, Any]
+    ) -> list[str]:
+        """Aliases the operator typed, or ones derived from the name.
+
+        Derived spellings are dropped on collision -- they were a convenience
+        the operator never asked for. A typed spelling that collides is a 400:
+        they meant it, so silently discarding it would be a lie.
+        """
+        claimed = _claimed_spellings(docs, name)
+        typed = payload.get("aliases")
+        if typed is not None:
+            if not isinstance(typed, list):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="aliases must be a list of strings",
+                )
+            for alias in typed:
+                if " ".join(str(alias).lower().split()) in claimed:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"alias {alias!r} already belongs to another "
+                            "vehicle; a spelling can only mean one product"
+                        ),
+                    )
+            return [str(a) for a in typed]
+        derived = derive_aliases(name, [n for n in docs if n != name])
+        return [a for a in derived if a not in claimed]
+
+    def _kb_warning(name: str) -> str | None:
+        """Flag a vehicle nothing in the knowledge base describes.
+
+        Retrieval still answers specification questions -- from other vehicles'
+        documents -- so the failure is a confident wrong answer, not a blank.
+        Never blocks: a brochure-only vehicle is a legitimate thing to add.
+        """
+        try:
+            documents = (kb.summary() or {}).get("documents") or []
+        except Exception:
+            return None
+        needle = name.lower()
+        for doc in documents:
+            if needle in str((doc or {}).get("name", "")).lower():
+                return None
+        return (
+            f"No knowledge-base document mentions {name!r}. The bot will still "
+            "answer specification questions about it, using other vehicles' "
+            "documents. Index one with POST /admin/api/kb."
+        )
+
+    @app.get("/admin/api/vehicles", tags=["vehicles"], summary="List configured vehicles", responses=_UNAUTHORIZED)
+    def list_vehicles(_: None = Depends(require_admin)) -> dict[str, Any]:
+        """Every vehicle the bot offers, with the aliases it matches on."""
+        _, docs = _documents()
+        return {
+            "vehicles": [_vehicle_view(n, e or {}) for n, e in docs.items()]
+        }
+
+    @app.get("/admin/api/vehicles/{name}", tags=["vehicles"], summary="Read one vehicle", responses={**_UNAUTHORIZED, 404: {"description": "No such vehicle."}})
+    def read_vehicle(name: str, _: None = Depends(require_admin)) -> dict[str, Any]:
+        _, docs = _documents()
+        if name not in docs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No vehicle named {name!r}.",
+            )
+        return _vehicle_view(name, docs[name] or {})
+
+    @app.post("/admin/api/vehicles", tags=["vehicles"], summary="Add a vehicle", status_code=status.HTTP_201_CREATED, responses={**_UNAUTHORIZED, 400: {"description": "Invalid payload; detail names the field."}, 409: {"description": "A vehicle with that name already exists."}})
+    def create_vehicle(
+        payload: dict[str, Any],
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Add a vehicle. Aliases are derived from the name unless supplied."""
+        cfg, docs = _documents()
+        name = str((payload or {}).get("name") or "").strip()
+        if not name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="name is required.",
+            )
+        if name in docs:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A vehicle named {name!r} already exists.",
+            )
+        entry = {
+            "brochure": payload.get("brochure", ""),
+            "fuel": payload.get("fuel") or {},
+            "support": payload.get("support") or [],
+            "aliases": _resolve_aliases(payload, name, docs),
+        }
+        docs[name] = entry
+        _save_documents(cfg, docs)
+        view = _vehicle_view(name, entry)
+        warning = _kb_warning(name)
+        if warning:
+            view["warning"] = warning
+        return view
+
+    @app.put("/admin/api/vehicles/{name}", tags=["vehicles"], summary="Update a vehicle", responses={**_UNAUTHORIZED, 400: {"description": "Invalid payload; detail names the field."}, 404: {"description": "No such vehicle."}})
+    def update_vehicle(
+        name: str,
+        payload: dict[str, Any],
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Replace a vehicle's documents and aliases. Use rename to change name."""
+        cfg, docs = _documents()
+        if name not in docs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No vehicle named {name!r}.",
+            )
+        current = dict(docs[name] or {})
+        payload = payload or {}
+        entry = {
+            "brochure": payload.get("brochure", current.get("brochure", "")),
+            "fuel": payload.get("fuel", current.get("fuel") or {}),
+            "support": payload.get("support", current.get("support") or []),
+            "aliases": (
+                _resolve_aliases(payload, name, docs)
+                if "aliases" in payload
+                else _vehicle_view(name, current)["aliases"]
+            ),
+        }
+        docs[name] = entry
+        _save_documents(cfg, docs)
+        return _vehicle_view(name, entry)
+
+    @app.post("/admin/api/vehicles/{name}/rename", tags=["vehicles"], summary="Rename a vehicle", responses={**_UNAUTHORIZED, 400: {"description": "new_name missing or blank."}, 404: {"description": "No such vehicle."}, 409: {"description": "The new name is already taken."}})
+    def rename_vehicle(
+        name: str,
+        payload: dict[str, Any],
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Rename in place, keeping documents, aliases and configured order.
+
+        Built-in spellings are keyed by the old name, so they are written into
+        the entry first: without that, renaming would silently cost the vehicle
+        every alias it had and customers would stop being understood.
+        """
+        cfg, docs = _documents()
+        if name not in docs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No vehicle named {name!r}.",
+            )
+        new_name = str((payload or {}).get("new_name") or "").strip()
+        if not new_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="new_name is required.",
+            )
+        if new_name != name and new_name in docs:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A vehicle named {new_name!r} already exists.",
+            )
+        entry = dict(docs[name] or {})
+        entry["aliases"] = _vehicle_view(name, entry)["aliases"]
+        renamed = {
+            (new_name if key == name else key): (
+                entry if key == name else value
+            )
+            for key, value in docs.items()
+        }
+        _save_documents(cfg, renamed)
+        return _vehicle_view(new_name, entry)
+
+    @app.delete("/admin/api/vehicles/{name}", tags=["vehicles"], summary="Remove a vehicle", responses={**_UNAUTHORIZED, 404: {"description": "No such vehicle."}})
+    def delete_vehicle(name: str, _: None = Depends(require_admin)) -> dict[str, Any]:
+        """Remove a vehicle. Config is re-read per turn, so this is immediate.
+
+        A customer mid-conversation about this vehicle stops matching it: their
+        brochure request will find no product and send nothing.
+        """
+        cfg, docs = _documents()
+        if name not in docs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No vehicle named {name!r}.",
+            )
+        docs.pop(name)
+        _save_documents(cfg, docs)
+        return {
+            "name": name,
+            "deleted": True,
+            "warning": (
+                "Customers already talking about this vehicle will stop "
+                "receiving its brochure from their next message onward."
+            ),
+        }
 
     @app.get("/admin/api/status", tags=["operations"], summary="Is the bot working?", responses=_UNAUTHORIZED)
     def operational_status(_: None = Depends(require_admin)) -> dict[str, Any]:

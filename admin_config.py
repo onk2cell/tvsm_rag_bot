@@ -119,6 +119,52 @@ DEFAULT_PRODUCT_DOCUMENTS = {
     },
 }
 
+def derive_aliases(name: str, other_products: Any = ()) -> list[str]:
+    """Latin spellings an operator should not have to type by hand.
+
+    The whole lower-cased name, plus each distinctive word in it. A word shared
+    with another product -- "king" across three King models -- is skipped: it
+    cannot say which product is meant, and matching only ever returns one.
+    """
+    cleaned = " ".join(str(name or "").lower().split())
+    if not cleaned:
+        return []
+    shared: set[str] = set()
+    for other in other_products or ():
+        if other and str(other) != str(name):
+            shared.update(" ".join(str(other).lower().split()).split())
+    derived = [cleaned]
+    for word in cleaned.split():
+        if len(word) > 2 and word not in shared and word not in derived:
+            derived.append(word)
+    return derived
+
+
+def product_alias_pairs(
+    documents: dict[str, Any],
+    builtin_for: Any = None,
+) -> list[tuple[str, str]]:
+    """(spelling, product) pairs for matching, from configured documents.
+
+    A product whose entry has no ``aliases`` key has never been edited through
+    the vehicle API, so it keeps the spellings this build ships -- upgrading
+    must not quietly cost a product its sixteen Devanagari variants. An empty
+    list is a deliberate choice by an operator and is honoured as-is.
+    """
+    pairs: list[tuple[str, str]] = []
+    for product, entry in (documents or {}).items():
+        if not isinstance(product, str) or not product.strip():
+            continue
+        pairs.append((product.lower(), product))
+        aliases = (entry or {}).get("aliases") if isinstance(entry, dict) else None
+        if aliases is None and builtin_for is not None:
+            aliases = builtin_for(product)
+        for alias in aliases or ():
+            if isinstance(alias, str) and alias.strip():
+                pairs.append((alias.lower(), product))
+    return pairs
+
+
 SUPPORT_DOC_KINDS = frozenset({"warranty", "pms"})
 FUEL_KINDS = frozenset({"cng", "lpg", "petrol"})
 
@@ -185,6 +231,30 @@ def validate_documents(documents: Any) -> None:
                 raise ValueError(
                     f"{where}.support[{i}].kind must be one of "
                     f"{', '.join(sorted(SUPPORT_DOC_KINDS))}"
+                )
+        aliases = entry.get("aliases")
+        if aliases is not None:
+            if not isinstance(aliases, list):
+                raise ValueError(f"{where}.aliases must be a list of strings")
+            for i, alias in enumerate(aliases):
+                if not isinstance(alias, str) or not alias.strip():
+                    raise ValueError(
+                        f"{where}.aliases[{i}] must be a non-empty string"
+                    )
+
+    # Two products answering to one spelling is not a preference, it is a bug:
+    # matching returns the first hit, so the loser silently stops being
+    # recognised and its customers get the other product's brochure.
+    claimed: dict[str, str] = {}
+    for product, entry in documents.items():
+        spellings = [product, *(entry.get("aliases") or [])]
+        for alias in spellings:
+            key = " ".join(str(alias).lower().split())
+            owner = claimed.setdefault(key, product)
+            if owner != product:
+                raise ValueError(
+                    f"alias {alias!r} is claimed by both {owner!r} and "
+                    f"{product!r}; a spelling can only mean one product"
                 )
 
 

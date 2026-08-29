@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import calendar
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -133,15 +134,69 @@ class DisposePayload:
     status: str
 
 
+AliasPairs = Sequence[tuple[str, str]]
+
+
+def builtin_aliases_for(canonical: str) -> tuple[str, ...]:
+    """The spellings this module ships for one product.
+
+    The admin API seeds a vehicle's editable alias list from this, so an
+    operator sees the real spellings rather than an empty box that silently
+    hides seventeen Devanagari variants.
+    """
+    return tuple(
+        needle for needle, owner in PRODUCT_ALIASES if owner == canonical
+    )
+
+
+def _builtin_alias_pairs() -> AliasPairs:
+    return PRODUCT_ALIASES
+
+
+# Injectable so admin config can drive product matching without this module
+# importing the config store: dispose.py is stdlib-only, which is why its
+# payload building is cheap to test. Unwired, it behaves exactly as before.
+_alias_source: Callable[[], AliasPairs] = _builtin_alias_pairs
+
+
+def set_alias_source(source: Callable[[], AliasPairs] | None) -> None:
+    """Point product matching at another alias table. None restores built-ins."""
+    global _alias_source
+    _alias_source = source or _builtin_alias_pairs
+
+
+def reset_alias_source() -> None:
+    set_alias_source(None)
+
+
+def _match_candidates() -> list[tuple[str, str]]:
+    """Alias needles plus every canonical name, longest needle first.
+
+    Longest-first replaces the hand-ordered tuple, where "duramax plus" beat
+    "duramax" only because a human put it on the earlier line. A vehicle added
+    through the admin API gets no such curation, so ordering by length makes
+    the more specific match win by construction rather than by editing care.
+    """
+    pairs: list[tuple[str, str]] = []
+    canonicals: list[str] = []
+    for needle, canonical in _alias_source():
+        needle = " ".join(str(needle or "").lower().split())
+        if needle:
+            pairs.append((needle, canonical))
+        if canonical and canonical not in canonicals:
+            canonicals.append(canonical)
+    # A product is always matchable by its own name, even with no aliases.
+    for canonical in canonicals:
+        pairs.append((canonical.lower(), canonical))
+    return sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)
+
+
 def normalize_product_name(text: str | None) -> str:
     raw = " ".join((text or "").lower().split())
     if not raw:
         return ""
-    for needle, canonical in PRODUCT_ALIASES:
+    for needle, canonical in _match_candidates():
         if needle in raw:
-            return canonical
-    for canonical in ("King EV MAX", "King Deluxe", "King Duramax Plus"):
-        if canonical.lower() in raw:
             return canonical
     return (text or "").strip()
 

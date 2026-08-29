@@ -137,20 +137,49 @@ def capture_field_ids(config: dict[str, Any]) -> list[str]:
     return [f["id"] for f in config["capture_fields"]]
 
 
+def configured_products(config: dict[str, Any]) -> list[str]:
+    """Product names the admin has configured, in configured order."""
+    documents = config.get("documents") if isinstance(config, dict) else None
+    if not isinstance(documents, dict):
+        return []
+    return [name for name in documents if isinstance(name, str) and name.strip()]
+
+
+def _product_menu(products: list[str] | None, conjunction: str = "") -> str:
+    """The model list as the bot should say it: "A, B, or C"."""
+    items = [p for p in (products or []) if isinstance(p, str) and p.strip()]
+    if not items:
+        return ""
+    if len(items) == 1 or not conjunction:
+        return ", ".join(items)
+    return f"{', '.join(items[:-1])}, {conjunction} {items[-1]}"
+
+
 def _step_guidance(
     step: str,
     *,
     product_hint: str = "",
     confirm_crm_dealer: bool = False,
+    products: list[str] | None = None,
 ) -> str:
+    # The model menu comes from configured documents so a vehicle added through
+    # the admin API is actually offered. With nothing configured the built-in
+    # wording stands, so an unreadable config cannot leave the bot mute.
+    menu = _product_menu(products, "or")
     if step == "model_interest" and product_hint:
+        ask = (
+            f"If they say no or name another model, ask which of {menu} they want."
+            if menu
+            else "If they say no or name another model, ask which one they want."
+        )
+        example = (products or [product_hint])[0]
         return (
             f'Soft-ask naturally whether they are interested in the {product_hint} '
-            '(e.g. "Are you interested in the King EV MAX?"). '
-            "Do NOT mention CRM, records, or any system. "
-            "If they say no or name another model, ask which of "
-            "King EV MAX, King Deluxe, or King Duramax Plus they want."
+            f'(e.g. "Are you interested in the {example}?"). '
+            "Do NOT mention CRM, records, or any system. " + ask
         )
+    if step == "model_interest" and menu:
+        return f"Ask which TVS passenger model they want ({menu})."
     if step == "location" and confirm_crm_dealer:
         return (
             "At the location step, briefly say you will share dealership details "
@@ -197,6 +226,7 @@ def build_system_instruction(
     """Assemble the qualification system prompt from admin config."""
     profile_keys = capture_field_ids(config)
     campaign = active_campaign_text(config)
+    products = configured_products(config)
     flow_lines = []
     step_number = 0
     for step in config["flow_steps"]:
@@ -209,11 +239,13 @@ def build_system_instruction(
             step,
             product_hint=product_hint,
             confirm_crm_dealer=confirm_crm_dealer,
+            products=products,
         )
         flow_lines.append(f"   {step_number}. {guidance}")
 
+    line_up = _product_menu(products) or "King EV MAX, King Deluxe, King Duramax Plus"
     return f"""You are {config["bot_name"]} for TVS PASSENGER three-wheelers \
-(King EV MAX, King Deluxe, King Duramax Plus).
+({line_up}).
 
 YOUR GOAL is NOT to answer every question in depth. Your goal is to QUALIFY and PROFILE \
 the lead in a short, friendly chat, {_campaign_goal(campaign)}then hand \

@@ -5,6 +5,7 @@ import re
 
 import admin_config
 import config
+import dispose
 from dispose import normalize_product_name
 
 SHARE_LOCATION_CAPTIONS = {
@@ -56,6 +57,20 @@ def product_documents() -> dict:
 
 def configured_products() -> list[str]:
     return list(product_documents())
+
+
+# This module already bridges admin config and dispose, so it is the one place
+# that can wire them together without dispose.py growing a config import and
+# losing the stdlib-only purity its tests rely on. Read per call, same
+# reload-on-read contract as product_documents().
+def config_alias_pairs() -> list[tuple[str, str]]:
+    """Product spellings from live config, for dispose's matcher."""
+    return admin_config.product_alias_pairs(
+        product_documents(), dispose.builtin_aliases_for
+    )
+
+
+dispose.set_alias_source(config_alias_pairs)
 
 
 # Kept for callers/tests that still check configured products.

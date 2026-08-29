@@ -157,6 +157,366 @@
         ]
       }
     },
+    "/admin/api/vehicles": {
+      "get": {
+        "tags": [
+          "vehicles"
+        ],
+        "summary": "List configured vehicles",
+        "description": "Every vehicle the bot offers, with the aliases it matches on.",
+        "operationId": "list_vehicles_admin_api_vehicles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Vehicles Admin Api Vehicles Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "vehicles"
+        ],
+        "summary": "Add a vehicle",
+        "description": "Add a vehicle. Aliases are derived from the name unless supplied.",
+        "operationId": "create_vehicle_admin_api_vehicles_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Payload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Create Vehicle Admin Api Vehicles Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "400": {
+            "description": "Invalid payload; detail names the field."
+          },
+          "409": {
+            "description": "A vehicle with that name already exists."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/vehicles/{name}": {
+      "get": {
+        "tags": [
+          "vehicles"
+        ],
+        "summary": "Read one vehicle",
+        "operationId": "read_vehicle_admin_api_vehicles__name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Read Vehicle Admin Api Vehicles  Name  Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "404": {
+            "description": "No such vehicle."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "vehicles"
+        ],
+        "summary": "Update a vehicle",
+        "description": "Replace a vehicle's documents and aliases. Use rename to change name.",
+        "operationId": "update_vehicle_admin_api_vehicles__name__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Update Vehicle Admin Api Vehicles  Name  Put"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "400": {
+            "description": "Invalid payload; detail names the field."
+          },
+          "404": {
+            "description": "No such vehicle."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vehicles"
+        ],
+        "summary": "Remove a vehicle",
+        "description": "Remove a vehicle. Config is re-read per turn, so this is immediate.\n\nA customer mid-conversation about this vehicle stops matching it: their\nbrochure request will find no product and send nothing.",
+        "operationId": "delete_vehicle_admin_api_vehicles__name__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Vehicle Admin Api Vehicles  Name  Delete"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "404": {
+            "description": "No such vehicle."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/api/vehicles/{name}/rename": {
+      "post": {
+        "tags": [
+          "vehicles"
+        ],
+        "summary": "Rename a vehicle",
+        "description": "Rename in place, keeping documents, aliases and configured order.\n\nBuilt-in spellings are keyed by the old name, so they are written into\nthe entry first: without that, renaming would silently cost the vehicle\nevery alias it had and customers would stop being understood.",
+        "operationId": "rename_vehicle_admin_api_vehicles__name__rename_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Rename Vehicle Admin Api Vehicles  Name  Rename Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "400": {
+            "description": "new_name missing or blank."
+          },
+          "404": {
+            "description": "No such vehicle."
+          },
+          "409": {
+            "description": "The new name is already taken."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/api/status": {
       "get": {
         "tags": [
