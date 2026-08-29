@@ -119,6 +119,58 @@ DEFAULT_PRODUCT_DOCUMENTS = {
     },
 }
 
+def validate_messages(messages: Any) -> None:
+    """Raise ValueError naming the message, language and offending placeholder.
+
+    Imported here rather than at module scope: client_static_messages reads
+    config, so a top-level import would be circular. By the time this runs,
+    admin_config is loaded and the import is free.
+    """
+    from string import Formatter
+
+    from client_static_messages import MESSAGE_DEFAULTS, placeholders_for
+
+    if not isinstance(messages, dict):
+        raise ValueError("messages must be an object keyed by message name")
+    for key, per_language in messages.items():
+        where = f"messages[{key!r}]"
+        if key not in MESSAGE_DEFAULTS:
+            raise ValueError(
+                f"{where} is not a known message; GET /admin/api/messages lists them"
+            )
+        if not isinstance(per_language, dict):
+            raise ValueError(f"{where} must be an object keyed by language")
+        allowed = placeholders_for(key)
+        for language, text in per_language.items():
+            spot = f"{where}[{language!r}]"
+            if not isinstance(language, str) or not language.strip():
+                raise ValueError(f"{where} has an empty language name")
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError(f"{spot} must be a non-empty string")
+            try:
+                fields = [name for _, name, _, _ in Formatter().parse(text) if name]
+            except ValueError as exc:
+                raise ValueError(f"{spot} is not a valid template: {exc}") from exc
+            unknown = sorted(
+                {
+                    name.split(".")[0].split("[")[0]
+                    for name in fields
+                    if name.split(".")[0].split("[")[0] not in allowed
+                }
+            )
+            if unknown:
+                listed = ", ".join(sorted(allowed)) or "none"
+                raise ValueError(
+                    f"{spot} uses unknown placeholder(s) "
+                    f"{', '.join(repr(u) for u in unknown)}; allowed here: {listed}"
+                )
+            # Catches what name-checking cannot: bare "{}", "{0}", bad specs.
+            try:
+                text.format(**{name: "x" for name in allowed})
+            except (KeyError, IndexError, ValueError) as exc:
+                raise ValueError(f"{spot} could not be rendered: {exc}") from exc
+
+
 def derive_aliases(name: str, other_products: Any = ()) -> list[str]:
     """Latin spellings an operator should not have to type by hand.
 
@@ -347,6 +399,9 @@ def default_config() -> dict[str, Any]:
         "campaign_starts_on": None,   # null = no start bound
         "campaign_ends_on": None,     # null = never expires
         "documents": deepcopy(DEFAULT_PRODUCT_DOCUMENTS),
+        # Sparse: only what an operator has actually reworded lives here, so a
+        # message added to client_static_messages later needs no migration.
+        "messages": {},
         "share_location_image": deepcopy(DEFAULT_SHARE_LOCATION_IMAGE),
         "intro": intro,
         "entry_sources": {
@@ -464,6 +519,9 @@ def validate_config(config: dict[str, Any]) -> None:
 
     if "documents" in config:
         validate_documents(config["documents"])
+
+    if "messages" in config:
+        validate_messages(config["messages"])
 
     if "share_location_image" in config:
         validate_share_location_image(config["share_location_image"])

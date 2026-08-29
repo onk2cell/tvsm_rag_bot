@@ -34,6 +34,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+import client_static_messages
 import config
 import dispose
 import rag
@@ -491,6 +492,127 @@ def create_admin_app(
                 "receiving its brochure from their next message onward."
             ),
         }
+
+    # --- messages ----------------------------------------------------------
+    #
+    # Overrides are sparse: config carries only what an operator reworded, and
+    # everything else falls through to client_static_messages. That is what
+    # lets a message added in a later build appear without migrating configs,
+    # and lets DELETE mean "give me the built-in wording back".
+
+    def _message_view(key: str, overrides: dict[str, Any], languages: list[str]) -> dict[str, Any]:
+        override = overrides.get(key) or {}
+        defaults = client_static_messages.MESSAGE_DEFAULTS.get(key, {})
+        return {
+            "key": key,
+            "placeholders": sorted(client_static_messages.placeholders_for(key)),
+            "defaults": dict(defaults),
+            "overrides": dict(override),
+            # Which configured languages this message has no text for and so
+            # will answer in English. This is how the Telugu/Tamil/Kannada/
+            # Malayalam gap becomes visible instead of silently falling back.
+            "falls_back_to_english": [
+                lang
+                for lang in languages
+                if lang != "English"
+                and not str(override.get(lang, "")).strip()
+                and not str(defaults.get(lang, "")).strip()
+            ],
+        }
+
+    def _messages_state() -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+        cfg = config_store.get()
+        raw = cfg.get("messages")
+        overrides = dict(raw) if isinstance(raw, dict) else {}
+        languages = [
+            str(lang.get("code", ""))
+            for lang in (cfg.get("languages") or [])
+            if isinstance(lang, dict) and str(lang.get("code", "")).strip()
+        ]
+        return cfg, overrides, languages
+
+    def _save_messages(cfg: dict[str, Any], overrides: dict[str, Any]) -> None:
+        cfg["messages"] = overrides
+        try:
+            config_store.update(cfg)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+
+    @app.get("/admin/api/messages", tags=["messages"], summary="Every editable bot message", responses=_UNAUTHORIZED)
+    def list_messages(_: None = Depends(require_admin)) -> dict[str, Any]:
+        """Built-in wording, any overrides, and which languages fall back."""
+        _, overrides, languages = _messages_state()
+        return {
+            "languages": languages,
+            "messages": [
+                _message_view(key, overrides, languages)
+                for key in client_static_messages.message_keys()
+            ],
+        }
+
+    @app.get("/admin/api/messages/{key}", tags=["messages"], summary="Read one message", responses={**_UNAUTHORIZED, 404: {"description": "No such message."}})
+    def read_message(key: str, _: None = Depends(require_admin)) -> dict[str, Any]:
+        _, overrides, languages = _messages_state()
+        if key not in client_static_messages.MESSAGE_DEFAULTS:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No message named {key!r}.",
+            )
+        return _message_view(key, overrides, languages)
+
+    @app.put("/admin/api/messages/{key}", tags=["messages"], summary="Reword a message", responses={**_UNAUTHORIZED, 400: {"description": "Bad placeholder or empty text; detail names the language."}, 404: {"description": "No such message."}})
+    def write_message(
+        key: str,
+        payload: dict[str, Any],
+        _: None = Depends(require_admin),
+    ) -> dict[str, Any]:
+        """Set this message's text per language. Omitted languages are unchanged.
+
+        A language whose text is blank has its override removed rather than
+        stored empty, so clearing a box restores the built-in wording instead
+        of leaving the bot with nothing to say.
+        """
+        cfg, overrides, languages = _messages_state()
+        if key not in client_static_messages.MESSAGE_DEFAULTS:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No message named {key!r}.",
+            )
+        incoming = (payload or {}).get("text", payload) or {}
+        if not isinstance(incoming, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="text must be an object keyed by language",
+            )
+        current = dict(overrides.get(key) or {})
+        for language, text in incoming.items():
+            if isinstance(text, str) and text.strip():
+                current[str(language)] = text
+            else:
+                current.pop(str(language), None)
+        if current:
+            overrides[key] = current
+        else:
+            overrides.pop(key, None)
+        _save_messages(cfg, overrides)
+        _, saved, languages = _messages_state()
+        return _message_view(key, saved, languages)
+
+    @app.delete("/admin/api/messages/{key}", tags=["messages"], summary="Restore a message's built-in wording", responses={**_UNAUTHORIZED, 404: {"description": "No such message."}})
+    def clear_message(key: str, _: None = Depends(require_admin)) -> dict[str, Any]:
+        """Drop every override for this message. The built-in wording returns."""
+        cfg, overrides, languages = _messages_state()
+        if key not in client_static_messages.MESSAGE_DEFAULTS:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No message named {key!r}.",
+            )
+        overrides.pop(key, None)
+        _save_messages(cfg, overrides)
+        _, saved, languages = _messages_state()
+        return _message_view(key, saved, languages)
 
     @app.get("/admin/api/status", tags=["operations"], summary="Is the bot working?", responses=_UNAUTHORIZED)
     def operational_status(_: None = Depends(require_admin)) -> dict[str, Any]:

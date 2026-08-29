@@ -5,6 +5,10 @@ back to English for these mechanical cards until translations are filled in.
 """
 from __future__ import annotations
 
+from typing import Any
+
+import admin_config
+
 _DEALER_INTRO = {
     "English": "Please check this dealership details:",
     "Hindi": "कृपया इस डीलरशिप का विवरण देखें:",
@@ -283,7 +287,124 @@ _PMS_CAPTION = {
 }
 
 
+# --- admin-editable overrides ----------------------------------------------
+#
+# Every string above is a default, not the last word: config["messages"] may
+# override any of them per language. Overrides are sparse -- config carries
+# only what an operator actually changed -- so a message added to this file
+# appears everywhere immediately, with nothing to back-fill into configs that
+# were written before it existed.
+
+MESSAGE_DEFAULTS: dict[str, dict[str, str]] = {
+    "dealer_intro": _DEALER_INTRO,
+    "dealer_ask": _DEALER_ASK,
+    "wrap_up_dealer_confirm_intro": _WRAP_UP_DEALER_CONFIRM_INTRO,
+    "place_redirect": _PLACE_REDIRECT,
+    "invalid_pincode_ask": _INVALID_PINCODE_ASK,
+    "invalid_pincode_location": _INVALID_PINCODE_LOCATION,
+    "share_location_ask": _SHARE_LOCATION_ASK,
+    "location_thanks": _LOCATION_THANKS,
+    "location_unreadable": _LOCATION_UNREADABLE,
+    "location_need_pincode": _LOCATION_NEED_PIN,
+    "location_no_dealer": _LOCATION_NO_DEALER,
+    "brochure_caption": _BROCHURE_CAPTION,
+    "still_interested_with_name": _STILL_INTERESTED_WITH_NAME,
+    "still_interested_no_name": _STILL_INTERESTED_NO_NAME,
+    "still_interested_no_thanks": _STILL_INTERESTED_NO_THANKS,
+    "dealer_share_ask": _DEALER_SHARE_ASK,
+    "acknowledgement_fallback": _ACKNOWLEDGEMENT_FALLBACK,
+    "brochure_offer_ask": _BROCHURE_OFFER_ASK,
+    "brochure_which_product_ask": _BROCHURE_WHICH_PRODUCT_ASK,
+    "warranty_caption": _WARRANTY_CAPTION,
+    "pms_caption": _PMS_CAPTION,
+}
+
+# The dealer card's field labels are one dict of dicts; flattened here so each
+# label is editable on its own rather than as an opaque blob.
+for _label in ("name", "address", "phone", "map", "fallback_address", "default_dealer"):
+    MESSAGE_DEFAULTS[f"dealer_label_{_label}"] = {
+        _lang_code: _values[_label] for _lang_code, _values in _LABELS.items()
+    }
+del _label
+
+# What each message may interpolate. A template naming anything else is
+# rejected on write: .format() raises KeyError, and that would surface as a
+# failed turn to a customer rather than as an error to the operator.
+MESSAGE_PLACEHOLDERS: dict[str, frozenset[str]] = {
+    "brochure_caption": frozenset({"product"}),
+    "warranty_caption": frozenset({"product"}),
+    "pms_caption": frozenset({"product"}),
+    "still_interested_with_name": frozenset({"name", "product"}),
+    "still_interested_no_name": frozenset({"product"}),
+}
+
+
+def placeholders_for(key: str) -> frozenset[str]:
+    return MESSAGE_PLACEHOLDERS.get(key, frozenset())
+
+
+def message_keys() -> list[str]:
+    return sorted(MESSAGE_DEFAULTS)
+
+
+def _overrides() -> dict[str, Any]:
+    """Admin overrides, read per call — same reload-on-read contract as the
+    rest of the bot. A broken config must not silence the bot, so any failure
+    reading it falls through to the built-in wording."""
+    try:
+        messages = admin_config.get_store().get().get("messages")
+    except Exception:
+        return {}
+    return messages if isinstance(messages, dict) else {}
+
+
+def _pick(source: dict[str, Any], language: str) -> str:
+    value = (source or {}).get(language)
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def message_text(key: str, language: str | None = "English") -> str:
+    """The wording for one message: override, then built-in, then English.
+
+    Falling back per language rather than per message is what lets an operator
+    translate Telugu without also having to supply every other language.
+    """
+    lang = (language or "English").strip() or "English"
+    override = _overrides().get(key) or {}
+    defaults = MESSAGE_DEFAULTS.get(key, {})
+    for source in (override, defaults):
+        text = _pick(source, lang)
+        if text:
+            return text
+    for source in (override, defaults):
+        text = _pick(source, "English")
+        if text:
+            return text
+    return ""
+
+
+def render_message(key: str, language: str | None = "English", **values: Any) -> str:
+    """Interpolate a message, surviving an override with a bad placeholder.
+
+    Validation rejects those on write, but config can also reach disk by hand
+    or from a restored backup. A typo must cost the operator their override,
+    never cost a customer their reply.
+    """
+    text = message_text(key, language)
+    try:
+        return text.format(**values)
+    except (KeyError, IndexError, ValueError):
+        lang = (language or "English").strip() or "English"
+        defaults = MESSAGE_DEFAULTS.get(key, {})
+        fallback = _pick(defaults, lang) or _pick(defaults, "English")
+        try:
+            return fallback.format(**values)
+        except (KeyError, IndexError, ValueError):
+            return fallback
+
+
 def _lang(language: str | None) -> str:
+    """Kept for callers that still ask which language will actually be used."""
     key = (language or "English").strip()
     return key if key in _DEALER_INTRO else "English"
 
@@ -298,67 +419,67 @@ def dealer_confirm_ask(
     city: str = "",
     language: str = "English",
 ) -> str:
-    lang = _lang(language)
-    labels = _LABELS[lang]
+    def label(which: str) -> str:
+        return message_text(f"dealer_label_{which}", language)
+
     lines = [
-        _DEALER_INTRO[lang],
+        message_text("dealer_intro", language),
         "",
-        f"{labels['name']}: {name or labels['default_dealer']}",
+        f"{label('name')}: {name or label('default_dealer')}",
     ]
     if address:
-        lines.append(f"{labels['address']}: {address}")
+        lines.append(f"{label('address')}: {address}")
     elif city:
-        lines.append(f"{labels['address']}: {city}")
+        lines.append(f"{label('address')}: {city}")
     else:
-        lines.append(f"{labels['address']}: {labels['fallback_address']}")
+        lines.append(f"{label('address')}: {label('fallback_address')}")
     if phone:
         contact = f"{spoc_name} - {phone}" if spoc_name else phone
-        lines.append(f"{labels['phone']}: {contact}")
+        lines.append(f"{label('phone')}: {contact}")
     if map_url:
-        lines.append(f"{labels['map']}: {map_url}")
-    lines.extend(["", _DEALER_ASK[lang]])
+        lines.append(f"{label('map')}: {map_url}")
+    lines.extend(["", message_text("dealer_ask", language)])
     return "\n".join(lines)
 
 
 def wrap_up_dealer_confirm_intro(language: str = "English") -> str:
-    return _WRAP_UP_DEALER_CONFIRM_INTRO[_lang(language)]
+    return message_text("wrap_up_dealer_confirm_intro", language)
 
 
 def place_redirect_message(language: str = "English") -> str:
-    return _PLACE_REDIRECT[_lang(language)]
+    return message_text("place_redirect", language)
 
 
 def invalid_pincode_ask(language: str = "English") -> str:
-    return _INVALID_PINCODE_ASK[_lang(language)]
+    return message_text("invalid_pincode_ask", language)
 
 
 def invalid_pincode_location_fallback(language: str = "English") -> str:
-    return _INVALID_PINCODE_LOCATION[_lang(language)]
+    return message_text("invalid_pincode_location", language)
 
 
 def share_location_ask(language: str = "English") -> str:
-    return _SHARE_LOCATION_ASK[_lang(language)]
+    return message_text("share_location_ask", language)
 
 
 def location_thanks(language: str = "English") -> str:
-    return _LOCATION_THANKS[_lang(language)]
+    return message_text("location_thanks", language)
 
 
 def location_unreadable(language: str = "English") -> str:
-    return _LOCATION_UNREADABLE[_lang(language)]
+    return message_text("location_unreadable", language)
 
 
 def location_need_pincode(language: str = "English") -> str:
-    return _LOCATION_NEED_PIN[_lang(language)]
+    return message_text("location_need_pincode", language)
 
 
 def location_no_dealer(language: str = "English") -> str:
-    return _LOCATION_NO_DEALER[_lang(language)]
+    return message_text("location_no_dealer", language)
 
 
 def brochure_caption(product: str, language: str = "English") -> str:
-    template = _BROCHURE_CAPTION[_lang(language)]
-    return template.format(product=product)
+    return render_message("brochure_caption", language, product=product)
 
 
 def welcome_back_still_interested(
@@ -368,45 +489,41 @@ def welcome_back_still_interested(
     language: str = "English",
 ) -> str:
     """Mandatory returning-customer Yes/No ask in the selected language."""
-    lang = _lang(language)
     product = (product or "").strip() or "TVS King"
     clean_name = (name or "").strip()
     if clean_name:
-        return _STILL_INTERESTED_WITH_NAME[lang].format(
-            name=clean_name, product=product
+        return render_message(
+            "still_interested_with_name", language, name=clean_name, product=product
         )
-    return _STILL_INTERESTED_NO_NAME[lang].format(product=product)
+    return render_message("still_interested_no_name", language, product=product)
 
 
 def still_interested_no_thanks(language: str = "English") -> str:
-    return _STILL_INTERESTED_NO_THANKS[_lang(language)]
+    return message_text("still_interested_no_thanks", language)
 
 
 def dealer_share_ask(language: str = "English") -> str:
-    return _DEALER_SHARE_ASK[_lang(language)]
+    return message_text("dealer_share_ask", language)
 
 
 def acknowledgement_fallback(language: str = "English") -> str:
-    return _ACKNOWLEDGEMENT_FALLBACK[_lang(language)]
+    return message_text("acknowledgement_fallback", language)
 
 
 def brochure_offer_ask(language: str = "English") -> str:
-    return _BROCHURE_OFFER_ASK[_lang(language)]
+    return message_text("brochure_offer_ask", language)
 
 
 def brochure_which_product_ask(language: str = "English") -> str:
-    return _BROCHURE_WHICH_PRODUCT_ASK[_lang(language)]
+    return message_text("brochure_which_product_ask", language)
 
 
 def product_doc_caption(
     product: str, kind: str = "brochure", language: str = "English"
 ) -> str:
     """Caption for brochure / warranty / PMS document sends."""
-    lang = _lang(language)
-    if kind == "warranty":
-        template = _WARRANTY_CAPTION[lang]
-    elif kind == "pms":
-        template = _PMS_CAPTION[lang]
-    else:
-        template = _BROCHURE_CAPTION[lang]
-    return template.format(product=product)
+    key = {
+        "warranty": "warranty_caption",
+        "pms": "pms_caption",
+    }.get(kind, "brochure_caption")
+    return render_message(key, language, product=product)

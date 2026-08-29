@@ -517,6 +517,228 @@
         }
       }
     },
+    "/admin/api/messages": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Every editable bot message",
+        "description": "Built-in wording, any overrides, and which languages fall back.",
+        "operationId": "list_messages_admin_api_messages_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Messages Admin Api Messages Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/admin/api/messages/{key}": {
+      "get": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Read one message",
+        "operationId": "read_message_admin_api_messages__key__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Read Message Admin Api Messages  Key  Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "404": {
+            "description": "No such message."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Reword a message",
+        "description": "Set this message's text per language. Omitted languages are unchanged.\n\nA language whose text is blank has its override removed rather than\nstored empty, so clearing a box restores the built-in wording instead\nof leaving the bot with nothing to say.",
+        "operationId": "write_message_admin_api_messages__key__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Write Message Admin Api Messages  Key  Put"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "400": {
+            "description": "Bad placeholder or empty text; detail names the language."
+          },
+          "404": {
+            "description": "No such message."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "messages"
+        ],
+        "summary": "Restore a message's built-in wording",
+        "description": "Drop every override for this message. The built-in wording returns.",
+        "operationId": "clear_message_admin_api_messages__key__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Clear Message Admin Api Messages  Key  Delete"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid admin token."
+          },
+          "503": {
+            "description": "Admin panel disabled (ADMIN_TOKEN unset)."
+          },
+          "404": {
+            "description": "No such message."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/api/status": {
       "get": {
         "tags": [
