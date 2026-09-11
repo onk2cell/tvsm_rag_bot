@@ -286,6 +286,64 @@ _PMS_CAPTION = {
     "Marathi": "{product} PMS शेड्यूल",
 }
 
+# Asked once, right after the language menu, before any other bot turn: route
+# the customer to the existing vehicle flow or to the locate-nearest-PGM flow.
+# Every language is filled in here, not just the three above — the customer has
+# just chosen their language and this is the first thing they read in it.
+_FLOW_INTENT_ASK = {
+    "English": (
+        "Are you still interested in the vehicle, or are you looking for the "
+        "nearest PGM?\n\n"
+        "Press 1 for Vehicle\n"
+        "Press 2 for Nearest PGM"
+    ),
+    "Hindi": (
+        "क्या आप अभी भी वाहन में रुचि रखते हैं, या आप नज़दीकी PGM ढूँढ रहे हैं?\n\n"
+        "वाहन के लिए 1 दबाएँ\n"
+        "नज़दीकी PGM के लिए 2 दबाएँ"
+    ),
+    "Marathi": (
+        "तुम्हाला अजूनही वाहनात रस आहे का, की तुम्ही जवळचे PGM शोधत आहात?\n\n"
+        "वाहनासाठी 1 दाबा\n"
+        "जवळच्या PGM साठी 2 दाबा"
+    ),
+    "Telugu": (
+        "మీకు ఇంకా వాహనంపై ఆసక్తి ఉందా, లేదా మీరు సమీపంలోని PGM కోసం చూస్తున్నారా?\n\n"
+        "వాహనం కోసం 1 నొక్కండి\n"
+        "సమీప PGM కోసం 2 నొక్కండి"
+    ),
+    "Tamil": (
+        "நீங்கள் இன்னும் வாகனத்தில் ஆர்வமாக உள்ளீர்களா, அல்லது அருகிலுள்ள PGM-ஐத் "
+        "தேடுகிறீர்களா?\n\n"
+        "வாகனத்திற்கு 1 ஐ அழுத்தவும்\n"
+        "அருகிலுள்ள PGM-க்கு 2 ஐ அழுத்தவும்"
+    ),
+    "Kannada": (
+        "ನೀವು ಇನ್ನೂ ವಾಹನದಲ್ಲಿ ಆಸಕ್ತಿ ಹೊಂದಿದ್ದೀರಾ, ಅಥವಾ ಹತ್ತಿರದ PGM ಅನ್ನು "
+        "ಹುಡುಕುತ್ತಿದ್ದೀರಾ?\n\n"
+        "ವಾಹನಕ್ಕಾಗಿ 1 ಒತ್ತಿರಿ\n"
+        "ಹತ್ತಿರದ PGM ಗಾಗಿ 2 ಒತ್ತಿರಿ"
+    ),
+    "Malayalam": (
+        "നിങ്ങൾക്ക് ഇപ്പോഴും വാഹനത്തിൽ താൽപ്പര്യമുണ്ടോ, അതോ അടുത്തുള്ള PGM "
+        "തിരയുകയാണോ?\n\n"
+        "വാഹനത്തിന് 1 അമർത്തുക\n"
+        "അടുത്തുള്ള PGM-ന് 2 അമർത്തുക"
+    ),
+}
+
+# First line of the locate-nearest-PGM flow. The location ask that follows it
+# is share_location_ask, so the wording stays in step with the vehicle flow.
+_PGM_FLOW_INTRO = {
+    "English": "Sure — I'll help you find your nearest PGM.",
+    "Hindi": "ज़रूर — मैं आपको नज़दीकी PGM ढूँढने में मदद करूँगा।",
+    "Marathi": "नक्की — मी तुम्हाला जवळचे PGM शोधण्यात मदत करेन.",
+    "Telugu": "తప్పకుండా — మీకు సమీపంలోని PGM కనుగొనడంలో నేను సహాయం చేస్తాను.",
+    "Tamil": "நிச்சயமாக — அருகிலுள்ள PGM-ஐக் கண்டறிய நான் உதவுகிறேன்.",
+    "Kannada": "ಖಂಡಿತ — ಹತ್ತಿರದ PGM ಅನ್ನು ಹುಡುಕಲು ನಾನು ಸಹಾಯ ಮಾಡುತ್ತೇನೆ.",
+    "Malayalam": "തീർച്ചയായും — അടുത്തുള്ള PGM കണ്ടെത്താൻ ഞാൻ സഹായിക്കാം.",
+}
+
 
 # --- admin-editable overrides ----------------------------------------------
 #
@@ -317,6 +375,8 @@ MESSAGE_DEFAULTS: dict[str, dict[str, str]] = {
     "brochure_which_product_ask": _BROCHURE_WHICH_PRODUCT_ASK,
     "warranty_caption": _WARRANTY_CAPTION,
     "pms_caption": _PMS_CAPTION,
+    "flow_intent_ask": _FLOW_INTENT_ASK,
+    "pgm_flow_intro": _PGM_FLOW_INTRO,
 }
 
 # The dealer card's field labels are one dict of dicts; flattened here so each
@@ -516,6 +576,15 @@ def brochure_offer_ask(language: str = "English") -> str:
 
 def brochure_which_product_ask(language: str = "English") -> str:
     return message_text("brochure_which_product_ask", language)
+
+
+def flow_intent_ask(language: str = "English") -> str:
+    """Vehicle-or-nearest-PGM routing question, in the language just chosen."""
+    return message_text("flow_intent_ask", language)
+
+
+def pgm_flow_intro(language: str = "English") -> str:
+    return message_text("pgm_flow_intro", language)
 
 
 def product_doc_caption(

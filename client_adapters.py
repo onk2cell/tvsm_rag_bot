@@ -574,6 +574,10 @@ class RedisClientState:
                 qualification_started=bool(
                     data.get("qualification_started") or False
                 ),
+                awaiting_flow_intent=bool(
+                    data.get("awaiting_flow_intent") or False
+                ),
+                flow=str(data.get("flow") or ""),
             )
         return ClientSession(
             conversation_id=self._id_factory(),
@@ -618,6 +622,8 @@ class RedisClientState:
                 session.awaiting_brochure_product_choice
             ),
             "qualification_started": session.qualification_started,
+            "awaiting_flow_intent": session.awaiting_flow_intent,
+            "flow": session.flow,
         }
         self._redis.set(
             self._key(session.mobile),

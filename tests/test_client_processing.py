@@ -10,7 +10,7 @@ from client_processing import (
     Customer,
     DocumentRecognition,
 )
-from client_static_messages import dealer_share_ask
+from client_static_messages import dealer_share_ask, flow_intent_ask
 from dealers import Dealer, DealerDirectory
 from dispose import resolve_purchase_date
 
@@ -787,9 +787,11 @@ def test_missing_language_menu_then_choice_starts_qualification():
     processor, deps = _processor(directory=directory, preselect_language=None)
 
     processor.process(_event(message_id="incoming-1", content="hi"))
-    processor.process(_event(message_id="incoming-2", content="2"))
+    processor.process(_event(message_id="incoming-2", content="2"))  # Hindi
+    processor.process(_event(message_id="incoming-3", content="1"))  # vehicle
 
     assert "Which language do you prefer?" in deps["reply_sender"].calls[0]["text"]
+    assert deps["reply_sender"].calls[1]["text"] == flow_intent_ask("Hindi")
     assert deps["engine"].turns[0].language == "Hindi"
     assert "selected Hindi" in deps["engine"].turns[0].message
 
@@ -830,6 +832,8 @@ def test_returning_customer_chooses_language_then_gets_welcome_back():
     deps["state"].save(session)
 
     processor.process(_event(message_id="m2", content="1"))  # English
+    assert deps["reply_sender"].calls[-1]["text"] == flow_intent_ask("English")
+    processor.process(_event(message_id="m3", content="1"))  # vehicle
     assert deps["engine"].turns == []  # static ask, not LLM
     ask = deps["reply_sender"].calls[-1]["text"]
     assert ask.startswith("Asha.")
@@ -2060,9 +2064,15 @@ def test_still_interested_digit_reply_does_not_flip_language_choice():
     processor.process(_event(message_id="m2", content="3"))  # picks Marathi
     session = deps["state"].sessions["+918286871533"]
     assert session.language == "Marathi"
+    assert session.awaiting_flow_intent is True
+
+    # Same digit trap one step earlier: "1" here means "vehicle", not English.
+    processor.process(_event(message_id="m3", content="1"))  # vehicle flow
+    session = deps["state"].sessions["+918286871533"]
+    assert session.language == "Marathi"
     assert session.awaiting_still_interested is True
 
-    processor.process(_event(message_id="m3", content="1"))  # "yes" to still-interested
+    processor.process(_event(message_id="m4", content="1"))  # "yes" to still-interested
     session = deps["state"].sessions["+918286871533"]
     assert session.language == "Marathi"
     assert session.awaiting_still_interested is False
@@ -2275,3 +2285,168 @@ def test_location_event_without_coords_asks_for_pincode():
 
     assert deps["engine"].turns == []
     assert "pincode" in deps["reply_sender"].calls[-1]["text"].lower()
+
+
+# --- vehicle-or-nearest-PGM routing after the language menu -----------------
+
+
+def _fresh_new_lead(**overrides):
+    """A number not in CRM, walked to the routing ask in Marathi."""
+    directory = FakeDirectory()
+    directory.customer = Customer("unknown-1", "Customer 1", "")
+    processor, deps = _processor(
+        directory=directory, preselect_language=None, **overrides
+    )
+    processor.process(_event(message_id="m1", content="Hi"))
+    processor.process(_event(message_id="m2", content="3"))  # Marathi
+    return processor, deps
+
+
+def test_language_choice_is_followed_by_routing_ask_in_that_language():
+    processor, deps = _fresh_new_lead()
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.language == "Marathi"
+    assert session.awaiting_flow_intent is True
+    assert session.flow == ""
+    assert deps["reply_sender"].calls[-1]["text"] == flow_intent_ask("Marathi")
+    assert "PGM" in deps["reply_sender"].calls[-1]["text"]
+    # Deterministic: no engine turn, and menu exchanges stay out of history.
+    assert deps["engine"].turns == []
+    assert session.history == []
+
+
+def test_vehicle_choice_continues_into_qualification():
+    processor, deps = _fresh_new_lead()
+
+    processor.process(_event(message_id="m3", content="1"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_flow_intent is False
+    assert session.flow == "vehicle"
+    assert session.language == "Marathi"  # bare "1" did not flip to English
+    turn = deps["engine"].turns[0]
+    assert turn.language == "Marathi"
+    assert "selected Marathi" in turn.message
+    assert "NOT in CRM" in turn.message  # unknown number: ask the name first
+
+
+def test_pgm_choice_enters_pgm_flow_without_the_engine(monkeypatch):
+    monkeypatch.setattr(
+        "client_processing.share_location_image_url",
+        lambda language: "https://media.example.com/share.png",
+    )
+    processor, deps = _fresh_new_lead()
+
+    processor.process(_event(message_id="m3", content="2"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_flow_intent is False
+    assert session.flow == "pgm"
+    assert deps["engine"].turns == []
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "PGM" in reply
+    assert "पिनकोड" in reply  # Marathi location ask follows the intro
+    # The how-to image goes with it, caption-less so the ask is not doubled.
+    assert deps["reply_sender"].image_calls[-1]["caption"] == ""
+    assert session.history[-1]["text"] == reply
+
+
+def test_unclear_routing_reply_is_asked_again():
+    processor, deps = _fresh_new_lead()
+
+    processor.process(_event(message_id="m3", content="hello?"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_flow_intent is True
+    assert session.flow == ""
+    assert deps["reply_sender"].calls[-1]["text"] == flow_intent_ask("Marathi")
+    assert deps["engine"].turns == []
+
+
+def test_location_pin_while_routing_ask_pending_is_re_asked_not_looked_up():
+    """A shared pin is not an answer to 'vehicle or PGM?', and must not start
+    the dealer lookup that belongs to the vehicle flow."""
+    directory = FakeDealerDirectory(
+        Dealer(
+            dealer_code="11689",
+            name="Shah Auto",
+            address="Pune",
+            pincode="411048",
+            phone="9000000001",
+            map_url="https://maps.example/11689",
+            latitude=18.52,
+            longitude=73.85,
+        )
+    )
+    processor, deps = _fresh_new_lead(dealer_directory=directory)
+
+    processor.process(
+        _event(message_id="m3", type="location", content="",
+               latitude=18.52, longitude=73.85)
+    )
+
+    assert directory.coord_calls == []
+    assert deps["reply_sender"].calls[-1]["text"] == flow_intent_ask("Marathi")
+    assert deps["state"].sessions["+918286871533"].awaiting_flow_intent is True
+
+
+def test_pgm_flow_turns_stay_deterministic():
+    """Once in the PGM flow, later turns never reach the LLM or the
+    still-interested ask; a pincode is captured and acknowledged."""
+    directory = FakeDirectory()
+    directory.customer = Customer(
+        "crm-1", "Asha", "", product_enquired="King EV MAX", last_status="Interested"
+    )
+    processor, deps = _processor(
+        directory=directory, preselect_language=None, skip_still_interested=False
+    )
+    processor.process(_event(message_id="m1", content="Hi"))
+    processor.process(_event(message_id="m2", content="1"))  # English
+    processor.process(_event(message_id="m3", content="2"))  # PGM
+
+    processor.process(_event(message_id="m4", content="what now"))
+    assert "pincode" in deps["reply_sender"].calls[-1]["text"].lower()
+
+    processor.process(_event(message_id="m5", content="411001"))
+    session = deps["state"].sessions["+918286871533"]
+    assert session.lead_profile["pincode"] == "411001"
+    assert "Thanks for sharing your location" in deps["reply_sender"].calls[-1]["text"]
+
+    assert deps["engine"].turns == []
+    assert session.awaiting_still_interested is False
+    assert session.flow == "pgm"
+
+
+def test_returning_customer_vehicle_choice_then_still_interested():
+    """The routing ask sits before still-interested, not instead of it."""
+    directory = FakeDirectory()
+    directory.customer = Customer(
+        "crm-1", "Asha", "", product_enquired="King EV MAX", last_status="Interested"
+    )
+    processor, deps = _processor(
+        directory=directory, preselect_language=None, skip_still_interested=False
+    )
+    processor.process(_event(message_id="m1", content="Hi"))
+    processor.process(_event(message_id="m2", content="2"))  # Hindi
+    assert deps["reply_sender"].calls[-1]["text"] == flow_intent_ask("Hindi")
+
+    processor.process(_event(message_id="m3", content="1"))  # vehicle
+
+    ask = deps["reply_sender"].calls[-1]["text"]
+    assert "King EV MAX" in ask
+    assert "1 दबाएँ" in ask
+    session = deps["state"].sessions["+918286871533"]
+    assert session.flow == "vehicle"
+    assert session.awaiting_still_interested is True
+    assert session.language == "Hindi"
+    assert deps["engine"].turns == []
+
+
+def test_routing_ask_survives_a_redis_round_trip():
+    """Flags are hand-listed in RedisClientState; a missing one would reset
+    the routing mid-conversation and re-ask forever."""
+    from dataclasses import fields
+
+    names = {f.name for f in fields(ClientSession)}
+    assert {"awaiting_flow_intent", "flow"} <= names

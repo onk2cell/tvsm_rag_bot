@@ -20,6 +20,7 @@ from bot.graph import (
     classify_share_consent_reply,
     classify_still_interested_reply,
 )
+from client_flow_intent import FLOW_PGM, FLOW_VEHICLE, parse_flow_intent
 from client_language import (
     LANGUAGE_PROMPT,
     SUPPORTED_LANGUAGES,
@@ -57,12 +58,14 @@ from client_static_messages import (
     brochure_offer_ask,
     brochure_which_product_ask,
     dealer_share_ask,
+    flow_intent_ask,
     invalid_pincode_ask,
     invalid_pincode_location_fallback,
     location_need_pincode,
     location_no_dealer,
     location_thanks,
     location_unreadable,
+    pgm_flow_intro,
     place_redirect_message,
     product_doc_caption,
     share_location_ask,
@@ -272,6 +275,11 @@ class ClientSession:
     # True after customer asked for a brochure/PDF but no product was known yet.
     awaiting_brochure_product_choice: bool = False
     qualification_started: bool = False
+    # Vehicle-or-PGM routing, asked once right after the language menu.
+    # ``flow`` is "" until answered, then FLOW_VEHICLE or FLOW_PGM; the PGM
+    # value keeps every later turn out of the LLM qualification path.
+    awaiting_flow_intent: bool = False
+    flow: str = ""
 
 
 @dataclass(frozen=True)
@@ -426,6 +434,7 @@ class ClientMessageProcessor:
                 self._state.save(session)
                 return
 
+        was_awaiting_language = session.awaiting_language_selection
         language = self._resolve_language(session, choice_event)
         if language is None:
             # Language menu sent; wait for the customer's choice.
@@ -478,7 +487,35 @@ class ClientMessageProcessor:
             received_at=event.get("received_at", ""),
         )
 
-        if event.get("type") == "location":
+        choice_text = str(
+            choice_event.get("content") or event.get("content") or event["type"]
+        )
+        if was_awaiting_language:
+            # The language was just chosen: before anything else, ask whether
+            # they want the vehicle flow or the nearest PGM. Nothing the
+            # customer typed alongside the choice reaches the LLM — the same
+            # trade the language menu itself makes.
+            self._ask_flow_intent(
+                event,
+                session=session,
+                language=language,
+                user_message=choice_text,
+                started=started,
+            )
+            return
+
+        if session.flow == FLOW_PGM:
+            self._handle_pgm_turn(
+                event,
+                session=session,
+                language=language,
+                started=started,
+            )
+            return
+
+        # A location pin while the routing ask is pending is not an answer to
+        # it; let it fall through to the re-ask instead of the dealer lookup.
+        if event.get("type") == "location" and not session.awaiting_flow_intent:
             self._handle_location_event(
                 event,
                 session=session,
@@ -510,32 +547,42 @@ class ClientMessageProcessor:
         # A voice note is only transcribed above, so the language check has
         # to run again here — otherwise "please speak in English" spoken
         # aloud is never applied and the next reply reverts (bug 010802).
-        if event.get("type") == "audio" and immediate_reply is None:
+        if (
+            event.get("type") == "audio"
+            and immediate_reply is None
+            and not session.awaiting_flow_intent
+        ):
             language = self._maybe_switch_language(session, message) or language
 
+        if session.awaiting_flow_intent and immediate_reply is None:
+            routed = self._apply_flow_intent(
+                event,
+                session=session,
+                language=language,
+                user_message=message,
+                started=started,
+            )
+            if routed is None:
+                return
+            message = routed
+
         # After a pure language-menu reply, start qualification instead of
-        # treating "2" / "Hindi" as the customer's product message.
-        choice_text = choice_event.get("content") if choice_event is not event else event.get("content")
-        if is_language_only_reply(choice_text, language) and not session.history:
-            if _is_unknown_crm_customer(customer):
-                message = (
-                    f"(The customer selected {language}. Their number is NOT in CRM yet. "
-                    "Greet briefly, ask their name first (we need it for CRM customername), "
-                    "then ask the first qualification question. Capture the name in lead_name.)"
-                )
-            else:
-                message = (
-                    f"(The customer selected {language}. "
-                    "Greet briefly and ask the first qualification question.)"
-                )
+        # treating "2" / "Hindi" as the customer's product message. In
+        # production the routing ask now sits between the two and seeds this
+        # message itself (session.flow is set); this remains for sessions that
+        # were never routed.
+        if (
+            is_language_only_reply(choice_text, language)
+            and not session.history
+            and not session.flow
+        ):
+            message = self._qualification_start_message(customer, language)
 
         # Returning customer after idle expiry / fresh session: mandatory
         # name+product still-interested Yes/No in the language just chosen.
         still_prompt = self._maybe_offer_still_interested(session, language=language)
         if still_prompt is not None:
-            user_text = str(
-                choice_event.get("content") or event.get("content") or event["type"]
-            )
+            user_text = choice_text
             self._reply_and_record(
                 event,
                 session=session,
@@ -1146,6 +1193,135 @@ class ClientMessageProcessor:
             )
             return enriched, None
         return message, None
+
+    # --- vehicle-or-PGM routing -------------------------------------------
+    #
+    # Asked once, on the turn the language is chosen, before still-interested
+    # or any LLM turn. Like the language menu, the ask and its re-asks are
+    # recorded as interactions but kept out of session.history: the model
+    # never needs to see menu exchanges, and _maybe_offer_still_interested
+    # relies on an empty history to fire on the first real turn.
+
+    def _ask_flow_intent(
+        self,
+        event: dict,
+        *,
+        session: ClientSession,
+        language: str,
+        user_message: str,
+        started: float,
+    ) -> None:
+        session.awaiting_flow_intent = True
+        session.flow = ""
+        self._reply_and_record(
+            event,
+            session=session,
+            language=language,
+            user_message=user_message,
+            reply=flow_intent_ask(language or self._session_language(session)),
+            started=started,
+        )
+        self._state.save(session)
+
+    def _apply_flow_intent(
+        self,
+        event: dict,
+        *,
+        session: ClientSession,
+        language: str,
+        user_message: str,
+        started: float,
+    ) -> str | None:
+        """Route the reply to the vehicle-or-PGM ask.
+
+        Returns the message to seed the vehicle flow with, or None when this
+        turn is finished here: the customer chose the PGM flow (intro sent,
+        session.flow set) or gave no clear choice (re-asked). Deterministic
+        by design — an unclear reply is re-asked, not classified.
+        """
+        lang = language or self._session_language(session)
+        intent = parse_flow_intent(user_message)
+        if intent == FLOW_VEHICLE:
+            session.awaiting_flow_intent = False
+            session.flow = FLOW_VEHICLE
+            return self._qualification_start_message(session.customer, lang)
+        if intent == FLOW_PGM:
+            session.awaiting_flow_intent = False
+            session.flow = FLOW_PGM
+            # One image (no caption) + one text, as the vehicle flow does.
+            self._send_share_location_guide(session, with_caption=False)
+            reply = f"{pgm_flow_intro(lang)}\n\n{share_location_ask(lang)}"
+            self._reply_and_record(
+                event,
+                session=session,
+                language=lang,
+                user_message=user_message,
+                reply=reply,
+                started=started,
+            )
+            self._complete_turn(session, event["message_id"], user_message, reply)
+            return None
+        self._ask_flow_intent(
+            event,
+            session=session,
+            language=lang,
+            user_message=user_message,
+            started=started,
+        )
+        return None
+
+    def _qualification_start_message(
+        self, customer: Customer | None, language: str
+    ) -> str:
+        """The first engine message once the customer is in the vehicle flow."""
+        if _is_unknown_crm_customer(customer):
+            return (
+                f"(The customer selected {language}. Their number is NOT in CRM yet. "
+                "Greet briefly, ask their name first (we need it for CRM customername), "
+                "then ask the first qualification question. Capture the name in lead_name.)"
+            )
+        return (
+            f"(The customer selected {language}. "
+            "Greet briefly and ask the first qualification question.)"
+        )
+
+    def _handle_pgm_turn(
+        self,
+        event: dict,
+        *,
+        session: ClientSession,
+        language: str,
+        started: float,
+    ) -> None:
+        """One turn of the locate-nearest-PGM flow. Deterministic — the LLM
+        qualification path is never entered while session.flow is PGM, so a
+        customer who said "not the vehicle" is not asked vehicle questions.
+
+        Only the entry is settled so far: ask where the customer is. A typed
+        pincode is kept in lead_profile["pincode"]; a shared pin is
+        acknowledged, its coordinates left for the lookup to consume. What a
+        PGM is, how the nearest one is found and what is sent back are a
+        separate requirement and slot in after the location capture below.
+        """
+        lang = language or self._session_language(session)
+        text = str(event.get("content") or "").strip()
+        if event.get("type") == "location":
+            user_label = "shared location"
+            located = extract_coordinates(event) is not None
+        else:
+            user_label = text or str(event["type"])
+            self._capture_pincode(session, user_message=text)
+            located = bool(extract_pincode(text))
+        reply = location_thanks(lang) if located else share_location_ask(lang)
+        self._reply_and_record(
+            event,
+            session=session,
+            language=lang,
+            user_message=user_label,
+            reply=reply,
+            started=started,
+        )
+        self._complete_turn(session, event["message_id"], user_label, reply)
 
     def _returning_product(self, customer: Customer | None) -> str:
         """Best-known prior product for the still-interested ask."""
@@ -2226,12 +2402,16 @@ class ClientMessageProcessor:
 
         if session.language in SUPPORTED_LANGUAGES:
             # Mid-chat switch via explicit language name / number / script label.
-            # Skip while the still-interested prompt is pending — its "Press 1
-            # for Yes / Press 2 for No" reuses the same digits 1-7 that
-            # _NAME_TO_LANGUAGE maps to language-menu choices, so a bare "1"
-            # meant as "yes" would otherwise get misread as "switch to
-            # English" (1 = English in the language menu).
-            if event.get("type") == "text" and not session.awaiting_still_interested:
+            # Skip while the still-interested or vehicle-vs-PGM prompt is
+            # pending — their "Press 1 / Press 2" reuse the same digits 1-7
+            # that _NAME_TO_LANGUAGE maps to language-menu choices, so a bare
+            # "1" meant as "yes" / "vehicle" would otherwise get misread as
+            # "switch to English" (1 = English in the language menu).
+            if (
+                event.get("type") == "text"
+                and not session.awaiting_still_interested
+                and not session.awaiting_flow_intent
+            ):
                 self._maybe_switch_language(session, content)
             return session.language
 
