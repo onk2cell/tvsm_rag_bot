@@ -2347,6 +2347,7 @@ def test_pgm_choice_enters_pgm_flow_without_the_engine(monkeypatch):
     reply = deps["reply_sender"].calls[-1]["text"]
     assert "PGM" in reply
     assert "पिनकोड" in reply  # Marathi location ask follows the intro
+    assert "सर्व्हिस सेंटर" in reply  # ...offering a place name as well
     # The how-to image goes with it, caption-less so the ask is not doubled.
     assert deps["reply_sender"].image_calls[-1]["caption"] == ""
     assert session.history[-1]["text"] == reply
@@ -2391,9 +2392,15 @@ def test_location_pin_while_routing_ask_pending_is_re_asked_not_looked_up():
     assert deps["state"].sessions["+918286871533"].awaiting_flow_intent is True
 
 
-def test_pgm_flow_turns_stay_deterministic():
-    """Once in the PGM flow, later turns never reach the LLM or the
-    still-interested ask; a pincode is captured and acknowledged."""
+def _pgm_session(monkeypatch, search):
+    """A returning customer walked into the PGM flow in English, with the
+    pincode web search replaced by ``search`` (query -> answer)."""
+    from bot.pgm_graph import resolve_pgm_location
+
+    monkeypatch.setattr(
+        "client_processing.resolve_pgm_location",
+        lambda text: resolve_pgm_location(text, search=search),
+    )
     directory = FakeDirectory()
     directory.customer = Customer(
         "crm-1", "Asha", "", product_enquired="King EV MAX", last_status="Interested"
@@ -2404,18 +2411,110 @@ def test_pgm_flow_turns_stay_deterministic():
     processor.process(_event(message_id="m1", content="Hi"))
     processor.process(_event(message_id="m2", content="1"))  # English
     processor.process(_event(message_id="m3", content="2"))  # PGM
+    return processor, deps
 
-    processor.process(_event(message_id="m4", content="what now"))
-    assert "pincode" in deps["reply_sender"].calls[-1]["text"].lower()
 
-    processor.process(_event(message_id="m5", content="411001"))
+def test_pgm_flow_turns_never_reach_the_engine(monkeypatch):
+    """Once in the PGM flow, later turns never reach the LLM qualification
+    path or the still-interested ask, whatever the customer types."""
+    processor, deps = _pgm_session(monkeypatch, search=lambda q: "NOT_FOUND")
+
+    processor.process(_event(message_id="m4", content="ok"))       # filler
+    processor.process(_event(message_id="m5", content="Xyzzy"))    # searched
+    processor.process(_event(message_id="m6", content="411001"))   # pincode
+
     session = deps["state"].sessions["+918286871533"]
-    assert session.lead_profile["pincode"] == "411001"
-    assert "Thanks for sharing your location" in deps["reply_sender"].calls[-1]["text"]
-
     assert deps["engine"].turns == []
     assert session.awaiting_still_interested is False
     assert session.flow == "pgm"
+    assert session.lead_profile["pincode"] == "411001"
+
+
+def test_pgm_typed_pincode_is_noted_without_a_search(monkeypatch):
+    def never(query):
+        raise AssertionError("no search for a typed pincode")
+
+    processor, deps = _pgm_session(monkeypatch, search=never)
+
+    processor.process(_event(message_id="m4", content="pin 411 035"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.lead_profile["pincode"] == "411035"
+    assert "area" not in session.lead_profile
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "411035" in reply and "service centre" in reply
+
+
+def test_pgm_place_name_is_resolved_to_a_pincode_by_web_search(monkeypatch):
+    queries = []
+
+    def fake(query):
+        queries.append(query)
+        return "411057 Hinjewadi, Pune"
+
+    processor, deps = _pgm_session(monkeypatch, search=fake)
+
+    processor.process(_event(message_id="m4", content="Hinjewadi"))
+
+    assert queries and "'Hinjewadi'" in queries[0]
+    session = deps["state"].sessions["+918286871533"]
+    assert session.lead_profile["pincode"] == "411057"
+    assert session.lead_profile["area"] == "Hinjewadi"
+    assert "411057" in deps["reply_sender"].calls[-1]["text"]
+
+
+def test_pgm_unknown_place_asks_for_a_bigger_city(monkeypatch):
+    processor, deps = _pgm_session(monkeypatch, search=lambda q: "NOT_FOUND")
+
+    processor.process(_event(message_id="m4", content="Xyzzy Nagar"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "nearest big city" in reply
+    session = deps["state"].sessions["+918286871533"]
+    assert "pincode" not in session.lead_profile
+    assert session.flow == "pgm"
+
+
+def test_pgm_search_outage_asks_for_pincode_not_a_bigger_city(monkeypatch):
+    def boom(query):
+        raise RuntimeError("429 quota")
+
+    processor, deps = _pgm_session(monkeypatch, search=boom)
+
+    processor.process(_event(message_id="m4", content="Pune"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "could not look that place up" in reply
+    assert "big city" not in reply
+
+
+def test_pgm_filler_is_asked_the_location_question_again(monkeypatch):
+    def never(query):
+        raise AssertionError("filler must not be searched")
+
+    processor, deps = _pgm_session(monkeypatch, search=never)
+
+    processor.process(_event(message_id="m4", content="ok"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "city/area" in reply and "pincode" in reply
+
+
+def test_pgm_location_pin_is_acknowledged(monkeypatch):
+    def never(query):
+        raise AssertionError("a pin needs no search")
+
+    processor, deps = _pgm_session(monkeypatch, search=never)
+
+    processor.process(
+        _event(message_id="m4", type="location", content="",
+               latitude=18.52, longitude=73.85)
+    )
+    assert "Thanks for sharing your location" in deps["reply_sender"].calls[-1]["text"]
+
+    processor.process(_event(message_id="m5", type="location", content=""))
+    assert "could not read your location" in deps["reply_sender"].calls[-1]["text"]
+    assert deps["engine"].turns == []
 
 
 def test_returning_customer_vehicle_choice_then_still_interested():

@@ -76,3 +76,28 @@ def test_flow_intent_ask_is_admin_editable(tmp_path, monkeypatch):
         assert "Press 1 for Vehicle" in flow_intent_ask("English")
     finally:
         admin_config.reset_store_for_tests()
+
+
+def test_pgm_location_step_messages_are_localized_for_every_menu_language():
+    from client_static_messages import (
+        pgm_ask_bigger_city,
+        pgm_location_ask,
+        pgm_lookup_failed,
+        pgm_pincode_noted,
+    )
+
+    for fn in (pgm_location_ask, pgm_ask_bigger_city, pgm_lookup_failed):
+        texts = {lang: fn(lang) for lang in _ALL_LANGUAGES}
+        assert len(set(texts.values())) == len(_ALL_LANGUAGES), fn.__name__
+    noted = {lang: pgm_pincode_noted("411001", lang) for lang in _ALL_LANGUAGES}
+    assert len(set(noted.values())) == len(_ALL_LANGUAGES)
+    assert all("411001" in text for text in noted.values())
+    assert "{pincode}" not in noted["English"]
+
+
+def test_pgm_pincode_noted_declares_its_placeholder():
+    """validate_messages rejects an override naming anything else."""
+    from client_static_messages import placeholders_for
+
+    assert placeholders_for("pgm_pincode_noted") == {"pincode"}
+    assert placeholders_for("pgm_location_ask") == frozenset()

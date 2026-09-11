@@ -10,6 +10,7 @@ from time import perf_counter
 from typing import Callable, Protocol, TypeVar
 
 import config
+from bot.pgm_graph import resolve_pgm_location
 from bot.graph import (
     classify_brochure_offer_reply,
     classify_brochure_request,
@@ -65,7 +66,11 @@ from client_static_messages import (
     location_no_dealer,
     location_thanks,
     location_unreadable,
+    pgm_ask_bigger_city,
     pgm_flow_intro,
+    pgm_location_ask,
+    pgm_lookup_failed,
+    pgm_pincode_noted,
     place_redirect_message,
     product_doc_caption,
     share_location_ask,
@@ -1250,7 +1255,7 @@ class ClientMessageProcessor:
             session.flow = FLOW_PGM
             # One image (no caption) + one text, as the vehicle flow does.
             self._send_share_location_guide(session, with_caption=False)
-            reply = f"{pgm_flow_intro(lang)}\n\n{share_location_ask(lang)}"
+            reply = f"{pgm_flow_intro(lang)}\n\n{pgm_location_ask(lang)}"
             self._reply_and_record(
                 event,
                 session=session,
@@ -1293,26 +1298,40 @@ class ClientMessageProcessor:
         language: str,
         started: float,
     ) -> None:
-        """One turn of the locate-nearest-PGM flow. Deterministic — the LLM
-        qualification path is never entered while session.flow is PGM, so a
-        customer who said "not the vehicle" is not asked vehicle questions.
+        """One turn of the locate-nearest-PGM flow. The vehicle qualification
+        path is never entered while session.flow is PGM, so a customer who
+        said "not the vehicle" is not asked vehicle questions.
 
-        Only the entry is settled so far: ask where the customer is. A typed
-        pincode is kept in lead_profile["pincode"]; a shared pin is
-        acknowledged, its coordinates left for the lookup to consume. What a
-        PGM is, how the nearest one is found and what is sent back are a
-        separate requirement and slot in after the location capture below.
+        Where the customer is comes in one of three shapes. A location pin
+        is exact and acknowledged as-is. A typed message goes through
+        bot.pgm_graph: a pincode is taken directly; a place name is resolved
+        to a pincode by Gemini + Google Search; a place the search cannot pin
+        down is answered by asking for a bigger city. The pincode lands in
+        lead_profile["pincode"], and the place the customer typed in
+        lead_profile["area"], for the service-centre lookup that follows.
         """
         lang = language or self._session_language(session)
-        text = str(event.get("content") or "").strip()
         if event.get("type") == "location":
             user_label = "shared location"
-            located = extract_coordinates(event) is not None
+            if extract_coordinates(event) is not None:
+                reply = location_thanks(lang)
+            else:
+                reply = location_unreadable(lang)
         else:
+            text = str(event.get("content") or "").strip()
             user_label = text or str(event["type"])
-            self._capture_pincode(session, user_message=text)
-            located = bool(extract_pincode(text))
-        reply = location_thanks(lang) if located else share_location_ask(lang)
+            located = resolve_pgm_location(text)
+            if located.result == "pincode":
+                session.lead_profile["pincode"] = located.pincode
+                if located.search_result:
+                    session.lead_profile["area"] = text
+                reply = pgm_pincode_noted(located.pincode, lang)
+            elif located.result == "not_found":
+                reply = pgm_ask_bigger_city(lang)
+            elif located.result == "lookup_failed":
+                reply = pgm_lookup_failed(lang)
+            else:
+                reply = pgm_location_ask(lang)
         self._reply_and_record(
             event,
             session=session,

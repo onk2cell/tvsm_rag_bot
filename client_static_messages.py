@@ -332,8 +332,7 @@ _FLOW_INTENT_ASK = {
     ),
 }
 
-# First line of the locate-nearest-PGM flow. The location ask that follows it
-# is share_location_ask, so the wording stays in step with the vehicle flow.
+# First line of the locate-nearest-PGM flow; pgm_location_ask follows it.
 _PGM_FLOW_INTRO = {
     "English": "Sure — I'll help you find your nearest PGM.",
     "Hindi": "ज़रूर — मैं आपको नज़दीकी PGM ढूँढने में मदद करूँगा।",
@@ -342,6 +341,120 @@ _PGM_FLOW_INTRO = {
     "Tamil": "நிச்சயமாக — அருகிலுள்ள PGM-ஐக் கண்டறிய நான் உதவுகிறேன்.",
     "Kannada": "ಖಂಡಿತ — ಹತ್ತಿರದ PGM ಅನ್ನು ಹುಡುಕಲು ನಾನು ಸಹಾಯ ಮಾಡುತ್ತೇನೆ.",
     "Malayalam": "തീർച്ചയായും — അടുത്തുള്ള PGM കണ്ടെത്താൻ ഞാൻ സഹായിക്കാം.",
+}
+
+# The PGM flow accepts a third answer the vehicle flow does not: the name of
+# the place where the customer wants a service centre, which is resolved to
+# a pincode by web search (bot/pgm_graph.py).
+_PGM_LOCATION_ASK = {
+    "English": (
+        "Please share your current WhatsApp location, type your 6-digit pincode, "
+        "or type the name of the city/area where you would like to see the "
+        "service centre."
+    ),
+    "Hindi": (
+        "कृपया अपनी WhatsApp करेंट लोकेशन शेयर करें, अपना 6-अंकों का पिनकोड टाइप करें, "
+        "या उस शहर/एरिया का नाम टाइप करें जहाँ आप सर्विस सेंटर देखना चाहते हैं।"
+    ),
+    "Marathi": (
+        "कृपया तुमचे WhatsApp करंट लोकेशन शेअर करा, तुमचा ६-अंकी पिनकोड टाइप करा, "
+        "किंवा ज्या शहर/एरियामध्ये तुम्हाला सर्व्हिस सेंटर पाहायचे आहे त्याचे नाव टाइप करा."
+    ),
+    "Telugu": (
+        "దయచేసి మీ WhatsApp ప్రస్తుత లొకేషన్ షేర్ చేయండి, మీ 6-అంకెల పిన్‌కోడ్ టైప్ చేయండి, "
+        "లేదా మీరు సర్వీస్ సెంటర్ చూడాలనుకుంటున్న నగరం/ప్రాంతం పేరు టైప్ చేయండి."
+    ),
+    "Tamil": (
+        "உங்கள் WhatsApp தற்போதைய இருப்பிடத்தைப் பகிரவும், உங்கள் 6-இலக்க பின்கோடை "
+        "டைப் செய்யவும், அல்லது சர்வீஸ் சென்டர் பார்க்க விரும்பும் நகரம்/பகுதியின் "
+        "பெயரை டைப் செய்யவும்."
+    ),
+    "Kannada": (
+        "ದಯವಿಟ್ಟು ನಿಮ್ಮ WhatsApp ಪ್ರಸ್ತುತ ಲೊಕೇಶನ್ ಹಂಚಿಕೊಳ್ಳಿ, ನಿಮ್ಮ 6-ಅಂಕಿಯ ಪಿನ್‌ಕೋಡ್ "
+        "ಟೈಪ್ ಮಾಡಿ, ಅಥವಾ ನೀವು ಸರ್ವಿಸ್ ಸೆಂಟರ್ ನೋಡಲು ಬಯಸುವ ನಗರ/ಪ್ರದೇಶದ ಹೆಸರನ್ನು ಟೈಪ್ ಮಾಡಿ."
+    ),
+    "Malayalam": (
+        "ദയവായി നിങ്ങളുടെ WhatsApp നിലവിലെ ലൊക്കേഷൻ പങ്കിടുക, നിങ്ങളുടെ 6-അക്ക പിൻകോഡ് "
+        "ടൈപ്പ് ചെയ്യുക, അല്ലെങ്കിൽ സർവീസ് സെന്റർ കാണാൻ ആഗ്രഹിക്കുന്ന നഗരം/പ്രദേശത്തിന്റെ "
+        "പേര് ടൈപ്പ് ചെയ്യുക."
+    ),
+}
+
+_PGM_PINCODE_NOTED = {
+    "English": "Thanks — I have noted pincode {pincode} for your nearest service centre.",
+    "Hindi": "धन्यवाद — आपके नज़दीकी सर्विस सेंटर के लिए पिनकोड {pincode} नोट कर लिया है।",
+    "Marathi": "धन्यवाद — तुमच्या जवळच्या सर्व्हिस सेंटरसाठी पिनकोड {pincode} नोंदवला आहे.",
+    "Telugu": "ధన్యవాదాలు — మీ సమీప సర్వీస్ సెంటర్ కోసం పిన్‌కోడ్ {pincode} నోట్ చేసుకున్నాను.",
+    "Tamil": "நன்றி — உங்கள் அருகிலுள்ள சர்வீஸ் சென்டருக்காக பின்கோடு {pincode} குறித்துக்கொண்டேன்.",
+    "Kannada": "ಧನ್ಯವಾದಗಳು — ನಿಮ್ಮ ಹತ್ತಿರದ ಸರ್ವಿಸ್ ಸೆಂಟರ್‌ಗಾಗಿ ಪಿನ್‌ಕೋಡ್ {pincode} ನೋಟ್ ಮಾಡಿಕೊಂಡಿದ್ದೇನೆ.",
+    "Malayalam": "നന്ദി — നിങ്ങളുടെ അടുത്തുള്ള സർവീസ് സെന്ററിനായി പിൻകോഡ് {pincode} കുറിച്ചു.",
+}
+
+# Web search could not pin the place down: ask for something bigger rather
+# than looping on the same name.
+_PGM_ASK_BIGGER_CITY = {
+    "English": (
+        "I could not find a pincode for that place. Please type the name of the "
+        "nearest big city or town, or your 6-digit pincode."
+    ),
+    "Hindi": (
+        "उस जगह का पिनकोड नहीं मिला। कृपया नज़दीकी बड़े शहर या कस्बे का नाम टाइप करें, "
+        "या अपना 6-अंकों का पिनकोड टाइप करें।"
+    ),
+    "Marathi": (
+        "त्या ठिकाणाचा पिनकोड सापडला नाही. कृपया जवळच्या मोठ्या शहराचे किंवा गावाचे "
+        "नाव टाइप करा, किंवा तुमचा ६-अंकी पिनकोड टाइप करा."
+    ),
+    "Telugu": (
+        "ఆ ప్రదేశానికి పిన్‌కోడ్ దొరకలేదు. దయచేసి సమీపంలోని పెద్ద నగరం లేదా పట్టణం పేరు "
+        "టైప్ చేయండి, లేదా మీ 6-అంకెల పిన్‌కోడ్ టైప్ చేయండి."
+    ),
+    "Tamil": (
+        "அந்த இடத்திற்கான பின்கோடு கிடைக்கவில்லை. அருகிலுள்ள பெரிய நகரம் அல்லது ஊரின் "
+        "பெயரை டைப் செய்யவும், அல்லது உங்கள் 6-இலக்க பின்கோடை டைப் செய்யவும்."
+    ),
+    "Kannada": (
+        "ಆ ಸ್ಥಳದ ಪಿನ್‌ಕೋಡ್ ಸಿಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಹತ್ತಿರದ ದೊಡ್ಡ ನಗರ ಅಥವಾ ಪಟ್ಟಣದ ಹೆಸರನ್ನು "
+        "ಟೈಪ್ ಮಾಡಿ, ಅಥವಾ ನಿಮ್ಮ 6-ಅಂಕಿಯ ಪಿನ್‌ಕೋಡ್ ಟೈಪ್ ಮಾಡಿ."
+    ),
+    "Malayalam": (
+        "ആ സ്ഥലത്തിന്റെ പിൻകോഡ് കണ്ടെത്താനായില്ല. ദയവായി അടുത്തുള്ള വലിയ നഗരത്തിന്റെയോ "
+        "പട്ടണത്തിന്റെയോ പേര് ടൈപ്പ് ചെയ്യുക, അല്ലെങ്കിൽ നിങ്ങളുടെ 6-അക്ക പിൻകോഡ് ടൈപ്പ് ചെയ്യുക."
+    ),
+}
+
+# The search itself failed (quota, network, key). Distinct from "not found":
+# the place may be perfectly real, so do not send the customer hunting for a
+# bigger city — a pincode needs no lookup at all.
+_PGM_LOOKUP_FAILED = {
+    "English": (
+        "I could not look that place up right now. Please type your 6-digit "
+        "pincode, or share your current WhatsApp location."
+    ),
+    "Hindi": (
+        "अभी उस जगह की जानकारी नहीं मिल पाई। कृपया अपना 6-अंकों का पिनकोड टाइप करें, "
+        "या अपनी WhatsApp करेंट लोकेशन शेयर करें।"
+    ),
+    "Marathi": (
+        "सध्या ते ठिकाण शोधता आले नाही. कृपया तुमचा ६-अंकी पिनकोड टाइप करा, "
+        "किंवा तुमचे WhatsApp करंट लोकेशन शेअर करा."
+    ),
+    "Telugu": (
+        "ప్రస్తుతం ఆ ప్రదేశాన్ని వెతకలేకపోయాను. దయచేసి మీ 6-అంకెల పిన్‌కోడ్ టైప్ చేయండి, "
+        "లేదా మీ WhatsApp ప్రస్తుత లొకేషన్ షేర్ చేయండి."
+    ),
+    "Tamil": (
+        "இப்போது அந்த இடத்தைத் தேட முடியவில்லை. உங்கள் 6-இலக்க பின்கோடை டைப் செய்யவும், "
+        "அல்லது உங்கள் WhatsApp தற்போதைய இருப்பிடத்தைப் பகிரவும்."
+    ),
+    "Kannada": (
+        "ಈಗ ಆ ಸ್ಥಳವನ್ನು ಹುಡುಕಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ನಿಮ್ಮ 6-ಅಂಕಿಯ ಪಿನ್‌ಕೋಡ್ ಟೈಪ್ ಮಾಡಿ, "
+        "ಅಥವಾ ನಿಮ್ಮ WhatsApp ಪ್ರಸ್ತುತ ಲೊಕೇಶನ್ ಹಂಚಿಕೊಳ್ಳಿ."
+    ),
+    "Malayalam": (
+        "ഇപ്പോൾ ആ സ്ഥലം തിരയാനായില്ല. ദയവായി നിങ്ങളുടെ 6-അക്ക പിൻകോഡ് ടൈപ്പ് ചെയ്യുക, "
+        "അല്ലെങ്കിൽ നിങ്ങളുടെ WhatsApp നിലവിലെ ലൊക്കേഷൻ പങ്കിടുക."
+    ),
 }
 
 
@@ -377,6 +490,10 @@ MESSAGE_DEFAULTS: dict[str, dict[str, str]] = {
     "pms_caption": _PMS_CAPTION,
     "flow_intent_ask": _FLOW_INTENT_ASK,
     "pgm_flow_intro": _PGM_FLOW_INTRO,
+    "pgm_location_ask": _PGM_LOCATION_ASK,
+    "pgm_pincode_noted": _PGM_PINCODE_NOTED,
+    "pgm_ask_bigger_city": _PGM_ASK_BIGGER_CITY,
+    "pgm_lookup_failed": _PGM_LOOKUP_FAILED,
 }
 
 # The dealer card's field labels are one dict of dicts; flattened here so each
@@ -396,6 +513,7 @@ MESSAGE_PLACEHOLDERS: dict[str, frozenset[str]] = {
     "pms_caption": frozenset({"product"}),
     "still_interested_with_name": frozenset({"name", "product"}),
     "still_interested_no_name": frozenset({"product"}),
+    "pgm_pincode_noted": frozenset({"pincode"}),
 }
 
 
@@ -585,6 +703,22 @@ def flow_intent_ask(language: str = "English") -> str:
 
 def pgm_flow_intro(language: str = "English") -> str:
     return message_text("pgm_flow_intro", language)
+
+
+def pgm_location_ask(language: str = "English") -> str:
+    return message_text("pgm_location_ask", language)
+
+
+def pgm_pincode_noted(pincode: str, language: str = "English") -> str:
+    return render_message("pgm_pincode_noted", language, pincode=pincode)
+
+
+def pgm_ask_bigger_city(language: str = "English") -> str:
+    return message_text("pgm_ask_bigger_city", language)
+
+
+def pgm_lookup_failed(language: str = "English") -> str:
+    return message_text("pgm_lookup_failed", language)
 
 
 def product_doc_caption(
