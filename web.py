@@ -284,6 +284,7 @@ def create_admin_app(
             "brochure": entry.get("brochure", ""),
             "fuel": entry.get("fuel") or {},
             "support": entry.get("support") or [],
+            "images": entry.get("images") or [],
             "aliases": list(aliases),
             "aliases_seeded_from_builtins": seeded,
         }
@@ -390,6 +391,7 @@ def create_admin_app(
             "brochure": payload.get("brochure", ""),
             "fuel": payload.get("fuel") or {},
             "support": payload.get("support") or [],
+            "images": payload.get("images") or [],
             "aliases": _resolve_aliases(payload, name, docs),
         }
         docs[name] = entry
@@ -419,6 +421,7 @@ def create_admin_app(
             "brochure": payload.get("brochure", current.get("brochure", "")),
             "fuel": payload.get("fuel", current.get("fuel") or {}),
             "support": payload.get("support", current.get("support") or []),
+            "images": payload.get("images", current.get("images") or []),
             "aliases": (
                 _resolve_aliases(payload, name, docs)
                 if "aliases" in payload

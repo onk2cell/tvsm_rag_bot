@@ -524,6 +524,7 @@ class RedisClientState:
                 ),
                 lead_profile=dict(data.get("lead_profile") or {}),
                 brochures_sent=list(data.get("brochures_sent") or []),
+                images_sent=list(data.get("images_sent") or []),
                 share_location_guide_sent=bool(
                     data.get("share_location_guide_sent") or False
                 ),
@@ -603,6 +604,7 @@ class RedisClientState:
             "last_dispose_fingerprint": session.last_dispose_fingerprint,
             "lead_profile": session.lead_profile,
             "brochures_sent": session.brochures_sent,
+            "images_sent": session.images_sent,
             "share_location_guide_sent": session.share_location_guide_sent,
             "invalid_pincode_attempts": session.invalid_pincode_attempts,
             "awaiting_dealer_confirm": session.awaiting_dealer_confirm,

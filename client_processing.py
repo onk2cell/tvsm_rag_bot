@@ -54,9 +54,11 @@ from client_media_assets import (
     doesnt_know_pincode,
     is_bare_dont_know,
     product_document_pack,
+    product_image_urls,
     share_location_caption,
     share_location_image_url,
     wants_product_brochure,
+    wants_product_images,
     wants_product_info,
     wants_support_documents,
 )
@@ -263,6 +265,10 @@ class ClientSession:
     last_dispose_fingerprint: str = ""
     lead_profile: dict = field(default_factory=dict)
     brochures_sent: list[str] = field(default_factory=list)
+    # Photos are cheap to re-send (unlike the brochure pack) but still
+    # tracked so a customer who asks "photo bhejo" twice in a row doesn't
+    # get the same set blasted twice in the same turn-handling pass.
+    images_sent: list[str] = field(default_factory=list)
     share_location_guide_sent: bool = False
     invalid_pincode_attempts: int = 0
     awaiting_dealer_confirm: bool = False
@@ -929,6 +935,12 @@ class ClientMessageProcessor:
             profile=output.profile,
             requested=brochure_requested,
         )
+        self._maybe_send_product_images(
+            session,
+            user_message=raw_user_text,
+            profile=output.profile,
+            requested=wants_product_images(raw_user_text),
+        )
         self._capture_purchase_date(session, user_message=raw_user_text)
         self._capture_lead_name(session, user_message=raw_user_text)
         self._capture_pincode(session, user_message=raw_user_text)
@@ -1031,6 +1043,59 @@ class ClientMessageProcessor:
             session.brochures_sent.append(product)
             session.lead_profile.setdefault("product_interest", product)
         return sent_any
+
+    def _send_product_images(
+        self,
+        session: ClientSession,
+        product: str,
+    ) -> bool:
+        """Send the configured photos for `product`. Returns True if
+        anything was sent. No-ops (without raising) when no product could
+        be resolved or no images are configured for it."""
+        if not product:
+            return False
+        urls = product_image_urls(product)
+        if not urls:
+            return False
+        sent_any = False
+        for link in urls:
+            try:
+                self._reply_sender.send_image(
+                    mobile=session.mobile,
+                    link=link,
+                    caption=product,
+                )
+                sent_any = True
+            except Exception:
+                log.exception(
+                    "product image send failed mobile=%s product=%s",
+                    session.mobile,
+                    product,
+                )
+        if sent_any:
+            session.images_sent.append(product)
+        return sent_any
+
+    def _maybe_send_product_images(
+        self,
+        session: ClientSession,
+        *,
+        user_message: str,
+        profile: dict | None = None,
+        requested: bool = False,
+    ) -> None:
+        """Send vehicle photos once the customer asks to see the product
+        (e.g. "photo bhejo", "send images"). Separate from the brochure
+        flow — asking for a photo must never trigger a PDF, and vice versa.
+        """
+        if not requested:
+            return
+        product, _hints = self._resolve_brochure_product(
+            session, user_message, profile
+        )
+        if not product:
+            return
+        self._send_product_images(session, product)
 
     def _prepare_brochure_request_context(
         self,
@@ -2342,6 +2407,7 @@ class ClientMessageProcessor:
             return
 
         latitude, longitude = coords
+
         session.awaiting_dealer_confirm = False
         if self._dealer_directory is None:
             reply = location_need_pincode(reply_language)

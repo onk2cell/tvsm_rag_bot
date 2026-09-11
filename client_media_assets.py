@@ -198,6 +198,48 @@ def wants_product_brochure(message: str | None) -> bool:
     return bool(PRODUCT_DOCUMENT_ASK_RE.search((message or "").strip()))
 
 
+# Customer wants to *see* the vehicle (photos), not the brochure PDF. Kept
+# separate from PRODUCT_DOCUMENT_ASK_RE: "send the brochure" and "send a
+# photo" are different requests and must not both trigger a PDF send.
+PRODUCT_IMAGE_ASK_RE = re.compile(
+    r"(?i)("
+    r"\b(image|images|photo|photos|pic|pics|picture|pictures|"
+    r"snap|snaps)\b|"
+    r"send\s+(me\s+)?(a\s+|the\s+|some\s+)?(image|photo|pic|picture)s?|"
+    r"(image|photo|pic|picture)s?\s+(bhejo|bhej\s*do|bhej\s*dijiye|"
+    r"bhej\s*dena)|"
+    r"(vehicle|gadi|gaadi|scooter|auto)\s+(kaisa|kaisi)\s+(dikh|lag)|"
+    r"फोटो|तस्वीर|तस्वीरें|इमेज|इमेजेस|चित्र|"
+    r"फोटो\s*(भेजो|भेज\s*दो|भेज\s*दीजिए)|"
+    r"फोटो\s*पाठवा|"
+    r"ఫోటో|ఫోటోలు|"
+    r"புகைப்படம்|படம்|"
+    r"ಫೋಟೋ|ಚಿತ್ರ|"
+    r"ഫോട്ടോ|ചിത്രം"
+    r")"
+)
+
+
+def wants_product_images(message: str | None) -> bool:
+    """True when the customer asks to see the vehicle (photo/image/pic),
+    as opposed to asking for the brochure document — gates sending the
+    photos configured in documents[product].images."""
+    return bool(PRODUCT_IMAGE_ASK_RE.search((message or "").strip()))
+
+
+def product_image_urls(product: str) -> list[str]:
+    """HTTPS image URLs configured for `product`, or an empty list.
+
+    Admin-configurable the same way brochures are: upload via
+    POST /admin/api/media/product_images, then add the returned URL(s) to
+    documents[product].images.
+    """
+    product = (product or "").strip()
+    entry = product_documents().get(product) or {}
+    urls = entry.get("images") or []
+    return [url for url in urls if isinstance(url, str) and url.strip()]
+
+
 def wants_product_info(message: str | None) -> bool:
     """True for a general product-info question (specs/features/details/
     "tell me about") that is NOT a literal document request — this should

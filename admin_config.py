@@ -83,6 +83,11 @@ DEFAULT_INTRO_TEXT = (
 #              servicing or warranty (one request must not deliver three files)
 JAM_PDF_BASE = "https://1.jamoutsourcing.com/f"
 
+#   images   — vehicle photo URLs sent when the customer asks to *see* the
+#              product (as opposed to asking for the brochure PDF). Empty by
+#              default — upload files via POST /admin/api/media/product_images
+#              and paste the returned URLs in here (or PATCH them in through
+#              the documents API) to turn photo requests on for a product.
 DEFAULT_PRODUCT_DOCUMENTS = {
     "King EV MAX": {
         "brochure": f"{JAM_PDF_BASE}/King_EV_MAX-English.pdf",
@@ -91,6 +96,7 @@ DEFAULT_PRODUCT_DOCUMENTS = {
             {"url": f"{JAM_PDF_BASE}/TVS_King_EV_MAX_Warranty_Policy.pdf",
              "kind": "warranty"},
         ],
+        "images": [],
     },
     "King Deluxe": {
         "brochure": f"{JAM_PDF_BASE}/King_Deluxe_Petrol-English.pdf",
@@ -104,6 +110,7 @@ DEFAULT_PRODUCT_DOCUMENTS = {
             {"url": f"{JAM_PDF_BASE}/Deluxe-Warranty-Policy-new.pdf",
              "kind": "warranty"},
         ],
+        "images": [],
     },
     "King Duramax Plus": {
         "brochure": f"{JAM_PDF_BASE}/King_Duramax_Plus_Petrol-English.pdf",
@@ -116,6 +123,7 @@ DEFAULT_PRODUCT_DOCUMENTS = {
             {"url": f"{JAM_PDF_BASE}/Duramaxplus-Warranty-Policy.pdf",
              "kind": "warranty"},
         ],
+        "images": [],
     },
 }
 
@@ -293,6 +301,12 @@ def validate_documents(documents: Any) -> None:
                     raise ValueError(
                         f"{where}.aliases[{i}] must be a non-empty string"
                     )
+        images = entry.get("images", [])
+        if not isinstance(images, list):
+            raise ValueError(f"{where}.images must be a list of URLs")
+        for i, url in enumerate(images):
+            if not isinstance(url, str) or not url.strip():
+                raise ValueError(f"{where}.images[{i}] must be a non-empty URL")
 
     # Two products answering to one spelling is not a preference, it is a bug:
     # matching returns the first hit, so the loser silently stops being

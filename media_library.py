@@ -63,7 +63,19 @@ IMAGES = MediaKind(
     label="image",
 )
 
-MEDIA_KINDS = {kind.name: kind for kind in (BROCHURES, IMAGES)}
+# Vehicle photos shown to a customer who asks to *see* the product (as
+# opposed to the brochure PDF). Uploaded here, then wired to a product via
+# admin_config documents[product].images — see client_media_assets.py.
+PRODUCT_IMAGES = MediaKind(
+    name="product_images",
+    subdir="products",
+    suffixes=frozenset({".jpg", ".jpeg", ".png"}),
+    magic=(b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n"),
+    max_bytes=5 * 1024 * 1024,
+    label="product image",
+)
+
+MEDIA_KINDS = {kind.name: kind for kind in (BROCHURES, IMAGES, PRODUCT_IMAGES)}
 
 # Kept for callers that predate the images kind.
 MAX_UPLOAD_BYTES = BROCHURES.max_bytes
