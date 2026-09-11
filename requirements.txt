@@ -15,6 +15,7 @@ requests==2.33.1
 # --- Document tooling (build_*.py scripts) — dev only ---
 reportlab==5.0.0
 pypdf
+openpyxl  # scripts/build_pgms.py
 
 # --- Tests ---
 pytest==8.3.4

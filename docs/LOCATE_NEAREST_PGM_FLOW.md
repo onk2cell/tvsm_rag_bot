@@ -1,4 +1,4 @@
-# Locate Nearest PGM — routing and location step
+# Locate Nearest PGM — routing, location and the nearest-PGM list
 
 Branch: `feature/locate-nearest-pgm` (based on `feature/vehicle-crud` @ `4a30553`).
 
@@ -18,11 +18,31 @@ bot        →  नक्की — मी तुम्हाला जवळच
               कृपया तुमचे WhatsApp करंट लोकेशन शेअर करा, तुमचा ६-अंकी पिनकोड टाइप करा,
               किंवा ज्या शहर/एरियामध्ये तुम्हाला सर्व्हिस सेंटर पाहायचे आहे त्याचे नाव टाइप करा.
 
-customer   →  Hinjewadi                          →  Gemini + Google Search → 411057
-bot        →  धन्यवाद — तुमच्या जवळच्या सर्व्हिस सेंटरसाठी पिनकोड 411057 नोंदवला आहे.
+customer   →  Vidyaranyapura                     →  Gemini + Google Search → 560097 → geocode
+   — or —   560097                             →  geocode (Nominatim, cached)
+   — or —   📍 location pin                    →  coordinates used as-is
+bot        →  पिनकोड 560097 जवळचे PGM:
+
+              1. Anees Auto Works — VIDYARANYAPURA (0.3 km)
+                 फोन: 8722574132
+              2. NAYEEM — Adityanagar (1.1 km)
+                 फोन: 9886427865
+              3. palya garage — Kanteerava Studio (1.4 km)
+                 फोन: 8892467219
+
+              पत्ता आणि नकाशा लिंकसाठी 1, 2 किंवा 3 पाठवा, किंवा पुन्हा शोधण्यासाठी
+              दुसरे लोकेशन किंवा पिनकोड पाठवा.
+customer   →  1
+bot        →  नाव: Anees Auto Works
+              पत्ता: VIDYARANYAPURA AMS LAYOUT BANGALORE 560097
+              फोन: Ajaz - 8722574132
+              नकाशा: https://maps.google.com/?q=13.083038,77.5506637
    — or —
 customer   →  Xyzzy Nagar                        →  search says NOT_FOUND
 bot        →  त्या ठिकाणाचा पिनकोड सापडला नाही. कृपया जवळच्या मोठ्या शहराचे ... नाव टाइप करा ...
+   — or —
+customer   →  411001                             →  geocodes to Pune; nothing within 50 km
+bot        →  माफ करा, त्या ठिकाणापासून 50 किमीच्या आत सध्या कोणतेही PGM नोंदलेले नाही. ...
 ```
 
 The routing question is sent in the language just chosen, in all seven menu
@@ -42,9 +62,24 @@ START ─┬─ has a 6-digit pincode ──────────────
 ```
 
 A WhatsApp location pin never enters the graph — its coordinates are exact
-and are acknowledged directly. The service-centre lookup itself (what a PGM
-is, the dataset, the card sent back) is still pending and slots into
-`_handle_pgm_turn` after the pincode is known.
+and go straight to the search.
+
+Once a location is known, `pgms.PgmDirectory` ranks every garage in
+`data/pgms.json` by haversine distance and returns the closest three within
+50 km. A typed or searched pincode is geocoded first through the same
+Nominatim geocoder (and cache file) the dealer flow uses; a pincode the
+geocoder cannot place gets `pgm_pincode_unresolved`, an empty result gets
+`pgm_none_nearby`. The list's DMS ids are kept in `session.pgm_candidates`
+so that a bare `1`–`3` on the next turn opens that garage's card (name,
+address, owner + phone, map link); the list stays live for further picks
+until the next search replaces it. Filler typed while a list is on screen
+gets the list's footer, not the opening location question.
+
+The dataset is the `Overall PGMs BNLR` sheet of the client's network
+workbook (`data/pgm_network_bnlr.xlsx`, dated 25.07.2026, not committed —
+same as the dealer CSV), built into `data/pgms.json` by
+`scripts/build_pgms.py`. Only that sheet: the dealer service centre, DASC,
+IASC and APS sheets are other outlet types.
 
 ## Commits
 
@@ -53,11 +88,40 @@ is, the dataset, the card sent back) is still pending and slots into
 | `50b5ded` | Ask vehicle or nearest PGM right after the language menu |
 | `8c0aff5` | Document the locate-nearest-PGM routing |
 | `476f58a` | Resolve a typed place name to a pincode in the PGM flow |
-| _(the commit updating this file)_ | Document the PGM location step |
+| `ff94afa` | Document the PGM location step |
+| _(the commit adding this section)_ | List the three nearest PGMs and open one on a pick |
 
 ## Code changes
 
-### `client_flow_intent.py` — new file (50 lines)
+### `scripts/build_pgms.py` — new file
+
+| Function | Change |
+|----------|--------|
+| `COLUMNS` | Header text → field. `Garage Name` becomes `name`, the sheet's `Name` (the owner) becomes `owner_name`, blanked when it repeats the garage name. |
+| `parse_coordinate` | Numbers, numbers-in-strings with stray commas / non-breaking spaces; `x`, blanks and out-of-India values (a `long` of `77569063`) are `None`. |
+| `map_url_for` | The sheet's own `maps.app.goo.gl` link when present, else `https://maps.google.com/?q=lat,lon`. |
+| `build_pgms` | Drops rows with unreadable coordinates or no name and reports each on stderr. |
+| `far_from_the_rest` | Reports (keeps) garages more than `--far-km` (100) from the median garage — a "Bengaluru" garage at Pune coordinates is a mistyped cell, but that is the client's call. |
+
+Current build: 1134 rows → 1131 kept, 3 dropped, 4 flagged (see
+"Data issues" below).
+
+### `pgms.py` — new file
+
+| Lines | Change |
+|-------|--------|
+| `Pgm` | Frozen dataclass: `dms_id, name, phone, address, area, map_url, latitude, longitude, owner_name, distance_km`. |
+| `PgmDirectory(pgms=None, *, pgms_path, geocoder, limit=3, max_km=50)` | Loads `data/pgms.json`; rows without coordinates are ignored. |
+| `find_nearest_by_coords` | Every garage ranked by `dealers.haversine_km`, then the top `limit` that are within `max_km`. Returns a list, possibly empty. |
+| `find_nearest_by_pincode` | Geocodes via the injected `NominatimPincodeGeocoder`; `None` when the pincode does not geocode, as distinct from `[]` (geocoded, none in range). |
+| `get_by_id` | For the pick. |
+
+**Note.** Built on `dealers.py`'s geocoder and haversine rather than a copy.
+In `client_tasks.py` one `NominatimPincodeGeocoder` is shared by both
+directories: each instance owns the `data/pincode_geocode_cache.json`
+file and two writers would overwrite each other's entries.
+
+### `client_flow_intent.py` — new file
 
 | Lines | Change |
 |-------|--------|
@@ -66,6 +130,7 @@ is, the dataset, the card sent back) is still pending and slots into
 | 16 | `_PGM_RE` — `pgm` / `p.g.m` (word-bounded) plus the acronym in Devanagari, Telugu, Tamil, Kannada and Malayalam script. |
 | 18–29 | `_VEHICLE_RE` — vehicle / gaadi / auto / rickshaw / product names, plus "vehicle"/"auto" in the five native scripts. |
 | 32–50 | `parse_flow_intent(text) -> str` — a numbered option decides outright; otherwise a message naming only one side wins; naming both, or neither, returns `""`. |
+| `_PICK_RE`, `parse_list_pick(text, count)` | A bare number (`2`, `2.`, `option 2`, `no. 2`) within `1..count`, else `0`. `2 more` and pincodes are not picks; a number past the end is nothing, not clamped. |
 
 **Note.** Deterministic by design, mirroring `client_language.parse_language_choice`.
 No LLM classifier: an unclear reply is re-asked. Kept in its own module so
@@ -120,6 +185,12 @@ fake the client without going through `invoke()`.
 | 492–497 | All six PGM messages registered in `MESSAGE_DEFAULTS`. |
 | 516 | `pgm_pincode_noted` declares its `{pincode}` placeholder, so an override naming anything else is rejected on write. |
 | 700–723 | Accessors `flow_intent_ask`, `pgm_flow_intro`, `pgm_location_ask`, `pgm_pincode_noted(pincode, language)`, `pgm_ask_bigger_city`, `pgm_lookup_failed`. |
+| `_LABELS` | Telugu, Tamil, Kannada, Malayalam added to the `dealer_label_*` set (name / address / phone / map / fallback / default dealer) — the PGM list and card reuse them, and the dealer card gains them for free. |
+| `_PGM_NEAREST_FOR_PINCODE` (`{pincode}`), `_PGM_NEAREST_FOR_LOCATION` | List headers. Two keys rather than a `{where}` placeholder because "pincode 560097" and "your shared location" decline differently per language. |
+| `_PGM_RESULTS_FOOTER` | "Reply 1, 2 or 3 … or share another location or pincode" — closes the list and is the whole reply to filler while a list is on screen. |
+| `_PGM_NONE_NEARBY` (`{km}`), `_PGM_PINCODE_UNRESOLVED` (`{pincode}`) | Empty result / pincode that did not geocode. |
+| `pgm_results_list(pgms, *, pincode, language)` | `n. name — area (d.d km)` + indented phone line per garage; area is not repeated when already in the name; address and map wait behind the pick. |
+| `pgm_card(pgm, *, language)` | Dealer-card shape with the `dealer_label_*` labels; no address falls back to the area; owner shown as `Owner - phone` when it differs from the garage name. |
 
 **Note.** Registering in `MESSAGE_DEFAULTS` is what makes both messages
 appear in `GET /admin/api/messages` and overridable per language through
@@ -146,8 +217,12 @@ vehicle flow does not — a place name.
 | 1197–1224 | `_ask_flow_intent` — sets `awaiting_flow_intent`, clears `flow`, sends the localized ask, saves. Used for the first ask and every re-ask. Not added to `session.history` (see note). |
 | 1231–1276 | `_apply_flow_intent` — vehicle → clear flag, `flow = "vehicle"`, return the qualification seed; PGM → clear flag, `flow = "pgm"`, send share-location image (no caption) + `pgm_flow_intro` + `pgm_location_ask` (line 1258), complete the turn, return `None`; else re-ask, return `None`. |
 | 1278–1291 | `_qualification_start_message(customer, language)` — extracted verbatim from the old inline block so the vehicle route and the legacy path produce the same engine message (including the unknown-CRM "ask their name first" variant). |
-| 1293–1343 | `_handle_pgm_turn` — the PGM flow body. Location pin: `location_thanks` if coordinates parse, else `location_unreadable`. Text: `resolve_pgm_location(text)` (line 1323) → `pincode` stores `lead_profile["pincode"]` (and `lead_profile["area"]` = the typed place when it came from search) and replies `pgm_pincode_noted`; `not_found` → `pgm_ask_bigger_city`; `lookup_failed` → `pgm_lookup_failed`; `unclear` → `pgm_location_ask` again. Never calls the engine, still-interested or dispose. |
-| 2426–2436 | `_resolve_language` mid-chat switch also skipped while `awaiting_flow_intent` — bare "1" is English in the language menu and was flipping a Marathi customer to English. |
+| `ClientSession.pgm_candidates` | `list[str]` of the DMS ids last listed, in order. Round-tripped in `client_adapters.py`. |
+| `__init__(pgm_directory=None)` | Optional; without it the flow degrades to `pgm_pincode_noted` / `location_thanks` as before. |
+| `_handle_pgm_turn` | Location pin → `find_nearest_by_coords` → `_pgm_results`. Text → a pick (`parse_list_pick` against `pgm_candidates`) opens `pgm_card`; otherwise `_pgm_text_turn`. Never calls the engine, still-interested or dispose. |
+| `_pgm_text_turn` | `resolve_pgm_location(text)`: `not_found` → `pgm_ask_bigger_city`; `lookup_failed` → `pgm_lookup_failed`; `unclear` → `pgm_results_footer` if a list is on screen else `pgm_location_ask`; `pincode` → stored in `lead_profile["pincode"]` (+ `["area"]` when searched), then `find_nearest_by_pincode` → `None` → `pgm_pincode_unresolved` (logged), else `_pgm_results`. |
+| `_pgm_results` | Writes `pgm_candidates` (empty list clears a stale one), renders `pgm_none_nearby(max_km)` or `pgm_results_list`. |
+| `_resolve_language` | Mid-chat switch skipped while `awaiting_flow_intent`, and for a bare number anywhere in the PGM flow — "2" is a pick (or nothing), not "switch to Hindi". A language typed in words still switches. |
 
 **Notes.**
 
@@ -207,6 +282,25 @@ With a fake client: the call goes to `rag.get_client()` with one
 | 81–95 | The four location-step messages are distinct per language; `{pincode}` is rendered. |
 | 98–103 | `pgm_pincode_noted` declares `{pincode}`; `pgm_location_ask` declares nothing. |
 
+### `tests/test_pgms.py` — new file
+
+Ranking and the limit; the 50 km radius (Mysuru → `[]`, Nelamangala → only
+Bengaluru garages); `find_nearest_by_pincode` `None` vs `[]`; `get_by_id`;
+`parse_coordinate` on the sheet's real shapes; `build_pgms` cleaning, owner
+de-duplication, derived map link and the dropped-row report.
+
+### `tests/test_client_flow_intent.py` (added)
+
+`parse_list_pick`: accepted forms, out-of-range numbers, `2 more`, a
+pincode, and a shorter list.
+
+### `tests/test_client_static_messages.py` (added)
+
+The five result messages distinct across all seven languages; list layout
+(numbering, area, distance, phone line only when there is a phone, no
+address/map in the list); the card in Kannada with the localized labels;
+placeholder declarations.
+
 ### `tests/test_client_processing.py`
 
 | Lines | Change |
@@ -231,8 +325,19 @@ With a fake client: the call goes to `rag.get_client()` with one
 | 2503–2517 | Location pin → `location_thanks`; pin without coordinates → `location_unreadable`. |
 | 2520–2542 | Returning customer: routing ask, then "1", then the still-interested ask in Hindi. |
 | 2545–2551 | Both new session fields exist on `ClientSession`. |
+| `FakePgmDirectory`, `_pgm_search_session` | Three garages; `geocoded` is what a pincode resolves to, `results` overrides the search. |
+| pincode → list | Header names the pincode, three numbered lines with area / distance / phone, footer; `pgm_candidates` and `lead_profile["pincode"]` set; no engine turn. |
+| place → list | Searched to a pincode, then geocoded; `area` stored. |
+| pin → list | `find_nearest_by_coords` called with the pin, no geocoding; unreadable pin still re-asked. |
+| pick | `1` opens the card; `3.` opens another (area as address, phone alone without an owner); list stays. |
+| number without a list | Location ask, no search, language unchanged; "Hindi please" still switches. |
+| filler after list | Footer, not the intro; `4` (past the end) likewise. |
+| new search | Replaces candidates; a stale `3` opens nothing. |
+| nothing within radius | `pgm_none_nearby` with 50 km, candidates cleared, still in the flow. |
+| pincode did not geocode | `pgm_pincode_unresolved`, no coordinate search. |
+| language | Marathi customer: Marathi header, `फोन:` label, `2` opens the card in Marathi and does **not** switch the session to Hindi. |
 
-Suite: 522 passed, 9 failed — the same 9 failures as before these changes
+Suite: 565 passed, 9 failed — the same 9 failures as before these changes
 (`test_230707_*`, `test_distance_is_shown_on_the_dealer_card`,
 `test_250703_conversation_restarts_after_wrap_up`,
 `test_pincode_message_asks_nearest_dealer_confirm_once`,
@@ -260,11 +365,36 @@ pre-existing and unrelated.
 - Dispose is not called anywhere in the PGM flow. Whether a PGM enquiry
   should reach CRM, and as what, is part of the pending requirement.
 
-## Open for the PGM requirements
+- Rebuilding the dataset: drop the new workbook at
+  `data/pgm_network_bnlr.xlsx` and run `python scripts/build_pgms.py`, then
+  commit `data/pgms.json` (whitelisted in `.gitignore`) and redeploy. Read
+  the `dropped` / `check` lines it prints. `openpyxl` is a dev dependency
+  for this script only.
+- Radius and list length are constructor arguments on `PgmDirectory`
+  (`max_km=50`, `limit=3`); the footer text hard-codes "1, 2 or 3", so
+  change both together.
+- The pincode geocoder is Nominatim (1 req/s, cached in
+  `data/pincode_geocode_cache.json`, shared with the dealer flow). First
+  hit on a new pincode costs ~1–2 s.
 
-`_handle_pgm_turn` (`client_processing.py:1293`) is the single place to
-extend. By the time it replies `pgm_pincode_noted`, the session holds the
-pincode in `lead_profile["pincode"]` (and the typed place in
-`lead_profile["area"]` when it came from search); for a shared pin the
-coordinates are in `extract_coordinates(event)`. The service-centre lookup,
-the card sent back and any follow-up question go right there.
+## Data issues in the 25.07.2026 sheet
+
+Dropped (unreadable coordinates): `58920745 RM AUTO GARAGE` (`x`),
+`65135285 S S auto garage` (long `77569063`), `80148008 TANVEER AUTO
+SERVICE` (long = lat).
+
+Kept but flagged (far from the rest of the network — likely mistyped or
+swapped cells): `58920933 SALIM AUTO WORKS` (Hosahalli) at Pune
+coordinates, `58920837 SON AUTO ENGINEERING WORK` (Hosadurga, 167 km),
+`58920787 KARNATAKA MOTORS` (Vishveswara Puram) at Mysuru coordinates,
+`62885020 RAJA` (Jaya Nagar, 111 km). Until the client corrects them, a
+Pune or Mysuru customer will be offered one of these.
+
+## Still open
+
+- Whether a PGM enquiry should reach CRM (dispose), and as what. Nothing
+  is sent today.
+- An admin upload for the workbook (rebuild without a redeploy), like the
+  vehicle and message endpoints.
+- Whether to also offer authorised service centres (the other four sheets)
+  when no PGM is within range.

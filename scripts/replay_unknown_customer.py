@@ -13,6 +13,7 @@ import admin_config
 from client_processing import ClientMessageProcessor, ClientSession, Customer
 from conversation_engine import make_engine
 from dealers import DealerDirectory
+from pgms import PgmDirectory
 
 MOBILE = "+910000088888"
 
@@ -121,6 +122,7 @@ def main() -> None:
         transcriber=NoopTranscriber(),
         document_recognizer=NoopRecognizer(),
         dealer_directory=DealerDirectory(),
+        pgm_directory=PgmDirectory(),
         dispose_client=dispose,
     )
     for index, text in enumerate(MESSAGES):

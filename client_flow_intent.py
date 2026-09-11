@@ -48,3 +48,20 @@ def parse_flow_intent(text: str | None) -> str:
     if wants_vehicle and not wants_pgm:
         return FLOW_VEHICLE
     return ""
+
+
+# "2" / "2." / "option 2" / "no. 2" — a pick from the numbered PGM list.
+_PICK_RE = re.compile(r"(?i)^\s*(?:option|no\.?|number)?\s*([1-9])\s*[\).:\-]?\s*$")
+
+
+def parse_list_pick(text: str | None, count: int) -> int:
+    """1-based index picked from a numbered list of ``count`` items, or 0.
+
+    Only a bare number counts: "2 more" or a pincode is not a pick, and a
+    number past the end of the list is nothing rather than clamped.
+    """
+    match = _PICK_RE.match(text or "")
+    if not match:
+        return 0
+    number = int(match.group(1))
+    return number if 1 <= number <= count else 0

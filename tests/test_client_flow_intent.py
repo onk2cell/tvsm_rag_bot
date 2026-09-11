@@ -33,3 +33,25 @@ def test_pgm_replies(text):
 def test_unclear_replies_are_not_guessed(text):
     """Anything that is not a clear choice is re-asked, never routed."""
     assert parse_flow_intent(text) == ""
+
+
+# --- picking from the numbered PGM list --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [("1", 1), (" 2 ", 2), ("3.", 3), ("2)", 2), ("option 3", 3), ("no. 2", 2),
+     ("number 1", 1), ("4", 0), ("0", 0), ("2 more", 0), ("560097", 0),
+     ("", 0), (None, 0), ("first", 0)],
+)
+def test_parse_list_pick(text, expected):
+    from client_flow_intent import parse_list_pick
+
+    assert parse_list_pick(text, 3) == expected
+
+
+def test_parse_list_pick_respects_a_shorter_list():
+    from client_flow_intent import parse_list_pick
+
+    assert parse_list_pick("2", 1) == 0
+    assert parse_list_pick("1", 0) == 0

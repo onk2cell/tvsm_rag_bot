@@ -101,3 +101,89 @@ def test_pgm_pincode_noted_declares_its_placeholder():
 
     assert placeholders_for("pgm_pincode_noted") == {"pincode"}
     assert placeholders_for("pgm_location_ask") == frozenset()
+
+
+# --- PGM results -------------------------------------------------------------
+
+
+class _Pgm:
+    def __init__(self, **values):
+        defaults = dict(
+            dms_id="1", name="Anees Auto Works", phone="8722574132",
+            address="VIDYARANYAPURA AMS LAYOUT BANGALORE 560097",
+            area="Vidyaranyapura", map_url="https://maps.google.com/?q=13.08,77.55",
+            owner_name="", distance_km=1.23,
+        )
+        defaults.update(values)
+        self.__dict__.update(defaults)
+
+
+def test_pgm_result_messages_are_localized_for_every_menu_language():
+    from client_static_messages import (
+        pgm_none_nearby,
+        pgm_pincode_unresolved,
+        pgm_results_footer,
+        pgm_results_list,
+    )
+
+    footers = {lang: pgm_results_footer(lang) for lang in _ALL_LANGUAGES}
+    assert len(set(footers.values())) == len(_ALL_LANGUAGES)
+    none = {lang: pgm_none_nearby(50, lang) for lang in _ALL_LANGUAGES}
+    assert len(set(none.values())) == len(_ALL_LANGUAGES)
+    assert all("50 " in text for text in none.values())
+    unresolved = {lang: pgm_pincode_unresolved("560097", lang) for lang in _ALL_LANGUAGES}
+    assert len(set(unresolved.values())) == len(_ALL_LANGUAGES)
+    assert all("560097" in text for text in unresolved.values())
+    headers = set()
+    for lang in _ALL_LANGUAGES:
+        by_pin = pgm_results_list([_Pgm()], pincode="560097", language=lang)
+        by_loc = pgm_results_list([_Pgm()], language=lang)
+        assert "560097" in by_pin.splitlines()[0]
+        assert by_pin.splitlines()[0] != by_loc.splitlines()[0]
+        headers.add(by_pin.splitlines()[0])
+    assert len(headers) == len(_ALL_LANGUAGES)
+
+
+def test_pgm_results_list_numbers_entries_with_area_distance_and_phone():
+    from client_static_messages import pgm_results_list
+
+    text = pgm_results_list(
+        [_Pgm(), _Pgm(dms_id="2", name="GK Motors Laggere", area="Laggere",
+                      phone="", distance_km=4.0)],
+        pincode="560097",
+    )
+
+    assert text.splitlines()[0] == "Nearest PGMs to pincode 560097:"
+    assert "1. Anees Auto Works — Vidyaranyapura (1.2 km)" in text
+    assert "   Phone: 8722574132" in text
+    # Area already in the name is not repeated; no phone, no phone line.
+    assert "2. GK Motors Laggere (4.0 km)" in text
+    assert text.count("Phone:") == 1
+    assert text.rstrip().endswith("to search again.")
+    # The card details wait behind the pick.
+    assert "AMS LAYOUT" not in text and "maps.google" not in text
+
+
+def test_pgm_card_uses_the_dealer_labels_in_the_customer_language():
+    from client_static_messages import pgm_card
+
+    card = pgm_card(_Pgm(owner_name="Ajaz"), language="Kannada")
+    assert card.splitlines() == [
+        "ಹೆಸರು: Anees Auto Works",
+        "ವಿಳಾಸ: VIDYARANYAPURA AMS LAYOUT BANGALORE 560097",
+        "ಫೋನ್: Ajaz - 8722574132",
+        "ನಕ್ಷೆ: https://maps.google.com/?q=13.08,77.55",
+    ]
+    # No address falls back to the area; no owner shows the phone alone.
+    card = pgm_card(_Pgm(address=""))
+    assert "Address: Vidyaranyapura" in card
+    assert "Phone: 8722574132" in card
+
+
+def test_pgm_result_messages_declare_their_placeholders():
+    from client_static_messages import placeholders_for
+
+    assert placeholders_for("pgm_nearest_for_pincode") == {"pincode"}
+    assert placeholders_for("pgm_none_nearby") == {"km"}
+    assert placeholders_for("pgm_pincode_unresolved") == {"pincode"}
+    assert placeholders_for("pgm_results_footer") == frozenset()

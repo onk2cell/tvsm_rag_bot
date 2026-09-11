@@ -2392,7 +2392,7 @@ def test_location_pin_while_routing_ask_pending_is_re_asked_not_looked_up():
     assert deps["state"].sessions["+918286871533"].awaiting_flow_intent is True
 
 
-def _pgm_session(monkeypatch, search):
+def _pgm_session(monkeypatch, search, **overrides):
     """A returning customer walked into the PGM flow in English, with the
     pincode web search replaced by ``search`` (query -> answer)."""
     from bot.pgm_graph import resolve_pgm_location
@@ -2406,7 +2406,8 @@ def _pgm_session(monkeypatch, search):
         "crm-1", "Asha", "", product_enquired="King EV MAX", last_status="Interested"
     )
     processor, deps = _processor(
-        directory=directory, preselect_language=None, skip_still_interested=False
+        directory=directory, preselect_language=None, skip_still_interested=False,
+        **overrides,
     )
     processor.process(_event(message_id="m1", content="Hi"))
     processor.process(_event(message_id="m2", content="1"))  # English
@@ -2515,6 +2516,228 @@ def test_pgm_location_pin_is_acknowledged(monkeypatch):
     processor.process(_event(message_id="m5", type="location", content=""))
     assert "could not read your location" in deps["reply_sender"].calls[-1]["text"]
     assert deps["engine"].turns == []
+
+
+# --- nearest-PGM search once the location is known --------------------------
+
+
+class FakePgmDirectory:
+    """Three garages near MG Road; ``geocoded`` is what a pincode resolves to
+    (None = geocoder failure), ``results`` overrides the coordinate search."""
+
+    def __init__(self, geocoded=(12.975, 77.606), results=None):
+        from pgms import Pgm
+
+        self.max_km = 50.0
+        self.geocoded = geocoded
+        self.results = results
+        self.coord_calls = []
+        self.pincode_calls = []
+        self.pgms = {
+            "58724079": Pgm("58724079", "Anees Auto Works", "8722574132",
+                            "VIDYARANYAPURA AMS LAYOUT", "Vidyaranyapura",
+                            "https://maps.google.com/?q=13.08,77.55", 13.08, 77.55,
+                            owner_name="Ajaz"),
+            "15140": Pgm("15140", "GK Motors", "9880155599", "Laggere Main Rd",
+                         "Laggere", "https://maps.google.com/?q=13.0,77.52", 13.0, 77.52),
+            "11338": Pgm("11338", "Vivegam", "9901541111", "", "Kalasipalya",
+                         "https://maps.google.com/?q=12.95,77.57", 12.95, 77.57),
+        }
+
+    def get_by_id(self, dms_id):
+        return self.pgms.get(dms_id)
+
+    def find_nearest_by_coords(self, latitude, longitude):
+        from dataclasses import replace
+
+        self.coord_calls.append((latitude, longitude))
+        if self.results is not None:
+            return list(self.results)
+        return [
+            replace(pgm, distance_km=km)
+            for pgm, km in zip(self.pgms.values(), (1.2, 3.4, 5.6))
+        ]
+
+    def find_nearest_by_pincode(self, pincode):
+        self.pincode_calls.append(pincode)
+        if self.geocoded is None:
+            return None
+        return self.find_nearest_by_coords(*self.geocoded)
+
+
+def _pgm_search_session(monkeypatch, search=None, **directory_kwargs):
+    pgm_directory = FakePgmDirectory(**directory_kwargs)
+    processor, deps = _pgm_session(
+        monkeypatch,
+        search=search or (lambda q: "560097 Vidyaranyapura, Bengaluru"),
+        pgm_directory=pgm_directory,
+    )
+    return processor, deps, pgm_directory
+
+
+def test_pgm_pincode_lists_the_nearest_three_with_phone_and_distance(monkeypatch):
+    processor, deps, pgm_directory = _pgm_search_session(monkeypatch)
+
+    processor.process(_event(message_id="m4", content="560097"))
+
+    assert pgm_directory.pincode_calls == ["560097"]
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert reply.splitlines()[0] == "Nearest PGMs to pincode 560097:"
+    assert "1. Anees Auto Works — Vidyaranyapura (1.2 km)" in reply
+    assert "Phone: 8722574132" in reply
+    assert "2. GK Motors — Laggere (3.4 km)" in reply
+    assert "3. Vivegam — Kalasipalya (5.6 km)" in reply
+    assert "Reply 1, 2 or 3" in reply
+    session = deps["state"].sessions["+918286871533"]
+    assert session.pgm_candidates == ["58724079", "15140", "11338"]
+    assert session.lead_profile["pincode"] == "560097"
+    assert deps["engine"].turns == []
+
+
+def test_pgm_place_name_is_searched_then_geocoded_for_the_list(monkeypatch):
+    processor, deps, pgm_directory = _pgm_search_session(monkeypatch)
+
+    processor.process(_event(message_id="m4", content="Vidyaranyapura"))
+
+    assert pgm_directory.pincode_calls == ["560097"]
+    session = deps["state"].sessions["+918286871533"]
+    assert session.lead_profile["area"] == "Vidyaranyapura"
+    assert "560097" in deps["reply_sender"].calls[-1]["text"]
+
+
+def test_pgm_location_pin_is_searched_directly_without_geocoding(monkeypatch):
+    processor, deps, pgm_directory = _pgm_search_session(monkeypatch)
+
+    processor.process(
+        _event(message_id="m4", type="location", content="",
+               latitude=12.975, longitude=77.606)
+    )
+
+    assert pgm_directory.coord_calls == [(12.975, 77.606)]
+    assert pgm_directory.pincode_calls == []
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert reply.splitlines()[0] == "Nearest PGMs to your shared location:"
+    assert "Anees Auto Works" in reply
+    # A pin that cannot be read is still asked again, not searched.
+    processor.process(_event(message_id="m5", type="location", content=""))
+    assert "could not read your location" in deps["reply_sender"].calls[-1]["text"]
+    assert len(pgm_directory.coord_calls) == 1
+
+
+def test_pgm_pick_opens_the_card_and_keeps_the_list(monkeypatch):
+    processor, deps, _ = _pgm_search_session(monkeypatch)
+    processor.process(_event(message_id="m4", content="560097"))
+
+    processor.process(_event(message_id="m5", content="1"))
+
+    card = deps["reply_sender"].calls[-1]["text"]
+    assert card.splitlines() == [
+        "Name: Anees Auto Works",
+        "Address: VIDYARANYAPURA AMS LAYOUT",
+        "Phone: Ajaz - 8722574132",
+        "Map: https://maps.google.com/?q=13.08,77.55",
+    ]
+    # The list is still live: a second pick works too.
+    processor.process(_event(message_id="m6", content="3."))
+    card = deps["reply_sender"].calls[-1]["text"]
+    assert "Name: Vivegam" in card
+    assert "Address: Kalasipalya" in card       # no address -> area
+    assert "Phone: 9901541111" in card          # no owner -> phone alone
+    session = deps["state"].sessions["+918286871533"]
+    assert session.pgm_candidates == ["58724079", "15140", "11338"]
+    assert deps["engine"].turns == []
+
+
+def test_pgm_number_without_a_list_is_asked_for_a_location(monkeypatch):
+    processor, deps, pgm_directory = _pgm_search_session(monkeypatch)
+
+    processor.process(_event(message_id="m4", content="2"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "city/area" in reply and "pincode" in reply
+    assert pgm_directory.coord_calls == []
+    # ...and that "2" was not "switch to Hindi" either.
+    assert deps["state"].sessions["+918286871533"].language == "English"
+
+    # A language named in words still switches mid-flow.
+    processor.process(_event(message_id="m5", content="Hindi please"))
+    assert deps["state"].sessions["+918286871533"].language == "Hindi"
+
+
+def test_pgm_filler_after_the_list_repeats_the_footer_not_the_intro(monkeypatch):
+    processor, deps, _ = _pgm_search_session(monkeypatch)
+    processor.process(_event(message_id="m4", content="560097"))
+
+    processor.process(_event(message_id="m5", content="ok"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert reply.startswith("Reply 1, 2 or 3")
+    # "4" is past the end of the list: not a pick, not a place.
+    processor.process(_event(message_id="m6", content="4"))
+    assert deps["reply_sender"].calls[-1]["text"] == reply
+
+
+def test_pgm_new_search_replaces_the_candidates(monkeypatch):
+    processor, deps, pgm_directory = _pgm_search_session(monkeypatch)
+    processor.process(_event(message_id="m4", content="560097"))
+
+    pgm_directory.results = [pgm_directory.pgms["15140"]]
+    processor.process(_event(message_id="m5", content="560058"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.pgm_candidates == ["15140"]
+    assert session.lead_profile["pincode"] == "560058"
+    # Stale "3" from the previous list opens nothing.
+    processor.process(_event(message_id="m6", content="3"))
+    assert deps["reply_sender"].calls[-1]["text"].startswith("Reply 1, 2 or 3")
+
+
+def test_pgm_nothing_within_radius_says_so_and_clears_the_list(monkeypatch):
+    processor, deps, pgm_directory = _pgm_search_session(monkeypatch)
+    processor.process(_event(message_id="m4", content="560097"))
+
+    pgm_directory.results = []
+    processor.process(_event(message_id="m5", content="411001"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "no PGM listed within 50 km" in reply
+    session = deps["state"].sessions["+918286871533"]
+    assert session.pgm_candidates == []
+    assert session.flow == "pgm"
+
+
+def test_pgm_pincode_that_does_not_geocode_asks_for_a_pin(monkeypatch):
+    processor, deps, pgm_directory = _pgm_search_session(monkeypatch, geocoded=None)
+
+    processor.process(_event(message_id="m4", content="560097"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "could not locate pincode 560097" in reply
+    assert "WhatsApp location" in reply
+    assert pgm_directory.coord_calls == []
+
+
+def test_pgm_results_are_in_the_customer_language(monkeypatch):
+    pgm_directory = FakePgmDirectory()
+    from bot.pgm_graph import resolve_pgm_location
+
+    monkeypatch.setattr(
+        "client_processing.resolve_pgm_location",
+        lambda text: resolve_pgm_location(text, search=lambda q: "NOT_FOUND"),
+    )
+    processor, deps = _fresh_new_lead(pgm_directory=pgm_directory)  # Marathi
+    processor.process(_event(message_id="m3", content="2"))
+
+    processor.process(_event(message_id="m4", content="560097"))
+    listing = deps["reply_sender"].calls[-1]["text"]
+    assert listing.splitlines()[0] == "पिनकोड 560097 जवळचे PGM:"
+    assert "फोन: 8722574132" in listing
+
+    # "2" picks the second garage; it is not "switch to Hindi" (2 in the
+    # language menu), so the card and the session stay Marathi.
+    processor.process(_event(message_id="m5", content="2"))
+    assert "नाव: GK Motors" in deps["reply_sender"].calls[-1]["text"]
+    assert deps["state"].sessions["+918286871533"].language == "Marathi"
 
 
 def test_returning_customer_vehicle_choice_then_still_interested():

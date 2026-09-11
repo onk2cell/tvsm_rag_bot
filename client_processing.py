@@ -21,7 +21,12 @@ from bot.graph import (
     classify_share_consent_reply,
     classify_still_interested_reply,
 )
-from client_flow_intent import FLOW_PGM, FLOW_VEHICLE, parse_flow_intent
+from client_flow_intent import (
+    FLOW_PGM,
+    FLOW_VEHICLE,
+    parse_flow_intent,
+    parse_list_pick,
+)
 from client_language import (
     LANGUAGE_PROMPT,
     SUPPORTED_LANGUAGES,
@@ -37,6 +42,7 @@ from dealers import (
     format_dealer_confirm_ask,
     format_dealer_confirm_ask_from_dealer,
 )
+from pgms import PgmDirectory
 from dispose import (
     build_dispose_payload,
     normalize_product_name,
@@ -67,10 +73,15 @@ from client_static_messages import (
     location_thanks,
     location_unreadable,
     pgm_ask_bigger_city,
+    pgm_card,
     pgm_flow_intro,
     pgm_location_ask,
     pgm_lookup_failed,
+    pgm_none_nearby,
     pgm_pincode_noted,
+    pgm_pincode_unresolved,
+    pgm_results_footer,
+    pgm_results_list,
     place_redirect_message,
     product_doc_caption,
     share_location_ask,
@@ -285,6 +296,9 @@ class ClientSession:
     # value keeps every later turn out of the LLM qualification path.
     awaiting_flow_intent: bool = False
     flow: str = ""
+    # DMS ids of the PGMs last listed, in the order shown, so a bare "2" on
+    # the next turn can be resolved to a garage. Replaced by every new search.
+    pgm_candidates: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -351,6 +365,7 @@ class ClientMessageProcessor:
         transcriber: AudioTranscriber,
         document_recognizer: DocumentRecognizer,
         dealer_directory: DealerDirectory | None = None,
+        pgm_directory: PgmDirectory | None = None,
         dispose_client: DisposeClient | None = None,
         sleep: Callable[[float], None] = time.sleep,
         retry_wait: float = 30,
@@ -365,6 +380,7 @@ class ClientMessageProcessor:
         self._transcriber = transcriber
         self._document_recognizer = document_recognizer
         self._dealer_directory = dealer_directory
+        self._pgm_directory = pgm_directory
         self._dispose_client = dispose_client
         self._sleep = sleep
         self._retry_wait = retry_wait
@@ -1303,35 +1319,45 @@ class ClientMessageProcessor:
         said "not the vehicle" is not asked vehicle questions.
 
         Where the customer is comes in one of three shapes. A location pin
-        is exact and acknowledged as-is. A typed message goes through
+        is exact and searched as-is. A typed message goes through
         bot.pgm_graph: a pincode is taken directly; a place name is resolved
         to a pincode by Gemini + Google Search; a place the search cannot pin
         down is answered by asking for a bigger city. The pincode lands in
         lead_profile["pincode"], and the place the customer typed in
-        lead_profile["area"], for the service-centre lookup that follows.
+        lead_profile["area"], then is geocoded for the PGM search.
+
+        With a list in front of them, a bare "1"-"3" opens that garage's
+        card; the list stays valid, so they can open another. Anything else
+        that is not a place is answered with the list's footer, not the
+        opening location question.
         """
         lang = language or self._session_language(session)
         if event.get("type") == "location":
             user_label = "shared location"
-            if extract_coordinates(event) is not None:
+            coords = extract_coordinates(event)
+            if coords is None:
+                reply = location_unreadable(lang)
+            elif self._pgm_directory is None:
                 reply = location_thanks(lang)
             else:
-                reply = location_unreadable(lang)
+                reply = self._pgm_results(
+                    session,
+                    self._pgm_directory.find_nearest_by_coords(*coords),
+                    language=lang,
+                )
         else:
             text = str(event.get("content") or "").strip()
             user_label = text or str(event["type"])
-            located = resolve_pgm_location(text)
-            if located.result == "pincode":
-                session.lead_profile["pincode"] = located.pincode
-                if located.search_result:
-                    session.lead_profile["area"] = text
-                reply = pgm_pincode_noted(located.pincode, lang)
-            elif located.result == "not_found":
-                reply = pgm_ask_bigger_city(lang)
-            elif located.result == "lookup_failed":
-                reply = pgm_lookup_failed(lang)
+            pick = parse_list_pick(text, len(session.pgm_candidates))
+            picked = (
+                self._pgm_directory.get_by_id(session.pgm_candidates[pick - 1])
+                if pick and self._pgm_directory is not None
+                else None
+            )
+            if picked is not None:
+                reply = pgm_card(picked, language=lang)
             else:
-                reply = pgm_location_ask(lang)
+                reply = self._pgm_text_turn(session, text, language=lang)
         self._reply_and_record(
             event,
             session=session,
@@ -1341,6 +1367,48 @@ class ClientMessageProcessor:
             started=started,
         )
         self._complete_turn(session, event["message_id"], user_label, reply)
+
+    def _pgm_text_turn(
+        self, session: ClientSession, text: str, *, language: str
+    ) -> str:
+        located = resolve_pgm_location(text)
+        if located.result == "not_found":
+            return pgm_ask_bigger_city(language)
+        if located.result == "lookup_failed":
+            return pgm_lookup_failed(language)
+        if located.result != "pincode":
+            if session.pgm_candidates:
+                return pgm_results_footer(language)
+            return pgm_location_ask(language)
+
+        session.lead_profile["pincode"] = located.pincode
+        if located.search_result:
+            session.lead_profile["area"] = text
+        if self._pgm_directory is None:
+            return pgm_pincode_noted(located.pincode, language)
+        nearest = self._pgm_directory.find_nearest_by_pincode(located.pincode)
+        if nearest is None:
+            log.warning("PGM search: pincode %s did not geocode", located.pincode)
+            return pgm_pincode_unresolved(located.pincode, language)
+        return self._pgm_results(
+            session, nearest, language=language, pincode=located.pincode
+        )
+
+    def _pgm_results(
+        self,
+        session: ClientSession,
+        nearest: list,
+        *,
+        language: str,
+        pincode: str = "",
+    ) -> str:
+        """Remember the list for the pick on the next turn, then render it.
+        An empty list also clears the candidates: a stale "2" must not open
+        a garage from the previous search."""
+        session.pgm_candidates = [pgm.dms_id for pgm in nearest]
+        if not nearest:
+            return pgm_none_nearby(self._pgm_directory.max_km, language)
+        return pgm_results_list(nearest, pincode=pincode, language=language)
 
     def _returning_product(self, customer: Customer | None) -> str:
         """Best-known prior product for the still-interested ask."""
@@ -2425,11 +2493,18 @@ class ClientMessageProcessor:
             # pending — their "Press 1 / Press 2" reuse the same digits 1-7
             # that _NAME_TO_LANGUAGE maps to language-menu choices, so a bare
             # "1" meant as "yes" / "vehicle" would otherwise get misread as
-            # "switch to English" (1 = English in the language menu).
+            # "switch to English" (1 = English in the language menu). In the
+            # PGM flow a bare number is only ever a pick from the numbered
+            # list (or nothing), never a language; a typed language name
+            # still switches.
+            bare_number_in_pgm_flow = (
+                session.flow == FLOW_PGM and parse_list_pick(content, 9) > 0
+            )
             if (
                 event.get("type") == "text"
                 and not session.awaiting_still_interested
                 and not session.awaiting_flow_intent
+                and not bare_number_in_pgm_flow
             ):
                 self._maybe_switch_language(session, content)
             return session.language

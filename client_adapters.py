@@ -578,6 +578,9 @@ class RedisClientState:
                     data.get("awaiting_flow_intent") or False
                 ),
                 flow=str(data.get("flow") or ""),
+                pgm_candidates=[
+                    str(item) for item in (data.get("pgm_candidates") or [])
+                ],
             )
         return ClientSession(
             conversation_id=self._id_factory(),
@@ -624,6 +627,7 @@ class RedisClientState:
             "qualification_started": session.qualification_started,
             "awaiting_flow_intent": session.awaiting_flow_intent,
             "flow": session.flow,
+            "pgm_candidates": session.pgm_candidates,
         }
         self._redis.set(
             self._key(session.mobile),

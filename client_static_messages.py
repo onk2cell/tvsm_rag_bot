@@ -5,7 +5,7 @@ back to English for these mechanical cards until translations are filled in.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 import admin_config
 
@@ -51,6 +51,38 @@ _LABELS = {
         "map": "नकाशा",
         "fallback_address": "(पूर्ण पत्ता डीलरशिपला विचारा)",
         "default_dealer": "TVS डीलरशिप",
+    },
+    "Telugu": {
+        "name": "పేరు",
+        "address": "చిరునామా",
+        "phone": "ఫోన్",
+        "map": "మ్యాప్",
+        "fallback_address": "(పూర్తి చిరునామా డీలర్‌షిప్‌ను అడగండి)",
+        "default_dealer": "TVS డీలర్‌షిప్",
+    },
+    "Tamil": {
+        "name": "பெயர்",
+        "address": "முகவரி",
+        "phone": "தொலைபேசி",
+        "map": "வரைபடம்",
+        "fallback_address": "(முழு முகவரிக்கு டீலர்ஷிப்பைக் கேளுங்கள்)",
+        "default_dealer": "TVS டீலர்ஷிப்",
+    },
+    "Kannada": {
+        "name": "ಹೆಸರು",
+        "address": "ವಿಳಾಸ",
+        "phone": "ಫೋನ್",
+        "map": "ನಕ್ಷೆ",
+        "fallback_address": "(ಪೂರ್ಣ ವಿಳಾಸಕ್ಕಾಗಿ ಡೀಲರ್‌ಶಿಪ್ ಅನ್ನು ಕೇಳಿ)",
+        "default_dealer": "TVS ಡೀಲರ್‌ಶಿಪ್",
+    },
+    "Malayalam": {
+        "name": "പേര്",
+        "address": "വിലാസം",
+        "phone": "ഫോൺ",
+        "map": "മാപ്പ്",
+        "fallback_address": "(പൂർണ്ണ വിലാസത്തിന് ഡീലർഷിപ്പിനോട് ചോദിക്കുക)",
+        "default_dealer": "TVS ഡീലർഷിപ്പ്",
     },
 }
 
@@ -465,6 +497,127 @@ _PGM_LOOKUP_FAILED = {
 # only what an operator actually changed -- so a message added to this file
 # appears everywhere immediately, with nothing to back-fill into configs that
 # were written before it existed.
+# --- PGM results -------------------------------------------------------------
+# Header above the ranked list. Two keys rather than a {where} placeholder:
+# "pincode 560097" and "your shared location" decline differently per language.
+_PGM_NEAREST_FOR_PINCODE = {
+    "English": "Nearest PGMs to pincode {pincode}:",
+    "Hindi": "पिनकोड {pincode} के नज़दीकी PGM:",
+    "Marathi": "पिनकोड {pincode} जवळचे PGM:",
+    "Telugu": "పిన్‌కోడ్ {pincode}కి సమీపంలోని PGMలు:",
+    "Tamil": "பின்கோடு {pincode}-க்கு அருகிலுள்ள PGM-கள்:",
+    "Kannada": "ಪಿನ್‌ಕೋಡ್ {pincode} ಹತ್ತಿರದ PGMಗಳು:",
+    "Malayalam": "പിൻകോഡ് {pincode}-ന് അടുത്തുള്ള PGM-കൾ:",
+}
+
+_PGM_NEAREST_FOR_LOCATION = {
+    "English": "Nearest PGMs to your shared location:",
+    "Hindi": "आपकी शेयर की गई लोकेशन के नज़दीकी PGM:",
+    "Marathi": "तुम्ही शेअर केलेल्या लोकेशनजवळचे PGM:",
+    "Telugu": "మీరు షేర్ చేసిన లొకేషన్‌కి సమీపంలోని PGMలు:",
+    "Tamil": "நீங்கள் பகிர்ந்த இருப்பிடத்திற்கு அருகிலுள்ள PGM-கள்:",
+    "Kannada": "ನೀವು ಹಂಚಿಕೊಂಡ ಲೊಕೇಶನ್ ಹತ್ತಿರದ PGMಗಳು:",
+    "Malayalam": "നിങ്ങൾ പങ്കിട്ട ലൊക്കേഷന് അടുത്തുള്ള PGM-കൾ:",
+}
+
+# Closes the list, and is the whole reply when a customer with a list in
+# front of them types something that is neither a pick nor a new place.
+_PGM_RESULTS_FOOTER = {
+    "English": (
+        "Reply 1, 2 or 3 for the address and map link, or share another "
+        "location or pincode to search again."
+    ),
+    "Hindi": (
+        "पता और मैप लिंक के लिए 1, 2 या 3 भेजें, या दोबारा खोजने के लिए "
+        "दूसरी लोकेशन या पिनकोड भेजें।"
+    ),
+    "Marathi": (
+        "पत्ता आणि नकाशा लिंकसाठी 1, 2 किंवा 3 पाठवा, किंवा पुन्हा शोधण्यासाठी "
+        "दुसरे लोकेशन किंवा पिनकोड पाठवा."
+    ),
+    "Telugu": (
+        "చిరునామా మరియు మ్యాప్ లింక్ కోసం 1, 2 లేదా 3 పంపండి, లేదా మళ్ళీ వెతకడానికి "
+        "మరో లొకేషన్ లేదా పిన్‌కోడ్ పంపండి."
+    ),
+    "Tamil": (
+        "முகவரி மற்றும் வரைபட இணைப்புக்கு 1, 2 அல்லது 3 அனுப்பவும், அல்லது மீண்டும் "
+        "தேட வேறு இருப்பிடம் அல்லது பின்கோடை அனுப்பவும்."
+    ),
+    "Kannada": (
+        "ವಿಳಾಸ ಮತ್ತು ನಕ್ಷೆ ಲಿಂಕ್‌ಗಾಗಿ 1, 2 ಅಥವಾ 3 ಕಳುಹಿಸಿ, ಅಥವಾ ಮತ್ತೆ ಹುಡುಕಲು "
+        "ಬೇರೆ ಲೊಕೇಶನ್ ಅಥವಾ ಪಿನ್‌ಕೋಡ್ ಕಳುಹಿಸಿ."
+    ),
+    "Malayalam": (
+        "വിലാസവും മാപ്പ് ലിങ്കും ലഭിക്കാൻ 1, 2 അല്ലെങ്കിൽ 3 അയയ്ക്കുക, അല്ലെങ്കിൽ വീണ്ടും "
+        "തിരയാൻ മറ്റൊരു ലൊക്കേഷനോ പിൻകോഡോ അയയ്ക്കുക."
+    ),
+}
+
+# The location resolved, but no listed PGM lies inside the search radius.
+_PGM_NONE_NEARBY = {
+    "English": (
+        "Sorry, there is no PGM listed within {km} km of that location yet. "
+        "You can try another pincode or area name, or share your location."
+    ),
+    "Hindi": (
+        "माफ़ कीजिए, उस जगह से {km} किमी के अंदर अभी कोई PGM सूचीबद्ध नहीं है। "
+        "आप दूसरा पिनकोड या एरिया नाम आज़मा सकते हैं, या अपनी लोकेशन शेयर कर सकते हैं।"
+    ),
+    "Marathi": (
+        "माफ करा, त्या ठिकाणापासून {km} किमीच्या आत सध्या कोणतेही PGM नोंदलेले नाही. "
+        "तुम्ही दुसरा पिनकोड किंवा एरियाचे नाव पाठवू शकता, किंवा तुमचे लोकेशन शेअर करू शकता."
+    ),
+    "Telugu": (
+        "క్షమించండి, ఆ ప్రదేశానికి {km} కి.మీ. లోపల ప్రస్తుతం ఏ PGM నమోదు కాలేదు. "
+        "మీరు మరో పిన్‌కోడ్ లేదా ఏరియా పేరు ప్రయత్నించవచ్చు, లేదా మీ లొకేషన్ షేర్ చేయవచ్చు."
+    ),
+    "Tamil": (
+        "மன்னிக்கவும், அந்த இடத்திலிருந்து {km} கி.மீ.க்குள் தற்போது எந்த PGM-ும் பதிவாகவில்லை. "
+        "வேறு பின்கோடு அல்லது பகுதியின் பெயரை முயற்சிக்கலாம், அல்லது உங்கள் இருப்பிடத்தைப் பகிரலாம்."
+    ),
+    "Kannada": (
+        "ಕ್ಷಮಿಸಿ, ಆ ಸ್ಥಳದಿಂದ {km} ಕಿ.ಮೀ. ಒಳಗೆ ಸದ್ಯಕ್ಕೆ ಯಾವುದೇ PGM ಪಟ್ಟಿಯಲ್ಲಿಲ್ಲ. "
+        "ನೀವು ಬೇರೆ ಪಿನ್‌ಕೋಡ್ ಅಥವಾ ಏರಿಯಾ ಹೆಸರನ್ನು ಪ್ರಯತ್ನಿಸಬಹುದು, ಅಥವಾ ನಿಮ್ಮ ಲೊಕೇಶನ್ ಹಂಚಿಕೊಳ್ಳಬಹುದು."
+    ),
+    "Malayalam": (
+        "ക്ഷമിക്കണം, ആ സ്ഥലത്തുനിന്ന് {km} കി.മീ.യ്ക്കുള്ളിൽ ഇപ്പോൾ ഒരു PGM-ഉം ലിസ്റ്റിലില്ല. "
+        "മറ്റൊരു പിൻകോഡോ പ്രദേശത്തിന്റെ പേരോ ശ്രമിക്കാം, അല്ലെങ്കിൽ നിങ്ങളുടെ ലൊക്കേഷൻ പങ്കിടാം."
+    ),
+}
+
+# A well-formed pincode the geocoder could not place. A location pin needs
+# no geocoding, so it is the first thing offered.
+_PGM_PINCODE_UNRESOLVED = {
+    "English": (
+        "I could not locate pincode {pincode}. Please share your current "
+        "WhatsApp location, or type the name of your city or area."
+    ),
+    "Hindi": (
+        "पिनकोड {pincode} की लोकेशन नहीं मिल पाई। कृपया अपनी WhatsApp करेंट लोकेशन "
+        "शेयर करें, या अपने शहर या एरिया का नाम टाइप करें।"
+    ),
+    "Marathi": (
+        "पिनकोड {pincode} चे ठिकाण सापडले नाही. कृपया तुमचे WhatsApp करंट लोकेशन "
+        "शेअर करा, किंवा तुमच्या शहराचे किंवा एरियाचे नाव टाइप करा."
+    ),
+    "Telugu": (
+        "పిన్‌కోడ్ {pincode} స్థానం కనుగొనలేకపోయాను. దయచేసి మీ WhatsApp ప్రస్తుత లొకేషన్ "
+        "షేర్ చేయండి, లేదా మీ నగరం లేదా ఏరియా పేరు టైప్ చేయండి."
+    ),
+    "Tamil": (
+        "பின்கோடு {pincode}-இன் இடத்தைக் கண்டறிய முடியவில்லை. உங்கள் WhatsApp தற்போதைய "
+        "இருப்பிடத்தைப் பகிரவும், அல்லது உங்கள் நகரம் அல்லது பகுதியின் பெயரை டைப் செய்யவும்."
+    ),
+    "Kannada": (
+        "ಪಿನ್‌ಕೋಡ್ {pincode} ಸ್ಥಳವನ್ನು ಹುಡುಕಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ನಿಮ್ಮ WhatsApp ಪ್ರಸ್ತುತ "
+        "ಲೊಕೇಶನ್ ಹಂಚಿಕೊಳ್ಳಿ, ಅಥವಾ ನಿಮ್ಮ ನಗರ ಅಥವಾ ಏರಿಯಾದ ಹೆಸರನ್ನು ಟೈಪ್ ಮಾಡಿ."
+    ),
+    "Malayalam": (
+        "പിൻകോഡ് {pincode}-ന്റെ സ്ഥാനം കണ്ടെത്താനായില്ല. ദയവായി നിങ്ങളുടെ WhatsApp നിലവിലെ "
+        "ലൊക്കേഷൻ പങ്കിടുക, അല്ലെങ്കിൽ നിങ്ങളുടെ നഗരത്തിന്റെയോ പ്രദേശത്തിന്റെയോ പേര് ടൈപ്പ് ചെയ്യുക."
+    ),
+}
+
 
 MESSAGE_DEFAULTS: dict[str, dict[str, str]] = {
     "dealer_intro": _DEALER_INTRO,
@@ -494,6 +647,11 @@ MESSAGE_DEFAULTS: dict[str, dict[str, str]] = {
     "pgm_pincode_noted": _PGM_PINCODE_NOTED,
     "pgm_ask_bigger_city": _PGM_ASK_BIGGER_CITY,
     "pgm_lookup_failed": _PGM_LOOKUP_FAILED,
+    "pgm_nearest_for_pincode": _PGM_NEAREST_FOR_PINCODE,
+    "pgm_nearest_for_location": _PGM_NEAREST_FOR_LOCATION,
+    "pgm_results_footer": _PGM_RESULTS_FOOTER,
+    "pgm_none_nearby": _PGM_NONE_NEARBY,
+    "pgm_pincode_unresolved": _PGM_PINCODE_UNRESOLVED,
 }
 
 # The dealer card's field labels are one dict of dicts; flattened here so each
@@ -514,6 +672,9 @@ MESSAGE_PLACEHOLDERS: dict[str, frozenset[str]] = {
     "still_interested_with_name": frozenset({"name", "product"}),
     "still_interested_no_name": frozenset({"product"}),
     "pgm_pincode_noted": frozenset({"pincode"}),
+    "pgm_nearest_for_pincode": frozenset({"pincode"}),
+    "pgm_none_nearby": frozenset({"km"}),
+    "pgm_pincode_unresolved": frozenset({"pincode"}),
 }
 
 
@@ -719,6 +880,65 @@ def pgm_ask_bigger_city(language: str = "English") -> str:
 
 def pgm_lookup_failed(language: str = "English") -> str:
     return message_text("pgm_lookup_failed", language)
+
+
+def pgm_none_nearby(max_km: float, language: str = "English") -> str:
+    return render_message("pgm_none_nearby", language, km=f"{max_km:g}")
+
+
+def pgm_pincode_unresolved(pincode: str, language: str = "English") -> str:
+    return render_message("pgm_pincode_unresolved", language, pincode=pincode)
+
+
+def pgm_results_footer(language: str = "English") -> str:
+    return message_text("pgm_results_footer", language)
+
+
+def pgm_results_list(
+    pgms: Sequence[Any],
+    *,
+    pincode: str = "",
+    language: str = "English",
+) -> str:
+    """The ranked list: a numbered line per PGM with its area, distance and
+    phone, so most customers need nothing further; the address and map link
+    wait behind the pick to keep the message short."""
+    if pincode:
+        header = render_message("pgm_nearest_for_pincode", language, pincode=pincode)
+    else:
+        header = message_text("pgm_nearest_for_location", language)
+    phone_label = message_text("dealer_label_phone", language)
+    lines = [header, ""]
+    for number, pgm in enumerate(pgms, start=1):
+        title = pgm.name
+        if pgm.area and pgm.area.lower() not in pgm.name.lower():
+            title = f"{pgm.name} — {pgm.area}"
+        if pgm.distance_km is not None:
+            title = f"{title} ({pgm.distance_km:.1f} km)"
+        lines.append(f"{number}. {title}")
+        if pgm.phone:
+            lines.append(f"   {phone_label}: {pgm.phone}")
+    lines.extend(["", message_text("pgm_results_footer", language)])
+    return "\n".join(lines)
+
+
+def pgm_card(pgm: Any, *, language: str = "English") -> str:
+    """One PGM in full, in the dealer card's shape and with its labels."""
+
+    def label(which: str) -> str:
+        return message_text(f"dealer_label_{which}", language)
+
+    lines = [f"{label('name')}: {pgm.name}"]
+    if pgm.address:
+        lines.append(f"{label('address')}: {pgm.address}")
+    elif pgm.area:
+        lines.append(f"{label('address')}: {pgm.area}")
+    if pgm.phone:
+        contact = f"{pgm.owner_name} - {pgm.phone}" if pgm.owner_name else pgm.phone
+        lines.append(f"{label('phone')}: {contact}")
+    if pgm.map_url:
+        lines.append(f"{label('map')}: {pgm.map_url}")
+    return "\n".join(lines)
 
 
 def product_doc_caption(

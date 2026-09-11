@@ -28,8 +28,9 @@ from client_media import (
 )
 from client_processing import ClientMessageProcessor
 from conversation_engine import ConversationEngine, GenerateResult, make_engine
-from dealers import DealerDirectory
+from dealers import DealerDirectory, NominatimPincodeGeocoder
 from leads import LeadWriter
+from pgms import PgmDirectory
 
 
 log = logging.getLogger(__name__)
@@ -128,11 +129,19 @@ def build_processor(redis: Redis | None = None) -> ClientMessageProcessor:
             retry_wait=config.CLIENT_RETRY_WAIT_SEC,
         )
 
+    # One geocoder for both directories: each instance owns the pincode
+    # cache file, and two writers would overwrite each other's entries.
+    geocoder = NominatimPincodeGeocoder()
     dealer_directory = None
     try:
-        dealer_directory = DealerDirectory()
+        dealer_directory = DealerDirectory(geocoder=geocoder)
     except Exception:
         log.exception("Dealer directory unavailable; pincode routing disabled")
+    pgm_directory = None
+    try:
+        pgm_directory = PgmDirectory(geocoder=geocoder)
+    except Exception:
+        log.exception("PGM directory unavailable; nearest-PGM search disabled")
 
     # Dispose always uses JAM X-API-KEY auth. Wire it whenever URL + key are
     # present — including lab (basic mock replies) so dispose can still hit
@@ -165,6 +174,7 @@ def build_processor(redis: Redis | None = None) -> ClientMessageProcessor:
         transcriber=transcriber,
         document_recognizer=recognizer,
         dealer_directory=dealer_directory,
+        pgm_directory=pgm_directory,
         dispose_client=dispose_client,
         retry_wait=config.CLIENT_RETRY_WAIT_SEC,
     )

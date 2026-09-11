@@ -22,6 +22,7 @@ import admin_config
 from client_processing import ClientMessageProcessor, ClientSession, Customer
 from conversation_engine import make_engine
 from dealers import DealerDirectory
+from pgms import PgmDirectory
 
 MOBILE = "+918459522206"
 
@@ -121,6 +122,7 @@ def main() -> None:
         transcriber=NoopTranscriber(),
         document_recognizer=NoopRecognizer(),
         dealer_directory=DealerDirectory(),
+        pgm_directory=PgmDirectory(),
         dispose_client=PrintingDispose(),
         sleep=lambda _s: None,
         retry_wait=0,
