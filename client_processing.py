@@ -17,7 +17,6 @@ from bot.graph import (
     classify_dealer_confirm_reply,
     classify_language_switch,
     classify_location_reply,
-    classify_product_info_request,
     classify_share_consent_reply,
     classify_still_interested_reply,
 )
@@ -64,7 +63,6 @@ from client_media_assets import (
 )
 from client_static_messages import (
     acknowledgement_fallback,
-    brochure_offer_ask,
     brochure_which_product_ask,
     dealer_share_ask,
     flow_intent_ask,
@@ -796,15 +794,18 @@ class ClientMessageProcessor:
                 "thank them, and wrap up. Do not ask more qualification questions.)"
             )
 
-        message, brochure_offer_product = self._prepare_brochure_info_context(
-            session, message, user_message=raw_user_text
-        )
         brochure_requested = classify_brochure_request(raw_user_text)
         message, brochure_needs_product = self._prepare_brochure_request_context(
             session,
             message,
             user_message=raw_user_text,
             requested=brochure_requested,
+        )
+        message, images_product = self._prepare_product_images_context(
+            session,
+            message,
+            user_message=raw_user_text,
+            requested=wants_product_images(raw_user_text),
         )
 
         confirm_was_pending = session.awaiting_dealer_confirm
@@ -896,11 +897,6 @@ class ClientMessageProcessor:
             reply=reply_text,
             dealer=nearest_dealer,
         )
-        reply_text = self._maybe_offer_brochure(
-            session,
-            reply=reply_text,
-            product=brochure_offer_product,
-        )
         if brochure_needs_product:
             ask = brochure_which_product_ask(self._session_language(session))
             reply_text = "\n\n".join(
@@ -935,11 +931,13 @@ class ClientMessageProcessor:
             profile=output.profile,
             requested=brochure_requested,
         )
-        self._maybe_send_product_images(
+        self._send_product_images(session, images_product)
+        # After the sends, so a brochure that just went out is never armed
+        # for a second offer.
+        self._arm_brochure_offer(
             session,
+            output.offered_brochure,
             user_message=raw_user_text,
-            profile=output.profile,
-            requested=wants_product_images(raw_user_text),
         )
         self._capture_purchase_date(session, user_message=raw_user_text)
         self._capture_lead_name(session, user_message=raw_user_text)
@@ -1051,7 +1049,9 @@ class ClientMessageProcessor:
     ) -> bool:
         """Send the configured photos for `product`. Returns True if
         anything was sent. No-ops (without raising) when no product could
-        be resolved or no images are configured for it."""
+        be resolved or no images are configured for it — the caller has
+        already told the model what will go out, so this must match
+        _prepare_product_images_context's decision exactly."""
         if not product:
             return False
         urls = product_image_urls(product)
@@ -1076,26 +1076,79 @@ class ClientMessageProcessor:
             session.images_sent.append(product)
         return sent_any
 
-    def _maybe_send_product_images(
+    def _prepare_product_images_context(
         self,
         session: ClientSession,
+        message: str,
         *,
         user_message: str,
-        profile: dict | None = None,
-        requested: bool = False,
-    ) -> None:
-        """Send vehicle photos once the customer asks to see the product
-        (e.g. "photo bhejo", "send images"). Separate from the brochure
-        flow — asking for a photo must never trigger a PDF, and vice versa.
+        requested: bool,
+    ) -> tuple[str, str]:
+        """Steer the LLM when the customer asks to see the vehicle ("photo
+        bhejo", "send images"). Separate from the brochure flow — asking for
+        a photo must never trigger a PDF, and vice versa.
+
+        Returns ``(message, product)``; the product is "" when nothing will
+        be sent. Decided BEFORE the prompt is built, the same way as the
+        brochure request: the photos used to go out after a reply that
+        never knew about them, so the model answered "Muje images bhejo"
+        with a campaign blurb and no acknowledgement of the photos.
         """
         if not requested:
-            return
-        product, _hints = self._resolve_brochure_product(
-            session, user_message, profile
-        )
+            return message, ""
+        product, _hints = self._resolve_brochure_product(session, user_message)
         if not product:
+            return (
+                f"{message}\n\n(Customer asked for photos but no product is "
+                "known yet. Do NOT say you are sending any. Ask which model "
+                "they mean — that is the only question in this reply.)"
+            ), ""
+        if not product_image_urls(product):
+            return (
+                f"{message}\n\n(No photos are available for {product}. Do "
+                "NOT say you are sending any. Say the dealership will share "
+                "them, then continue.)"
+            ), ""
+        return (
+            f"{message}\n\n(The system is sending the {product} photos "
+            "separately after your reply. Acknowledge briefly that you are "
+            "sending them — do not describe them or invent links.)"
+        ), product
+
+    def _arm_brochure_offer(
+        self,
+        session: ClientSession,
+        offered: str,
+        *,
+        user_message: str,
+    ) -> None:
+        """Arm _apply_brochure_offer when the model's reply offered the
+        brochure (reported through the OFFERED_BROCHURE marker, prompt
+        rule 11), so the customer's "yes" on the next turn sends the PDF.
+
+        The model owns that question; before the marker its offer was
+        invisible here — it asked "ब्रोशर भेजूँ?", the customer said "Ha",
+        nothing recognised that as an accept, and the model improvised that
+        the dealership would send it (session +918459522206, 2026-09-12).
+        """
+        if not offered:
             return
-        self._send_product_images(session, product)
+        product = brochure_product_from_text(offered)
+        if not product:
+            product, _hints = self._resolve_brochure_product(
+                session, user_message
+            )
+        if not product:
+            log.warning(
+                "brochure offer marker did not resolve mobile=%s marker=%r",
+                session.mobile,
+                offered,
+            )
+            return
+        if product in session.brochures_sent:
+            return
+        session.awaiting_brochure_offer = True
+        session.pending_brochure_product = product
 
     def _prepare_brochure_request_context(
         self,
@@ -1161,8 +1214,8 @@ class ClientMessageProcessor:
 
         We never push PDFs/images just because a model name was mentioned,
         and a general info question ("tell me about X") gets an offer
-        instead of an automatic send — see _prepare_brochure_info_context /
-        _maybe_offer_brochure / _apply_brochure_offer.
+        instead of an automatic send — the model asks it (prompt rule 11)
+        and _arm_brochure_offer / _apply_brochure_offer act on the answer.
 
         If they asked earlier without naming a product, naming a model on a
         later turn completes the pending request and sends the pack.
@@ -1189,53 +1242,6 @@ class ClientMessageProcessor:
                 session, product, hints, include_support_docs=support
             ):
                 session.awaiting_brochure_product_choice = False
-
-    def _prepare_brochure_info_context(
-        self,
-        session: ClientSession,
-        message: str,
-        *,
-        user_message: str,
-    ) -> tuple[str, str]:
-        """If `user_message` is a general product-info question (not a
-        literal document request) and we can resolve an unsent product, tag
-        `message` so the LLM answers ONLY the question — no extra question
-        of its own — and return the product to offer the brochure for
-        afterward (post-reply, deterministically, so the offer is the one
-        question this turn, not a second one stacked on the LLM's own).
-        """
-        if session.awaiting_brochure_offer:
-            return message, ""
-        if wants_product_brochure(user_message) or not classify_product_info_request(
-            user_message
-        ):
-            return message, ""
-        product, _ = self._resolve_brochure_product(session, user_message)
-        if not product or product in session.brochures_sent:
-            return message, ""
-        enriched = (
-            f"{message}\n\n(Answer this product question in at most TWO "
-            "sentences using ONLY the KNOWLEDGE BASE. Do NOT ask a "
-            "qualification question or anything else in this reply — the "
-            "system will separately ask if they want the brochure.)"
-        )
-        return enriched, product
-
-    def _maybe_offer_brochure(
-        self,
-        session: ClientSession,
-        *,
-        reply: str,
-        product: str,
-    ) -> str:
-        """Append a deterministic "want the brochure too?" ask after an
-        info-question reply, and arm _apply_brochure_offer for the next turn."""
-        if not product:
-            return reply
-        session.awaiting_brochure_offer = True
-        session.pending_brochure_product = product
-        ask = brochure_offer_ask(self._session_language(session))
-        return "\n\n".join(part for part in (reply.rstrip(), ask) if part)
 
     def _apply_brochure_offer(
         self,
@@ -1717,6 +1723,8 @@ class ClientMessageProcessor:
 
         if session.brochures_sent:
             bits.append("brochure already sent: " + ", ".join(session.brochures_sent))
+        if session.images_sent:
+            bits.append("photos already sent: " + ", ".join(session.images_sent))
 
         docs = [
             label

@@ -111,11 +111,14 @@ they are being offered.
 
 Buttons: `Yes` / `No` · Sample: `{{1}}` = King Duramax Plus
 
-> **Code change needed.** `_BROCHURE_OFFER_ASK` (`client_static_messages.py:252`)
-> has no product placeholder today — it says "the brochure for more details".
-> `brochure_offer_ask()` must take a `product` argument, like
-> `brochure_caption()` already does. The product is already resolved on the
-> session (`pending_brochure_product`), so the value is available.
+> **Code change needed.** Since 2026-09-12 the brochure offer is written by
+> the model, not by the code: the system prompt (rule 11) has it ask in its
+> own words and report the offer with an `OFFERED_BROCHURE: <model>` marker
+> that `client_processing._arm_brochure_offer` turns into the pending offer.
+> Serving it from a template means putting the ask back on the code path —
+> a deterministic send after the reply, with the marker still deciding
+> *when* — so this template is only worth submitting once that trade is
+> agreed. The product would come from `pending_brochure_product`.
 >
 > T7 below is still needed for the case where no model has been identified yet.
 

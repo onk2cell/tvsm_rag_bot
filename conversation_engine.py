@@ -26,6 +26,13 @@ _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})", re.DOTALL)
 # must never reach the customer even when nothing above matched.
 _STRAY_FENCE_RE = re.compile(r"```(?:json)?")
 
+# The model owns the "would you like the brochure?" question (rule 11 of the
+# system prompt) and reports having asked it with this one-line marker, which
+# is stripped before the reply reaches the customer. Anchored to the line, not
+# the end of the text: the model sometimes signs off after a trailer, just as
+# it does after PROFILE_JSON.
+OFFERED_BROCHURE_RE = re.compile(r"[ \t]*OFFERED_BROCHURE:[ \t]*([^\n]*)", re.IGNORECASE)
+
 LANGUAGE_SELECTED_TRIGGER = (
     "(The customer has selected their language. Greet briefly and ask the "
     "first qualification question.)"
@@ -90,6 +97,9 @@ class TurnOutput:
     reply_text: str
     captured: bool = False
     profile: dict[str, Any] | None = None
+    # Model name from the OFFERED_BROCHURE marker when this reply asked the
+    # customer whether they want the brochure; "" otherwise.
+    offered_brochure: str = ""
     citations: list[str] = field(default_factory=list)
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
@@ -274,6 +284,14 @@ are sending, have sent, or will send any file — offer it instead ("Would you l
 send the brochure?") and wait for their answer. NEVER claim in past tense that a file was \
 delivered, since you cannot see whether the send succeeded. Never say you are unable to \
 send a brochure.
+11. Offering the brochure is YOUR job — the system never asks for you. After you answer a \
+product question, and whenever a system note says photos are being sent, offer the brochure \
+for that model unless KNOWN SO FAR lists it as already sent. That offer is the ONLY question \
+in that reply. Every reply that offers the brochure ends with one extra final line, exactly:
+OFFERED_BROCHURE: <model name from the line-up above>
+The system reads that line and removes it before the customer sees anything. Without it the \
+customer's "yes" cannot send the file, so never leave it out — and never write it in a reply \
+that does not offer the brochure.
 
 Never use markdown code fences (```) anywhere in your reply — WhatsApp shows the raw \
 backtick characters to the customer, it does not render them. This applies to every reply, \
@@ -320,6 +338,21 @@ def _extract_usage(response: Any) -> tuple[int | None, int | None]:
         count("prompt_token_count", "input_token_count"),
         count("candidates_token_count", "output_token_count"),
     )
+
+
+def parse_offered_brochure(text: str) -> tuple[str, str]:
+    """Strip the OFFERED_BROCHURE marker, returning (text, model name).
+
+    The marker is removed even when its value is empty or unusable: it is
+    an instruction to the system, never customer-facing content. Resolving
+    the name to a configured product is the caller's job.
+    """
+    match = OFFERED_BROCHURE_RE.search(text)
+    if match is None:
+        return text, ""
+    offered = match.group(1).strip().strip("`*\"'").strip()
+    cleaned = text[: match.start()] + text[match.end() :]
+    return cleaned.strip(), offered
 
 
 def parse_profile_json(text: str) -> tuple[str, dict[str, Any] | None]:
@@ -374,7 +407,11 @@ class ConversationEngine:
         contents = build_contents(turn.history, user_text, turn.known_state)
         result = self._llm.generate(system_instruction=system, contents=contents)
 
-        reply_text, profile = parse_profile_json(result.text or "")
+        # Marker first: PROFILE_JSON's payload match runs to the last brace
+        # in the text, and a marker after it would otherwise be swallowed
+        # into the (then unparseable) payload.
+        text, offered_brochure = parse_offered_brochure(result.text or "")
+        reply_text, profile = parse_profile_json(text)
         captured = False
         if profile and self._lead_writer is not None:
             self._lead_writer.append(
@@ -390,6 +427,7 @@ class ConversationEngine:
             reply_text=reply_text,
             captured=captured,
             profile=profile,
+            offered_brochure=offered_brochure,
             citations=list(result.citations),
             prompt_tokens=result.prompt_tokens,
             completion_tokens=result.completion_tokens,

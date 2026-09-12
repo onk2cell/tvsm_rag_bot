@@ -93,9 +93,10 @@ PRODUCT_DOCUMENT_ASK_RE = re.compile(
     r")"
 )
 
-# General product-info questions — answered in text, then the customer is
-# asked (separately, deterministically) whether they'd like the brochure
-# too. Not gated to an automatic document send.
+# General product-info questions — answered in text by the model, which
+# then offers the brochure itself (prompt rule 11). Not gated to an
+# automatic document send; used here only to keep such a question out of
+# the place-name handler.
 PRODUCT_INFO_ASK_RE = re.compile(
     r"(?i)("
     r"\b(specs?|features?|specification|details?|full\s+details|"
@@ -242,9 +243,9 @@ def product_image_urls(product: str) -> list[str]:
 
 def wants_product_info(message: str | None) -> bool:
     """True for a general product-info question (specs/features/details/
-    "tell me about") that is NOT a literal document request — this should
-    get a text answer plus an offer to send the brochure, not an automatic
-    document send."""
+    "tell me about") that is NOT a literal document request — it goes to
+    the model for a text answer (which offers the brochure itself), never
+    to an automatic document send or the place-name redirect."""
     return bool(PRODUCT_INFO_ASK_RE.search((message or "").strip()))
 
 

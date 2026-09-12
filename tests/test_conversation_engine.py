@@ -13,6 +13,7 @@ from conversation_engine import (
     GenerateResult,
     TurnInput,
     build_system_instruction,
+    parse_offered_brochure,
     parse_profile_json,
 )
 from leads import LeadWriter
@@ -231,6 +232,71 @@ def test_brochure_rule_tells_llm_system_handles_delivery(stores):
     # Must not assert a completed send as fact — only the deterministic
     # sender knows whether the document actually went out.
     assert "never claim in past tense" in system.lower()
+
+
+def test_brochure_offer_rule_puts_the_question_on_the_model(stores):
+    """The model owns the "want the brochure?" question and reports it with
+    the marker — the code never asks it, so without the marker a "yes" has
+    nothing to act on (session +918459522206, 2026-09-12)."""
+    config_store, _, _ = stores
+    system = build_system_instruction(config_store.get(), "English")
+    assert "offering the brochure is your job" in system.lower()
+    assert "\nOFFERED_BROCHURE: <model name from the line-up above>\n" in system
+    assert "already sent" in system.lower()
+
+
+def test_offered_brochure_marker_is_stripped_and_returned(stores):
+    text, offered = parse_offered_brochure(
+        "It has a 100km range. Want the brochure?\nOFFERED_BROCHURE: King EV MAX"
+    )
+    assert text == "It has a 100km range. Want the brochure?"
+    assert offered == "King EV MAX"
+
+
+def test_offered_brochure_marker_tolerates_decoration_and_trailing_text(stores):
+    """Bold, backticks and a sign-off after the marker all show up in
+    practice, as they do with PROFILE_JSON; none of it may leak."""
+    text, offered = parse_offered_brochure(
+        "Want the brochure? OFFERED_BROCHURE: **King Deluxe**\nThank you!"
+    )
+    assert text == "Want the brochure?\nThank you!"
+    assert offered == "King Deluxe"
+
+
+def test_offered_brochure_marker_absent_or_empty(stores):
+    assert parse_offered_brochure("Plain reply") == ("Plain reply", "")
+    # An empty marker is still stripped: it is never customer-facing.
+    assert parse_offered_brochure("Sure.\nOFFERED_BROCHURE:") == ("Sure.", "")
+
+
+def test_handle_turn_surfaces_offered_brochure(stores):
+    config_store, lead_writer, _ = stores
+    llm = FakeLLM(["Range is 179 km. Shall I send the brochure?\nOFFERED_BROCHURE: King EV MAX"])
+    engine = ConversationEngine(config_store=config_store, llm=llm, lead_writer=lead_writer)
+    out = engine.handle_turn(
+        TurnInput(session_id="s1", language="English", message="what is the range?")
+    )
+    assert out.reply_text == "Range is 179 km. Shall I send the brochure?"
+    assert out.offered_brochure == "King EV MAX"
+    assert out.profile is None  # mid-flow: no wrap-up payload
+
+
+def test_handle_turn_marker_after_profile_json_does_not_break_wrap_up(stores):
+    """The marker is stripped before PROFILE_JSON is parsed, so a marker the
+    model puts after the payload cannot swallow it."""
+    config_store, lead_writer, _ = stores
+    profile = {"product_interest": "King EV MAX", "lead_quality": "WARM"}
+    llm = FakeLLM([
+        f"Thanks, the dealership will call you.\nPROFILE_JSON:{json.dumps(profile)}\n"
+        "OFFERED_BROCHURE: King EV MAX"
+    ])
+    engine = ConversationEngine(config_store=config_store, llm=llm, lead_writer=lead_writer)
+    out = engine.handle_turn(
+        TurnInput(session_id="s1", language="English", message="ok thanks")
+    )
+    assert out.reply_text == "Thanks, the dealership will call you."
+    assert out.profile == profile
+    assert out.offered_brochure == "King EV MAX"
 
 
 def test_delivery_location_in_profile_keys(stores):

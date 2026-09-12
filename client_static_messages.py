@@ -285,12 +285,6 @@ _ACKNOWLEDGEMENT_FALLBACK = {
     "Marathi": "मी तुम्हाला आणखी काही मदत करू शकतो का?",
 }
 
-_BROCHURE_OFFER_ASK = {
-    "English": "Would you like me to send you the brochure for more details?",
-    "Hindi": "क्या आप चाहेंगे कि मैं आपको अधिक जानकारी के लिए ब्रोशर भेजूं?",
-    "Marathi": "अधिक माहितीसाठी मी तुम्हाला ब्रोशर पाठवू का?",
-}
-
 _BROCHURE_WHICH_PRODUCT_ASK = {
     "English": (
         "Which model's brochure should I send — "
@@ -637,7 +631,6 @@ MESSAGE_DEFAULTS: dict[str, dict[str, str]] = {
     "still_interested_no_thanks": _STILL_INTERESTED_NO_THANKS,
     "dealer_share_ask": _DEALER_SHARE_ASK,
     "acknowledgement_fallback": _ACKNOWLEDGEMENT_FALLBACK,
-    "brochure_offer_ask": _BROCHURE_OFFER_ASK,
     "brochure_which_product_ask": _BROCHURE_WHICH_PRODUCT_ASK,
     "warranty_caption": _WARRANTY_CAPTION,
     "pms_caption": _PMS_CAPTION,
@@ -847,10 +840,6 @@ def dealer_share_ask(language: str = "English") -> str:
 
 def acknowledgement_fallback(language: str = "English") -> str:
     return message_text("acknowledgement_fallback", language)
-
-
-def brochure_offer_ask(language: str = "English") -> str:
-    return message_text("brochure_offer_ask", language)
 
 
 def brochure_which_product_ask(language: str = "English") -> str:

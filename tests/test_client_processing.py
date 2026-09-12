@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from conversation_engine import TurnOutput
+from conversation_engine import TurnOutput, parse_offered_brochure
 from client_processing import (
     ClientMessageProcessor,
     ClientSession,
@@ -111,7 +111,15 @@ class FakeEngine:
         reply = self.reply
         if self.SUPPRESS_QUESTION in (turn.message or ""):
             reply = self.acknowledgement
-        return TurnOutput(reply_text=reply, profile=self.profile, captured=bool(self.profile))
+        # Same contract as the real engine: a reply that offers the brochure
+        # carries the OFFERED_BROCHURE marker, which never reaches the text.
+        reply, offered = parse_offered_brochure(reply)
+        return TurnOutput(
+            reply_text=reply,
+            profile=self.profile,
+            captured=bool(self.profile),
+            offered_brochure=offered,
+        )
 
 
 class FakeReplySender:
@@ -386,54 +394,119 @@ def test_brochure_request_resolves_product_from_earlier_history(monkeypatch):
     ]
 
 
-def test_info_question_offers_brochure_instead_of_auto_sending(monkeypatch):
-    """A general info question ("what are the features") gets a text answer
-    plus a deterministic offer — not an automatic document send."""
-    del monkeypatch
-    processor, deps = _processor()
+OFFER_EV_MAX = (
+    "It has a 100km range. Would you like the brochure?\n"
+    "OFFERED_BROCHURE: King EV MAX"
+)
+
+
+def _offer_ev_max(processor, deps):
+    """Two turns: the customer names King EV MAX, then asks a feature
+    question that the model answers and — as prompt rule 11 requires —
+    ends by offering the brochure, reported through the marker."""
     deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
     processor.process(_event(message_id="m1", content="King EV MAX"))
-
-    deps["engine"].reply = "It has a 100km range and fast charging."
+    deps["engine"].reply = OFFER_EV_MAX
     processor.process(
         _event(message_id="m2", content="What are the features of this?")
     )
 
+
+def test_model_brochure_offer_arms_the_offer_and_marker_is_stripped(monkeypatch):
+    """The model owns the "want the brochure?" question. Its marker arms
+    the offer for the next turn and is never shown to the customer or kept
+    in history; nothing is sent yet."""
+    del monkeypatch
+    processor, deps = _processor()
+    _offer_ev_max(processor, deps)
+
     assert deps["reply_sender"].document_calls == []
     reply_text = deps["reply_sender"].calls[-1]["text"]
-    assert "brochure" in reply_text.lower()
+    assert reply_text == "It has a 100km range. Would you like the brochure?"
     session = deps["state"].sessions["+918286871533"]
     assert session.awaiting_brochure_offer is True
     assert session.pending_brochure_product == "King EV MAX"
+    assert all("OFFERED_BROCHURE" not in turn["text"] for turn in session.history)
 
 
-def test_info_question_tells_llm_to_answer_only(monkeypatch):
-    """The LLM is told not to ask its own follow-up this turn — the
-    brochure offer is the one question, appended deterministically."""
+def test_info_question_is_not_answered_or_offered_by_the_code(monkeypatch):
+    """No deterministic offer: a feature question reaches the model as-is,
+    and a reply without the marker arms nothing."""
     del monkeypatch
     processor, deps = _processor()
-    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
+    deps["engine"].reply = "Great choice — King EV MAX."
     processor.process(_event(message_id="m1", content="King EV MAX"))
-
     deps["engine"].reply = "It has a 100km range."
     processor.process(
         _event(message_id="m2", content="What are the features of this?")
     )
 
-    enriched = deps["engine"].turns[-1].message
-    assert "at most TWO sentences" in enriched
-    assert "Do NOT ask a qualification question" in enriched
+    assert deps["engine"].turns[-1].message == "What are the features of this?"
+    assert deps["reply_sender"].calls[-1]["text"] == "It has a 100km range."
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is False
+    assert deps["reply_sender"].document_calls == []
+
+
+def test_offer_marker_for_already_sent_brochure_does_not_arm(monkeypatch):
+    """The model slipping and re-offering a brochure that already went out
+    must not arm a second offer — the send path would skip it anyway."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Sure, sending it."
+    processor.process(
+        _event(message_id="m1", content="Please send me the King EV MAX brochure")
+    )
+    assert deps["state"].sessions["+918286871533"].brochures_sent == ["King EV MAX"]
+
+    deps["engine"].reply = OFFER_EV_MAX
+    processor.process(_event(message_id="m2", content="What is the range?"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is False
+    assert session.pending_brochure_product == ""
+
+
+def test_offer_marker_with_vague_name_resolves_from_conversation(monkeypatch):
+    """A marker like "OFFERED_BROCHURE: the brochure" names no model; the
+    product the customer has been talking about fills in."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = "Great choice — King Deluxe."
+    processor.process(_event(message_id="m1", content="I want King Deluxe"))
+    deps["engine"].reply = (
+        "It seats three. Want the brochure?\nOFFERED_BROCHURE: the brochure"
+    )
+    processor.process(_event(message_id="m2", content="How many seats?"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is True
+    assert session.pending_brochure_product == "King Deluxe"
+
+
+def test_offer_marker_that_resolves_nothing_logs_and_does_not_arm(
+    monkeypatch, caplog
+):
+    """No product anywhere: don't arm (a "yes" would have nothing to send),
+    but leave a trace — the live bug was invisible because nothing logged."""
+    del monkeypatch
+    processor, deps = _processor()
+    deps["engine"].reply = (
+        "Our autos are great. Want the brochure?\nOFFERED_BROCHURE: auto"
+    )
+    with caplog.at_level("WARNING", logger="client_processing"):
+        processor.process(_event(message_id="m1", content="tell me about autos"))
+
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_brochure_offer is False
+    assert "brochure offer marker did not resolve" in caplog.text
+    assert "OFFERED_BROCHURE" not in deps["reply_sender"].calls[-1]["text"]
 
 
 def test_brochure_offer_accepted_sends_pack(monkeypatch):
     del monkeypatch
     processor, deps = _processor()
-    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
-    processor.process(_event(message_id="m1", content="King EV MAX"))
-    deps["engine"].reply = "It has a 100km range."
-    processor.process(
-        _event(message_id="m2", content="What are the features of this?")
-    )
+    _offer_ev_max(processor, deps)
     assert deps["reply_sender"].document_calls == []
 
     deps["engine"].reply = "Great, noted."
@@ -453,12 +526,7 @@ def test_brochure_offer_accepted_with_bhejo_sends_pack(monkeypatch):
     """Hindi/Hinglish 'bhejo' must accept the brochure offer (not place routing)."""
     del monkeypatch
     processor, deps = _processor()
-    deps["engine"].reply = "Great choice — King EV MAX."
-    processor.process(_event(message_id="m1", content="King EV MAX"))
-    deps["engine"].reply = "It has a 100km range."
-    processor.process(
-        _event(message_id="m2", content="What are the features of this?")
-    )
+    _offer_ev_max(processor, deps)
     assert deps["state"].sessions["+918286871533"].awaiting_brochure_offer is True
 
     deps["engine"].reply = "Sending it now."
@@ -494,29 +562,25 @@ def test_product_switch_wins_over_earlier_named_model(monkeypatch):
     assert product == "King Deluxe"
 
 
-def test_romanized_hindi_info_request_offers_and_sends_brochure(monkeypatch):
+def test_romanized_hindi_info_request_offer_then_ha_sends_brochure(monkeypatch):
     """Real transcript: 'muje aur jankari chaiye' (Romanized Hindi) never
-    matched PRODUCT_INFO_ASK_RE (Devanagari/English only), so the
-    deterministic offer never armed — the LLM was left to freelance and,
-    on a later "ha", claimed to send a brochure it never actually sent
-    (brochures_sent stayed empty, no send in the logs). The classifier is
-    LLM-backed now; the fast regex path is bypassed here via monkeypatch
-    to keep the test deterministic and offline, but the soft-signal gate
-    (jankari/jaankari) that routes to the classifier is exercised for real.
-    """
-    monkeypatch.setattr(
-        "client_processing.classify_product_info_request",
-        lambda msg: "jankari" in (msg or "").lower(),
-    )
+    matched the old Devanagari/English info regex, so the deterministic
+    offer never armed — the model was left to freelance and, on a later
+    "ha", claimed to send a brochure it never actually sent. With the model
+    owning the offer, phrasing and language stop mattering: it answers,
+    offers, reports the marker, and "ha" sends."""
+    del monkeypatch
     processor, deps = _processor(preselect_language="Hindi")
     deps["engine"].reply = "बढ़िया चुनाव — King EV MAX."
     processor.process(_event(message_id="m1", content="TVS King EV max"))
 
-    deps["engine"].reply = "इसमें 179 km की रेंज मिलती है।"
+    deps["engine"].reply = (
+        "इसमें 179 km की रेंज मिलती है। क्या मैं ब्रोशर भेजूँ?\n"
+        "OFFERED_BROCHURE: King EV MAX"
+    )
     processor.process(_event(message_id="m2", content="muje aur jankari chaiye"))
 
-    reply_text = deps["reply_sender"].calls[-1]["text"]
-    assert "brochure" in reply_text.lower() or "ब्रोशर" in reply_text
+    assert "ब्रोशर" in deps["reply_sender"].calls[-1]["text"]
     session = deps["state"].sessions["+918286871533"]
     assert session.awaiting_brochure_offer is True
     assert deps["reply_sender"].document_calls == []  # not sent yet, only offered
@@ -532,12 +596,7 @@ def test_romanized_hindi_info_request_offers_and_sends_brochure(monkeypatch):
 def test_brochure_offer_declined_does_not_send(monkeypatch):
     del monkeypatch
     processor, deps = _processor()
-    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
-    processor.process(_event(message_id="m1", content="King EV MAX"))
-    deps["engine"].reply = "It has a 100km range."
-    processor.process(
-        _event(message_id="m2", content="What are the features of this?")
-    )
+    _offer_ev_max(processor, deps)
 
     deps["engine"].reply = "No problem, when are you looking to buy?"
     processor.process(_event(message_id="m3", content="no"))
@@ -558,12 +617,7 @@ def test_brochure_offer_ambiguous_reply_passes_through_unchanged(monkeypatch):
         lambda _msg: "unclear",
     )
     processor, deps = _processor()
-    deps["engine"].reply = "Great choice — King EV MAX. When are you looking to buy?"
-    processor.process(_event(message_id="m1", content="King EV MAX"))
-    deps["engine"].reply = "It has a 100km range."
-    processor.process(
-        _event(message_id="m2", content="What are the features of this?")
-    )
+    _offer_ev_max(processor, deps)
 
     deps["engine"].reply = "Sure, when are you looking to buy?"
     processor.process(_event(message_id="m3", content="ok noted"))
@@ -582,12 +636,7 @@ def test_brochure_offer_llm_accept_in_any_language_sends_pack(monkeypatch):
         lambda _msg: "yes",
     )
     processor, deps = _processor()
-    deps["engine"].reply = "Great choice — King EV MAX."
-    processor.process(_event(message_id="m1", content="King EV MAX"))
-    deps["engine"].reply = "It has a 100km range."
-    processor.process(
-        _event(message_id="m2", content="What are the features of this?")
-    )
+    _offer_ev_max(processor, deps)
 
     deps["engine"].reply = "Sending now."
     processor.process(
@@ -2772,3 +2821,98 @@ def test_routing_ask_survives_a_redis_round_trip():
 
     names = {f.name for f in fields(ClientSession)}
     assert {"awaiting_flow_intent", "flow"} <= names
+
+
+# --- product photos -------------------------------------------------------
+
+DURAMAX_PHOTO = "https://1.jamoutsourcing.com/i/DuramaxImage.webp"
+
+
+def _duramax_photos(monkeypatch):
+    monkeypatch.setattr(
+        "client_processing.product_image_urls",
+        lambda product: [DURAMAX_PHOTO] if product == "King Duramax Plus" else [],
+    )
+
+
+def test_photo_request_sends_photos_and_tells_the_model_first(monkeypatch):
+    """Photos are decided before the prompt is built, so the reply knows
+    they are going out — the model used to answer "images bhejo" blind."""
+    _duramax_photos(monkeypatch)
+    processor, deps = _processor(preselect_language="Hindi")
+    deps["engine"].reply = "बढ़िया — King Duramax Plus."
+    processor.process(_event(message_id="m1", content="King Duramax Plus"))
+
+    deps["engine"].reply = "ज़रूर, तस्वीरें भेज रहा हूँ।"
+    processor.process(_event(message_id="m2", content="Muje images bhejo"))
+
+    note = deps["engine"].turns[-1].message
+    assert "sending the King Duramax Plus photos" in note
+    assert [call["link"] for call in deps["reply_sender"].image_calls] == [
+        DURAMAX_PHOTO
+    ]
+    assert deps["reply_sender"].document_calls == []  # photos are not a PDF
+    session = deps["state"].sessions["+918286871533"]
+    assert session.images_sent == ["King Duramax Plus"]
+
+    deps["engine"].reply = "ठीक है।"
+    processor.process(_event(message_id="m3", content="ok"))
+    assert "photos already sent: King Duramax Plus" in deps["engine"].turns[-1].known_state
+
+
+def test_photo_request_without_product_tells_model_to_ask_which(monkeypatch):
+    _duramax_photos(monkeypatch)
+    processor, deps = _processor()
+    deps["engine"].reply = "Which model would you like to see?"
+    processor.process(_event(message_id="m1", content="send me photos"))
+
+    note = deps["engine"].turns[-1].message
+    assert "no product is known yet" in note
+    assert "Do NOT say you are sending any" in note
+    assert deps["reply_sender"].image_calls == []
+
+
+def test_photo_request_without_configured_photos_tells_model_not_to_promise(
+    monkeypatch,
+):
+    _duramax_photos(monkeypatch)  # nothing configured for King EV MAX
+    processor, deps = _processor()
+    deps["engine"].reply = "The dealership will share photos."
+    processor.process(_event(message_id="m1", content="King EV MAX photos please"))
+
+    note = deps["engine"].turns[-1].message
+    assert "No photos are available for King EV MAX" in note
+    assert deps["reply_sender"].image_calls == []
+    assert deps["state"].sessions["+918286871533"].images_sent == []
+
+
+def test_photos_then_model_offers_brochure_then_ha_sends_it(monkeypatch):
+    """Live session +918459522206 (2026-09-12): "Muje images bhejo" sent the
+    photos, the model asked "क्या आप चाहते हैं कि मैं आपको ब्रोशर भेजूँ?" on
+    its own, the customer said "Ha" — and nothing was sent, because the
+    code never knew an offer had been made. The marker closes that gap."""
+    _duramax_photos(monkeypatch)
+    processor, deps = _processor(preselect_language="Hindi")
+    deps["engine"].reply = "बढ़िया — King Duramax Plus."
+    processor.process(_event(message_id="m1", content="King Duramax Plus"))
+
+    deps["engine"].reply = (
+        "ज़रूर, तस्वीरें भेज रहा हूँ। क्या आप चाहते हैं कि मैं आपको ब्रोशर भेजूँ?\n"
+        "OFFERED_BROCHURE: King Duramax Plus"
+    )
+    processor.process(_event(message_id="m2", content="Muje images bhejo"))
+    assert deps["reply_sender"].image_calls
+    assert deps["reply_sender"].document_calls == []
+    sent_text = deps["reply_sender"].calls[-1]["text"]
+    assert "ब्रोशर भेजूँ" in sent_text and "OFFERED_BROCHURE" not in sent_text
+
+    deps["engine"].reply = "जी ज़रूर, ब्रोशर भेज रहा हूँ।"
+    processor.process(_event(message_id="m3", content="Ha"))
+
+    assert [call["link"] for call in deps["reply_sender"].document_calls] == [
+        "https://1.jamoutsourcing.com/f/King_Duramax_Plus_Petrol-English.pdf"
+    ]
+    assert "Brochure for King Duramax Plus has been sent" in deps["engine"].turns[-1].message
+    session = deps["state"].sessions["+918286871533"]
+    assert session.brochures_sent == ["King Duramax Plus"]
+    assert session.awaiting_brochure_offer is False
