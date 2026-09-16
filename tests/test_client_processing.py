@@ -17,6 +17,7 @@ from client_static_messages import (
     flow_intent_ask,
     location_thanks,
     pincode_or_location_ask,
+    vehicle_list_ask,
 )
 from dealers import Dealer, DealerDirectory
 from dispose import resolve_purchase_date
@@ -2577,6 +2578,155 @@ def test_first_message_context_includes_preferred_language_without_remarks():
     turn_message = deps["engine"].turns[0].message
     assert "preferred language: Marathi" in turn_message
     assert deps["state"].sessions["+918286871533"].welcome_back_sent is True
+
+
+# --- CLIENT_ASSUME_NOT_STILL_INTERESTED --------------------------------------
+
+VEHICLES = ("King EV MAX", "King Deluxe", "King Duramax Plus")
+
+
+def _no_still_interested(**overrides):
+    dispose = FakeDisposeClient()
+    processor, deps = _processor(
+        dispose_client=dispose,
+        skip_still_interested=False,
+        switches=FlowSwitches(
+            assume_not_still_interested=True, vehicle_list=VEHICLES
+        ),
+        **overrides,
+    )
+    deps["directory"].customer = _full_crm_record()  # enquired about TVS KING KARGO
+    deps["dispose"] = dispose
+    return processor, deps
+
+
+def test_assume_not_still_interested_shows_the_vehicle_list_instead_of_the_ask():
+    """Client request (16/09): a returning customer is not asked "still
+    planning to purchase X?" — the answer is taken as no — and instead of
+    "thank you for letting us know" they get the vehicle list to pick from.
+    Nothing is written to the lead and nothing is disposed."""
+    processor, deps = _no_still_interested()
+
+    processor.process(_event(message_id="m1", content="Hi"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert reply == vehicle_list_ask(VEHICLES, "English")
+    assert "1. King EV MAX" in reply and "3. King Duramax Plus" in reply
+    assert "Last time" not in reply and "still planning" not in reply.lower()
+    assert deps["engine"].turns == []
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_vehicle_pick is True
+    assert session.awaiting_still_interested is False
+    assert "product_interest" not in session.lead_profile
+    assert "disposition" not in session.lead_profile
+    assert deps["dispose"].calls == []
+
+
+def test_vehicle_list_is_localised_and_sent_once():
+    processor, deps = _no_still_interested(preselect_language="Marathi")
+
+    processor.process(_event(message_id="m1", content="Hi"))
+    first = deps["reply_sender"].calls[-1]["text"]
+    assert first == vehicle_list_ask(VEHICLES, "Marathi")
+    assert "2. King Deluxe" in first
+    assert first != vehicle_list_ask(VEHICLES, "English")
+
+    deps["engine"].reply = "ठीक आहे. तुम्ही कधी घेण्याचा विचार करत आहात?"
+    processor.process(_event(message_id="m2", content="2"))
+    processor.process(_event(message_id="m3", content="पुढच्या महिन्यात"))
+    assert [c["text"] for c in deps["reply_sender"].calls].count(first) == 1
+
+
+def test_vehicle_pick_by_number_sets_the_product_and_keeps_the_language():
+    processor, deps = _no_still_interested()
+    processor.process(_event(message_id="m1", content="Hi"))
+
+    processor.process(_event(message_id="m2", content="2"))
+
+    turn = deps["engine"].turns[-1]
+    assert "chose King Deluxe from the vehicle list" in turn.message
+    # The CRM product (Kargo) is gone for good; only the pick reaches the model.
+    assert turn.product_hint == ""
+    assert "product: King Deluxe" in (turn.known_state or "")
+    assert "Kargo" not in turn.message and "Kargo" not in (turn.known_state or "")
+    session = deps["state"].sessions["+918286871533"]
+    assert session.lead_profile["product_interest"] == "King Deluxe"
+    assert session.awaiting_vehicle_pick is False
+    # "2" answered the list — it did not switch the chat to Hindi.
+    assert session.language == "English"
+
+
+def test_vehicle_pick_by_name_resolves_the_canonical_product():
+    processor, deps = _no_still_interested()
+    processor.process(_event(message_id="m1", content="Hi"))
+
+    processor.process(_event(message_id="m2", content="ev max chahiye"))
+
+    assert "chose King EV MAX from the vehicle list" in deps["engine"].turns[-1].message
+    assert deps["state"].sessions["+918286871533"].lead_profile["product_interest"] == "King EV MAX"
+    # A product name is not a place name: no location classification ran.
+    assert deps["engine"].turns[-1].message.startswith("ev max chahiye")
+
+
+def test_vehicle_list_non_matching_reply_goes_to_the_model_once():
+    processor, deps = _no_still_interested()
+    processor.process(_event(message_id="m1", content="Hi"))
+    deps["engine"].reply = "Prices start at Rs 3.2 lakh. Which model would you like?"
+
+    processor.process(_event(message_id="m2", content="what is the price?"))
+
+    turn = deps["engine"].turns[-1]
+    assert "did not pick one" in turn.message
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "1. King EV MAX" not in reply  # the list is not re-sent
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_vehicle_pick is False
+    assert "product_interest" not in session.lead_profile
+
+
+def test_vehicle_list_falls_back_to_the_configured_products():
+    processor, deps = _processor(
+        skip_still_interested=False,
+        switches=FlowSwitches(assume_not_still_interested=True),
+    )
+    deps["directory"].customer = _full_crm_record()
+
+    processor.process(_event(message_id="m1", content="Hi"))
+
+    from client_media_assets import configured_products
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    for i, name in enumerate(configured_products(), 1):
+        assert f"{i}. {name}" in reply
+
+
+def test_assumed_no_keeps_the_crm_product_out_of_dispose():
+    """"No" to the CRM product means it is not their interest — dispose must
+    not fall back to it when the customer has not named one."""
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _no_still_interested(dealer_directory=directory)
+    processor.process(_event(message_id="m1", content="Hi"))
+    deps["engine"].reply = "Noted. Which model would you like?"
+    processor.process(_event(message_id="m2", content="not sure yet"))
+    deps["engine"].acknowledgement = "Thanks for the pincode."
+
+    processor.process(_event(message_id="m3", content="411001"))
+
+    assert deps["dispose"].calls, "pincode should still dispose"
+    assert all("Kargo" not in str(call.get("product_name", "")) for call in deps["dispose"].calls)
+
+
+def test_new_customer_is_unaffected_by_assume_not_still_interested():
+    processor, deps = _processor(
+        skip_still_interested=False,
+        switches=FlowSwitches(assume_not_still_interested=True, vehicle_list=VEHICLES),
+    )
+    deps["directory"].customer = Customer("unknown-8286871533", "Customer 8286871533")
+
+    processor.process(_event(message_id="m1", content="Hi"))
+
+    assert "1. King EV MAX" not in deps["reply_sender"].calls[-1]["text"]
+    assert len(deps["engine"].turns) == 1
 
 
 # --- CLIENT_SKIP_CRM_DEALER --------------------------------------------------

@@ -187,6 +187,47 @@ _PINCODE_OR_LOCATION_ASK = {
     ),
 }
 
+# Shown to a returning customer instead of "still planning to purchase X?"
+# (flow switch CLIENT_ASSUME_NOT_STILL_INTERESTED). {options} is the
+# numbered vehicle list, one "N. Name" per line.
+_VEHICLE_LIST_ASK = {
+    "English": (
+        "Which TVS passenger vehicle would you like to know about?\n\n"
+        "{options}\n\n"
+        "Reply with the number or the vehicle name."
+    ),
+    "Hindi": (
+        "आप किस TVS पैसेंजर वाहन के बारे में जानना चाहेंगे?\n\n"
+        "{options}\n\n"
+        "नंबर या वाहन का नाम लिखकर जवाब दें।"
+    ),
+    "Marathi": (
+        "तुम्हाला कोणत्या TVS पॅसेंजर वाहनाबद्दल जाणून घ्यायचे आहे?\n\n"
+        "{options}\n\n"
+        "नंबर किंवा वाहनाचे नाव लिहून उत्तर द्या."
+    ),
+    "Telugu": (
+        "మీరు ఏ TVS ప్యాసింజర్ వాహనం గురించి తెలుసుకోవాలనుకుంటున్నారు?\n\n"
+        "{options}\n\n"
+        "నంబర్ లేదా వాహనం పేరు టైప్ చేసి రిప్లై ఇవ్వండి."
+    ),
+    "Tamil": (
+        "எந்த TVS பயணிகள் வாகனம் பற்றி அறிய விரும்புகிறீர்கள்?\n\n"
+        "{options}\n\n"
+        "எண் அல்லது வாகனத்தின் பெயரை டைப் செய்து பதிலளிக்கவும்."
+    ),
+    "Kannada": (
+        "ನೀವು ಯಾವ TVS ಪ್ಯಾಸೆಂಜರ್ ವಾಹನದ ಬಗ್ಗೆ ತಿಳಿಯಲು ಬಯಸುತ್ತೀರಿ?\n\n"
+        "{options}\n\n"
+        "ಸಂಖ್ಯೆ ಅಥವಾ ವಾಹನದ ಹೆಸರನ್ನು ಟೈಪ್ ಮಾಡಿ ಉತ್ತರಿಸಿ."
+    ),
+    "Malayalam": (
+        "ഏത് TVS പാസഞ്ചർ വാഹനത്തെക്കുറിച്ചാണ് നിങ്ങൾക്ക് അറിയാൻ താൽപ്പര്യം?\n\n"
+        "{options}\n\n"
+        "നമ്പർ അല്ലെങ്കിൽ വാഹനത്തിന്റെ പേര് ടൈപ്പ് ചെയ്ത് മറുപടി നൽകുക."
+    ),
+}
+
 _LOCATION_THANKS = {
     "English": "Thanks for sharing your location.",
     "Hindi": "लोकेशन शेयर करने के लिए धन्यवाद।",
@@ -660,6 +701,7 @@ MESSAGE_DEFAULTS: dict[str, dict[str, str]] = {
     "invalid_pincode_location": _INVALID_PINCODE_LOCATION,
     "share_location_ask": _SHARE_LOCATION_ASK,
     "pincode_or_location_ask": _PINCODE_OR_LOCATION_ASK,
+    "vehicle_list_ask": _VEHICLE_LIST_ASK,
     "location_thanks": _LOCATION_THANKS,
     "location_unreadable": _LOCATION_UNREADABLE,
     "location_need_pincode": _LOCATION_NEED_PIN,
@@ -707,6 +749,7 @@ MESSAGE_PLACEHOLDERS: dict[str, frozenset[str]] = {
     "pgm_nearest_for_pincode": frozenset({"pincode"}),
     "pgm_none_nearby": frozenset({"km"}),
     "pgm_pincode_unresolved": frozenset({"pincode"}),
+    "vehicle_list_ask": frozenset({"options"}),
 }
 
 
@@ -841,6 +884,12 @@ def share_location_ask(language: str = "English") -> str:
 
 def pincode_or_location_ask(language: str = "English") -> str:
     return message_text("pincode_or_location_ask", language)
+
+
+def vehicle_list_ask(vehicles: Sequence[str], language: str = "English") -> str:
+    """Numbered vehicle menu; names stay as configured, the frame is localised."""
+    options = "\n".join(f"{i}. {name}" for i, name in enumerate(vehicles, 1))
+    return render_message("vehicle_list_ask", language, options=options)
 
 
 def location_thanks(language: str = "English") -> str:

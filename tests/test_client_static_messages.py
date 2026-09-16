@@ -198,3 +198,28 @@ def test_pgm_result_messages_declare_their_placeholders():
     assert placeholders_for("pgm_none_nearby") == {"km"}
     assert placeholders_for("pgm_pincode_unresolved") == {"pincode"}
     assert placeholders_for("pgm_results_footer") == frozenset()
+
+
+# --- flow-switch cards -------------------------------------------------------
+
+
+def test_vehicle_list_ask_is_localized_for_every_menu_language():
+    """The list replaces the still-interested ask for returning customers, so
+    every menu language must get its own frame around the numbered names."""
+    from client_static_messages import vehicle_list_ask
+
+    vehicles = ("King EV MAX", "King Deluxe")
+    texts = {lang: vehicle_list_ask(vehicles, lang) for lang in _ALL_LANGUAGES}
+    assert len(set(texts.values())) == len(_ALL_LANGUAGES)
+    for lang, text in texts.items():
+        assert "1. King EV MAX\n2. King Deluxe" in text, lang
+        assert "{options}" not in text, lang
+
+
+def test_pincode_or_location_ask_is_localized_and_never_mentions_the_image():
+    from client_static_messages import pincode_or_location_ask
+
+    texts = {lang: pincode_or_location_ask(lang) for lang in _ALL_LANGUAGES}
+    assert len(set(texts.values())) == len(_ALL_LANGUAGES)
+    assert "image" not in texts["English"].lower()
+    assert "इमेज" not in texts["Hindi"] and "इमेज" not in texts["Marathi"]

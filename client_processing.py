@@ -50,6 +50,7 @@ from dispose import (
 )
 from client_media_assets import (
     brochure_product_from_text,
+    configured_products,
     doesnt_know_pincode,
     is_bare_dont_know,
     product_document_filename,
@@ -73,6 +74,7 @@ from client_static_messages import (
     location_no_dealer,
     location_thanks,
     pincode_or_location_ask,
+    vehicle_list_ask,
     location_unreadable,
     pgm_ask_bigger_city,
     pgm_card,
@@ -650,6 +652,7 @@ class ClientMessageProcessor:
             event.get("type") == "audio"
             and immediate_reply is None
             and not session.awaiting_flow_intent
+            and not session.awaiting_vehicle_pick
         ):
             language = self._maybe_switch_language(session, message) or language
 
@@ -679,7 +682,9 @@ class ClientMessageProcessor:
 
         # Returning customer after idle expiry / fresh session: mandatory
         # name+product still-interested Yes/No in the language just chosen.
-        still_prompt = self._maybe_offer_still_interested(session, language=language)
+        still_prompt = self._maybe_offer_vehicle_list(
+            session, language=language
+        ) or self._maybe_offer_still_interested(session, language=language)
         if still_prompt is not None:
             user_text = choice_text
             self._reply_and_record(
@@ -718,8 +723,19 @@ class ClientMessageProcessor:
                 return
             message = enriched
 
+        vehicle_picked = False
+        vehicle_pick = self._apply_vehicle_pick(
+            session,
+            user_message=str(event.get("content") or "").strip(),
+            language=language,
+        )
+        if vehicle_pick is not None:
+            message, vehicle_picked = vehicle_pick
+
         raw_place_text = str(event.get("content") or "").strip()
-        if event.get("type") == "text" and raw_place_text:
+        # A pick from the vehicle list ("2", "King Deluxe") is not a place
+        # name or a pincode; skip that classification for the turn.
+        if event.get("type") == "text" and raw_place_text and not vehicle_picked:
             # One classification per turn, shared by the pincode and
             # place-name handlers below.
             location_kind = self._classify_location(session, raw_place_text)
@@ -884,7 +900,7 @@ class ClientMessageProcessor:
         )
 
         confirm_was_pending = session.awaiting_dealer_confirm
-        product_hint = _product_hint_for(customer)
+        product_hint = self._crm_product(customer)
         crm_offer_pending = (
             _crm_dealer_available(customer)
             and not session.dealer_confirmed
@@ -1104,7 +1120,7 @@ class ClientMessageProcessor:
             user_message,
             str((profile or {}).get("product_interest") or ""),
             str(session.lead_profile.get("product_interest") or ""),
-            _product_hint_for(session.customer),
+            self._crm_product(session.customer),
             *history_hints,
         )
         return brochure_product_from_text(*hints), hints
@@ -1588,6 +1604,23 @@ class ClientMessageProcessor:
             return pgm_none_nearby(self._pgm_directory.max_km, language)
         return pgm_results_list(nearest, pincode=pincode, language=language)
 
+    def _crm_product(self, customer: Customer | None) -> str:
+        """The CRM product as the customer's interest — or nothing.
+
+        With assume_not_still_interested the answer to "still planning to
+        purchase X?" is taken as no, so X must not steer the model, the
+        known-state block or dispose; the customer picks afresh from the
+        vehicle list. (_returning_product keeps reading the raw record so a
+        returning customer is still recognised as one.)
+        """
+        if self._switches.assume_not_still_interested:
+            return ""
+        return _product_hint_for(customer)
+
+    def _vehicle_options(self) -> list[str]:
+        """Vehicles for the numbered list: env override, else admin products."""
+        return list(self._switches.vehicle_list) or list(configured_products())
+
     def _returning_product(self, customer: Customer | None) -> str:
         """Best-known prior product for the still-interested ask."""
         product = _product_hint_for(customer)
@@ -1622,6 +1655,8 @@ class ClientMessageProcessor:
         language: str,
     ) -> str | None:
         """Send mandatory still-interested Yes/No for returning customers."""
+        if self._switches.assume_not_still_interested:
+            return None  # answered "no" for them — see _maybe_offer_vehicle_list
         if session.still_interested_asked or session.awaiting_still_interested:
             return None
         customer = session.customer
@@ -1644,6 +1679,87 @@ class ClientMessageProcessor:
             product=product,
             language=language or self._session_language(session),
         )
+
+    def _maybe_offer_vehicle_list(
+        self,
+        session: ClientSession,
+        *,
+        language: str,
+    ) -> str | None:
+        """The vehicle list, where the still-interested ask used to be.
+
+        Client request (16/09): a returning customer is not asked whether
+        they still want the product CRM has on file — the answer is taken as
+        "no", and instead of "thank you for letting us know" they get the
+        numbered list of vehicles to choose from. Nothing is written to the
+        lead profile and nothing is disposed: the customer has not said
+        anything yet.
+        """
+        if not self._switches.assume_not_still_interested:
+            return None
+        if session.vehicle_menu_sent:
+            return None
+        if not self._is_returning_customer(session.customer):
+            return None
+        if session.history and not _history_is_language_menu_only(session.history):
+            return None
+        session.vehicle_menu_sent = True
+        session.awaiting_vehicle_pick = True
+        # Same slot as the still-interested ask: mark it taken so neither the
+        # static ask nor the LLM welcome-back seed fires later.
+        session.still_interested_asked = True
+        session.welcome_back_sent = True
+        return vehicle_list_ask(
+            self._vehicle_options(), language or self._session_language(session)
+        )
+
+    def _apply_vehicle_pick(
+        self,
+        session: ClientSession,
+        *,
+        user_message: str,
+        language: str,
+    ) -> tuple[str, bool] | None:
+        """Read the reply to the vehicle list.
+
+        Returns None when no list is pending, else ``(engine_message,
+        picked)``. A number or a recognisable name becomes the product of
+        interest; anything else goes to the model with a note, once — the
+        list is not re-sent, the model already knows how to ask for a model.
+        """
+        if not session.awaiting_vehicle_pick:
+            return None
+        session.awaiting_vehicle_pick = False
+        options = self._vehicle_options()
+        text = (user_message or "").strip()
+        product = ""
+        pick = parse_list_pick(text, len(options))
+        if pick:
+            product = options[pick - 1]
+        else:
+            by_name = brochure_product_from_text(text) or normalize_product_name(text)
+            lowered = {opt.lower(): opt for opt in options}
+            if by_name.lower() in lowered:
+                product = lowered[by_name.lower()]
+            else:
+                product = next(
+                    (opt for opt in options if opt.lower() in text.lower()), ""
+                )
+        lang = language or self._session_language(session)
+        if not product:
+            return (
+                f"{user_message}\n\n(The customer was shown the vehicle list but "
+                "did not pick one. Address what they said; if the model is still "
+                f"unknown, ask which one they want, in {lang}. Do not re-send "
+                "the list.)"
+            ), False
+        session.lead_profile["product_interest"] = product
+        return (
+            f"{user_message}\n\n(The customer chose {product} from the vehicle "
+            "list. Treat it as their product of interest and do not ask which "
+            f"model again. In {lang}: greet briefly, acknowledge the choice, then "
+            "ask the next qualification question.)"
+        ), True
 
     def _apply_still_interested(
         self,
@@ -1735,7 +1851,7 @@ class ClientMessageProcessor:
             (session.language or "").strip()
             or (customer.preferred_language or "").strip()
         )
-        product = _product_hint_for(customer)
+        product = self._crm_product(customer)
         dealership = (
             ""
             if self._switches.skip_crm_dealer
@@ -1811,7 +1927,7 @@ class ClientMessageProcessor:
 
         product = normalize_product_name(
             str(profile.get("product_interest") or "")
-        ) or _product_hint_for(session.customer)
+        ) or self._crm_product(session.customer)
         if product:
             bits.append(f"product: {product}")
 
@@ -2527,7 +2643,7 @@ class ClientMessageProcessor:
         if preferred:
             enriched.setdefault("preferred_language", preferred)
         if not normalize_product_name(str(enriched.get("product_interest") or "")):
-            hint = _product_hint_for(session.customer)
+            hint = self._crm_product(session.customer)
             if hint:
                 enriched["product_interest"] = hint
         # New CRM field customername — required when the mobile is not already in CRM.
@@ -2765,7 +2881,7 @@ class ClientMessageProcessor:
             channel="client_app",
             source="client_app",
             history=list(session.history),
-            product_hint=_product_hint_for(session.customer),
+            product_hint=self._crm_product(session.customer),
             confirm_crm_dealer=False,
             known_state=self._known_state_block(session),
         )
@@ -2876,14 +2992,16 @@ class ClientMessageProcessor:
             # PGM flow a bare number is only ever a pick from the numbered
             # list (or nothing), never a language; a typed language name
             # still switches.
-            bare_number_in_pgm_flow = (
-                session.flow == FLOW_PGM and parse_list_pick(content, 9) > 0
+            # A bare "2" answers whichever numbered list is open (PGM
+            # candidates, the vehicle list) — it is not "switch to Hindi".
+            bare_menu_pick = parse_list_pick(content, 9) > 0 and (
+                session.flow == FLOW_PGM or session.awaiting_vehicle_pick
             )
             if (
                 event.get("type") == "text"
                 and not session.awaiting_still_interested
                 and not session.awaiting_flow_intent
-                and not bare_number_in_pgm_flow
+                and not bare_menu_pick
             ):
                 self._maybe_switch_language(session, content)
             return session.language
