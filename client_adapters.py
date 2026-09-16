@@ -550,6 +550,9 @@ class RedisClientState:
                     data.get("dealer_confirm_deferred") or False
                 ),
                 crm_dealer_offered=bool(data.get("crm_dealer_offered") or False),
+                crm_dealer_reoffered=bool(
+                    data.get("crm_dealer_reoffered") or False
+                ),
                 awaiting_dealer_share_consent=bool(
                     data.get("awaiting_dealer_share_consent") or False
                 ),
@@ -622,6 +625,7 @@ class RedisClientState:
             "awaiting_dealer_confirm": session.awaiting_dealer_confirm,
             "dealer_confirm_deferred": session.dealer_confirm_deferred,
             "crm_dealer_offered": session.crm_dealer_offered,
+            "crm_dealer_reoffered": session.crm_dealer_reoffered,
             "awaiting_dealer_share_consent": session.awaiting_dealer_share_consent,
             "dealer_share_asked": session.dealer_share_asked,
             "dealer_share_declined": session.dealer_share_declined,

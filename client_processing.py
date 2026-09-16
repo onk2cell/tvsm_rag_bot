@@ -273,9 +273,15 @@ class ClientSession:
     awaiting_dealer_confirm: bool = False
     dealer_confirm_deferred: bool = False
     crm_dealer_offered: bool = False
+    # The CRM-dealer consent ask gets one retry when the customer's reply
+    # was about something else (they answered the model's earlier question
+    # instead). Without it a late "yes" had nothing to land on.
+    crm_dealer_reoffered: bool = False
     dealer_confirmed: bool = False
-    # Dealership details are never volunteered: we ask first, and only send
-    # the name/address/phone/map card once the customer says yes.
+    # A dealership WE bring up (the CRM record) is never volunteered: we ask
+    # first, and only send the name/address/phone/map card once the customer
+    # says yes. One the customer located themselves (pincode / live location
+    # sent so we could find it) skips this and goes straight to the card.
     awaiting_dealer_share_consent: bool = False
     dealer_share_asked: bool = False
     dealer_share_declined: bool = False
@@ -804,11 +810,12 @@ class ClientMessageProcessor:
             user_message=raw_user_text,
             requested=brochure_requested,
         )
+        images_requested = wants_product_images(raw_user_text)
         message, images_product = self._prepare_product_images_context(
             session,
             message,
             user_message=raw_user_text,
-            requested=wants_product_images(raw_user_text),
+            requested=images_requested,
         )
 
         confirm_was_pending = session.awaiting_dealer_confirm
@@ -819,6 +826,15 @@ class ClientMessageProcessor:
             and not session.crm_dealer_offered
         )
         is_first_qualification_reply = not session.qualification_started
+        # A turn spent on a side request (brochure, photos) is not the
+        # moment to open the dealership question. The customer asked for a
+        # document, and the model's own open question (purchase date, ...)
+        # is still unanswered — stacking the consent ask onto the brochure
+        # acknowledgement made the customer answer the date instead, which
+        # read as "unclear" and threw the consent away (16/09 transcript,
+        # 9322138350: asked three times in one chat). Defer to the next
+        # question-free turn, the same way the bare first reply defers.
+        crm_offer_deferred = brochure_requested or images_requested
         # _maybe_offer_crm_dealer (post-reply) will attach a mandatory
         # dealer-confirm question under these same conditions, except it
         # additionally defers on a bare first reply (see its docstring —
@@ -833,8 +849,13 @@ class ClientMessageProcessor:
         # up front so the guard covers it too — without this the customer
         # got the campaign blurb, a purchase-date question AND the dealer
         # card in one bubble (bug 010801).
-        crm_card_will_attach = confirm_crm and (
-            not is_first_qualification_reply or bool(extract_pincode(raw_user_text))
+        crm_card_will_attach = (
+            confirm_crm
+            and not crm_offer_deferred
+            and (
+                not is_first_qualification_reply
+                or bool(extract_pincode(raw_user_text))
+            )
         )
         # _maybe_offer_crm_dealer runs first and sets awaiting_dealer_confirm,
         # which short-circuits _attach_nearest_dealer — so when the CRM card
@@ -893,6 +914,7 @@ class ClientMessageProcessor:
             user_message=raw_user_text,
             reply=output.reply_text,
             is_first_reply=is_first_qualification_reply,
+            deferred=crm_offer_deferred,
         )
         reply_text = self._attach_nearest_dealer(
             session,
@@ -1964,11 +1986,30 @@ class ClientMessageProcessor:
         """
         return any(mark in (text or "") for mark in ("?", "？", "﻿?"))
 
+    def _dealer_confirm_ask_for_dealer(self, session: ClientSession, dealer) -> str:
+        """Arm the OK/not-OK card for a dealership the customer located.
+
+        A pincode or live location sent in answer to "share your pincode so
+        I can connect you with the nearest dealership" already says they
+        want that dealership. Asking "would you like me to share the
+        details?" on top of it was the double confirmation in the 16/09
+        transcript (9322138350) — and every corrected pincode asked it
+        again. Only a dealership WE volunteer (the CRM record, via
+        _maybe_offer_crm_dealer) still goes through the consent question.
+        """
+        session.last_dealer_code = dealer.dealer_code
+        session.awaiting_dealer_confirm = True
+        session.dealer_confirmed = False
+        return format_dealer_confirm_ask_from_dealer(
+            dealer, language=self._session_language(session)
+        )
+
     def _dealer_share_ask_for_session(
         self, session: ClientSession, dealer_code: str
     ) -> str:
         """Arm the consent question for `dealer_code` and return its text.
 
+        Used for the CRM dealership only — one we bring up ourselves.
         ``last_dealer_code`` is set here, not on consent: which dealer the
         lead is routed to is a CRM fact that dispose needs regardless of
         whether the customer wanted to see the contact card. Only the
@@ -2010,9 +2051,22 @@ class ClientMessageProcessor:
                 "right now. Acknowledge briefly, do NOT send dealership "
                 "details, and continue with the next qualification step.)"
             ), None
-        # Unclear — they were talking about something else. Don't assume
-        # consent, and don't nag: the ask can come round again later.
+        # Unclear — they were talking about something else (answering the
+        # model's earlier question, sending a pincode, ...). Don't assume
+        # consent, but don't lose the ask either: in the 16/09 transcript
+        # (9322138350) the customer answered the purchase-date question
+        # first and said "Yes" one turn later — by then nothing was
+        # pending, so the yes went to the model as small talk.
         session.dealer_share_asked = False
+        if extract_pincode(message):
+            # A pincode answers "which dealership?" better than a yes
+            # would. Leave the CRM offer retired and let
+            # _attach_nearest_dealer put up the card for THAT location.
+            return message, None
+        if not session.crm_dealer_reoffered:
+            # Re-offer once, on the next turn we can have to ourselves.
+            session.crm_dealer_reoffered = True
+            session.crm_dealer_offered = False
         return message, None
 
     def _maybe_offer_crm_dealer(
@@ -2022,7 +2076,12 @@ class ClientMessageProcessor:
         user_message: str,
         reply: str,
         is_first_reply: bool = False,
+        deferred: bool = False,
     ) -> str:
+        # The caller already decided this turn belongs to something else
+        # (a brochure or photo request — see crm_offer_deferred in process).
+        if deferred:
+            return reply
         # offer is mandatory once CRM has a dealer, but never stack it onto
         # the very first REAL qualification reply (from the engine) unless
         # the customer's own message already signals they're at the
@@ -2171,7 +2230,7 @@ class ClientMessageProcessor:
         if dealer is None:
             return reply
         # Never append to a reply that already asks something (see
-        # _asks_a_question) — the consent question must stand alone. Unlike
+        # _asks_a_question) — the card's Yes/No must stand alone. Unlike
         # a pincode, which only ever appears once in the message stream, the
         # resolved dealer is persisted here so a later, question-free turn
         # can still offer it instead of losing the chance for good (mirrors
@@ -2183,7 +2242,7 @@ class ClientMessageProcessor:
         session.pending_nearest_dealer_code = ""
         session.pending_nearest_dealer_pincode = ""
         session.dealer_shared_for_pincode = target_pincode
-        ask = self._dealer_share_ask_for_session(session, dealer.dealer_code)
+        ask = self._dealer_confirm_ask_for_dealer(session, dealer)
         return f"{reply.rstrip()}\n\n{ask}"
 
     def _maybe_handle_place_name(
@@ -2458,12 +2517,12 @@ class ClientMessageProcessor:
             self._complete_turn(session, event["message_id"], user_label, reply)
             return
 
-        session.dealer_confirmed = False
         if dealer.pincode and not session.dealer_shared_for_pincode:
             session.dealer_shared_for_pincode = dealer.pincode
-        # Even here the details are not volunteered: a shared pin tells us
-        # WHERE they are, not that they want a dealership's phone number.
-        ask = self._dealer_share_ask_for_session(session, dealer.dealer_code)
+        # A live location is sent in answer to "share your pincode or live
+        # location so I can connect you with the nearest dealership" — the
+        # same consent a typed pincode carries, so straight to the card.
+        ask = self._dealer_confirm_ask_for_dealer(session, dealer)
         reply = f"{location_thanks(reply_language)}\n\n{ask}"
         self._maybe_dispose(session, profile=None)
         self._reply_and_record(

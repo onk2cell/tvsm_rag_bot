@@ -74,16 +74,12 @@ def test_010801_pincode_reply_does_not_stack_two_questions():
 
     # The model must be told to stay quiet before anything is appended...
     assert CompliantEngine.SUPPRESS in deps["engine"].turns[-1].message
-    # ...and the delivered message must carry exactly one question.
+    # ...and the delivered message carries the card with exactly one
+    # question — its own Yes/No. The pincode was the consent, so there is
+    # no "may I share?" hop in between.
     sent = deps["reply_sender"].calls[-1]["text"]
+    assert "Arc Andheri" in sent
     assert sent.count("?") <= 1, f"two questions stacked:\n{sent}"
-
-    # Details are consent-gated, so the card arrives on the next turn —
-    # still as the single question of that message.
-    processor.process(_event(message_id="m2", content="yes"))
-    card = deps["reply_sender"].calls[-1]["text"]
-    assert "Arc Andheri" in card
-    assert card.count("?") <= 1, f"two questions stacked:\n{card}"
 
 
 # --- 010802 / 230701: language switch spoken in a voice note --------------
