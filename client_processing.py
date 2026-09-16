@@ -931,7 +931,17 @@ class ClientMessageProcessor:
             else self._pending_nearest_dealer(session, raw_user_text)
         )
         dealer_card_will_attach = crm_card_will_attach or nearest_dealer is not None
-        if dealer_card_will_attach:
+        if nearest_dealer is not None and self._switches.assume_dealer_ok:
+            # The card goes out without its Yes/No, so the model must keep
+            # the conversation moving with its own question.
+            message = (
+                f"{message}\n\n(The system is placing the nearest dealership "
+                "card — name, address, phone, map — ABOVE your reply. Do NOT "
+                "repeat or invent dealership details. Briefly acknowledge, "
+                "then ask the next qualification question — you MUST ask it, "
+                "the card carries no question.)"
+            )
+        elif dealer_card_will_attach:
             message = (
                 f"{message}\n\n(Do NOT ask any question of your own in this "
                 "reply — just briefly acknowledge/transition. The system "
@@ -2068,6 +2078,43 @@ class ClientMessageProcessor:
             dealer, language=self._session_language(session)
         )
 
+    def _dealer_card_for_dealer(
+        self, session: ClientSession, dealer, *, pincode: str
+    ) -> str:
+        """The nearest dealership as a settled fact (assume_dealer_ok).
+
+        The customer located it themselves, so it is taken as theirs without
+        "is this OK? Yes/No": confirmed on the spot, routed for dispose, and
+        the card carries no question. A different pincode later still
+        replaces it (see _pending_nearest_dealer).
+        """
+        session.last_dealer_code = dealer.dealer_code
+        session.dealer_confirmed = True
+        session.awaiting_dealer_confirm = False
+        session.dealer_confirm_deferred = False
+        session.dealer_shared_for_pincode = pincode
+        session.pending_nearest_dealer_code = ""
+        session.pending_nearest_dealer_pincode = ""
+        return format_dealer_confirm_ask_from_dealer(
+            dealer, language=self._session_language(session), include_ask=False
+        )
+
+    def _dealer_settled(self, session: ClientSession, pincode: str) -> bool:
+        """Is the dealer question closed for this turn?
+
+        Once a card is out, a later pincode normally lands in
+        _apply_dealer_confirm ("a fresh pincode wins") — but under
+        assume_dealer_ok nothing is ever awaiting confirmation, so that
+        branch is never reached. Let a *different* pincode reopen the lookup
+        here instead.
+        """
+        if session.awaiting_dealer_confirm:
+            return True
+        if not session.dealer_confirmed:
+            return False
+        fresh = bool(pincode) and pincode != session.dealer_shared_for_pincode
+        return not (self._switches.assume_dealer_ok and fresh)
+
     def _dealer_share_ask_for_session(
         self, session: ClientSession, dealer_code: str
     ) -> str:
@@ -2234,11 +2281,11 @@ class ClientMessageProcessor:
         """
         if self._dealer_directory is None:
             return None
-        if session.dealer_confirmed or session.awaiting_dealer_confirm:
+        pincode = extract_pincode(user_message)
+        if self._dealer_settled(session, pincode):
             return None
         if session.awaiting_dealer_share_consent or session.dealer_share_declined:
             return None
-        pincode = extract_pincode(user_message)
         if pincode and pincode != session.dealer_shared_for_pincode:
             try:
                 return self._dealer_directory.find_nearest_by_pincode(pincode)
@@ -2269,11 +2316,11 @@ class ClientMessageProcessor:
     ) -> str:
         if self._dealer_directory is None:
             return reply
-        if session.dealer_confirmed or session.awaiting_dealer_confirm:
+        pincode = extract_pincode(user_message)
+        if self._dealer_settled(session, pincode):
             return reply
         if session.awaiting_dealer_share_consent or session.dealer_share_declined:
             return reply
-        pincode = extract_pincode(user_message)
         if pincode and pincode != session.dealer_shared_for_pincode:
             target_pincode = pincode
         elif (
@@ -2293,6 +2340,12 @@ class ClientMessageProcessor:
                 return reply
         if dealer is None:
             return reply
+        if self._switches.assume_dealer_ok:
+            # No question on the card, so nothing to keep apart from the
+            # model's own question: card first, then the reply that carries
+            # the next step. One message, one bot turn in history.
+            card = self._dealer_card_for_dealer(session, dealer, pincode=target_pincode)
+            return f"{card}\n\n{reply.strip()}" if reply.strip() else card
         # Never append to a reply that already asks something (see
         # _asks_a_question) — the card's Yes/No must stand alone. Unlike
         # a pincode, which only ever appears once in the message stream, the
@@ -2581,6 +2634,16 @@ class ClientMessageProcessor:
             self._complete_turn(session, event["message_id"], user_label, reply)
             return
 
+        if self._switches.assume_dealer_ok:
+            self._reply_to_location_with_settled_dealer(
+                event,
+                session=session,
+                dealer=dealer,
+                language=reply_language,
+                started=started,
+            )
+            return
+
         if dealer.pincode and not session.dealer_shared_for_pincode:
             session.dealer_shared_for_pincode = dealer.pincode
         # A live location is sent in answer to "share your pincode or live
@@ -2598,6 +2661,98 @@ class ClientMessageProcessor:
             started=started,
         )
         self._complete_turn(session, event["message_id"], user_label, reply)
+
+    def _reply_to_location_with_settled_dealer(
+        self,
+        event: dict,
+        *,
+        session: ClientSession,
+        dealer,
+        language: str,
+        started: float,
+    ) -> None:
+        """assume_dealer_ok on a shared location: card, then the next step.
+
+        The static path above ends on the card's Yes/No, which is what keeps
+        the conversation going. Without that question the customer would be
+        left looking at an address, so this variant runs an engine turn and
+        lets the model ask the next qualification question under the card.
+        """
+        user_label = "shared location"
+        # A fresh location wins over any earlier pincode, like a new pincode.
+        card = self._dealer_card_for_dealer(
+            session,
+            dealer,
+            pincode=dealer.pincode or session.dealer_shared_for_pincode,
+        )
+        message = (
+            f"{user_label}\n\n(Customer shared their live location. The system "
+            "has placed the nearest dealership card — name, address, phone, "
+            "map — ABOVE your reply. Do NOT repeat or invent dealership "
+            "details. Briefly acknowledge, then ask the next qualification "
+            "question — you MUST ask it, the card carries no question.)"
+        )
+        output = self._engine_turn(session, language=language, message=message)
+        follow_up = (
+            (output.reply_text or "").strip()
+            if output is not None
+            else acknowledgement_fallback(language)
+        )
+        reply = "\n\n".join(
+            part for part in (location_thanks(language), card, follow_up) if part
+        )
+        if output is not None:
+            self._arm_brochure_offer(session, output.offered_brochure, user_message="")
+        self._maybe_dispose(session, profile=output.profile if output else None)
+        session.pending_replies[event["message_id"]] = {
+            "language": language,
+            "user_message": message,
+            "reply": reply,
+            "citations": output.citations if output else [],
+        }
+        self._state.save(session)
+        self._reply_and_record(
+            event,
+            session=session,
+            language=language,
+            user_message=user_label,
+            reply=reply,
+            started=started,
+            citations=output.citations if output else None,
+            prompt_tokens=output.prompt_tokens if output else None,
+            completion_tokens=output.completion_tokens if output else None,
+        )
+        self._complete_turn(session, event["message_id"], message, reply)
+
+    def _engine_turn(
+        self, session: ClientSession, *, language: str, message: str
+    ):
+        """One qualification turn for a system-authored message, or None.
+
+        Mirrors the engine call in process() (retry, empty-reply nudge,
+        qualification_started) for the paths that reply statically today
+        but need the model to supply the next question. Returns None when
+        the model is unavailable so the caller can fall back to a static
+        line instead of failing the whole reply.
+        """
+        turn = TurnInput(
+            session_id=session.conversation_id,
+            language=language,
+            message=message,
+            channel="client_app",
+            source="client_app",
+            history=list(session.history),
+            product_hint=_product_hint_for(session.customer),
+            confirm_crm_dealer=False,
+            known_state=self._known_state_block(session),
+        )
+        try:
+            output = self._attempt(lambda: self._engine.handle_turn(turn))
+        except Exception:
+            log.exception("engine turn failed mobile=%s", session.mobile)
+            return None
+        session.qualification_started = True
+        return self._retry_empty_reply(turn, output)
 
     def _message_for_event(
         self,

@@ -750,7 +750,12 @@ def dealer_confirm_ask(
     map_url: str = "",
     city: str = "",
     language: str = "English",
+    include_ask: bool = True,
 ) -> str:
+    """The dealership card, ending in "is this OK? Yes/No" unless
+    ``include_ask`` is False (the card is then informational — used when
+    the bot assumes the nearest dealership is the right one)."""
+
     def label(which: str) -> str:
         return message_text(f"dealer_label_{which}", language)
 
@@ -770,7 +775,8 @@ def dealer_confirm_ask(
         lines.append(f"{label('phone')}: {contact}")
     if map_url:
         lines.append(f"{label('map')}: {map_url}")
-    lines.extend(["", message_text("dealer_ask", language)])
+    if include_ask:
+        lines.extend(["", message_text("dealer_ask", language)])
     return "\n".join(lines)
 
 

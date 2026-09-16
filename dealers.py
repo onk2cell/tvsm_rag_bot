@@ -174,6 +174,7 @@ def format_dealer_confirm_ask(
     map_url: str = "",
     city: str = "",
     language: str = "English",
+    include_ask: bool = True,
 ) -> str:
     """Ask whether this dealership (name + address mandatory) is OK."""
     from client_static_messages import dealer_confirm_ask
@@ -186,6 +187,7 @@ def format_dealer_confirm_ask(
         map_url=map_url,
         city=city,
         language=language,
+        include_ask=include_ask,
     )
 
 
@@ -193,6 +195,7 @@ def format_dealer_confirm_ask_from_dealer(
     dealer: Dealer,
     *,
     language: str = "English",
+    include_ask: bool = True,
 ) -> str:
     return format_dealer_confirm_ask(
         name=dealer.name,
@@ -202,6 +205,7 @@ def format_dealer_confirm_ask_from_dealer(
         map_url=dealer.map_url,
         city=dealer.town_name,
         language=language,
+        include_ask=include_ask,
     )
 
 

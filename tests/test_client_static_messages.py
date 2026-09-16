@@ -22,6 +22,17 @@ def test_dealer_card_english_default():
     assert "Reply Yes or No" in ask
 
 
+def test_dealer_card_without_ask_omits_the_question():
+    card = dealer_confirm_ask(
+        name="Rhythm Auto", address="Pune", language="Marathi", include_ask=False
+    )
+    with_ask = dealer_confirm_ask(name="Rhythm Auto", address="Pune", language="Marathi")
+    assert "Rhythm Auto" in card and "Pune" in card
+    assert "?" not in card
+    assert with_ask.startswith(card)
+    assert with_ask != card
+
+
 def test_place_redirect_marathi():
     text = place_redirect_message("Marathi")
     assert "पिनकोड" in text

@@ -9,8 +9,14 @@ from client_processing import (
     ClientSession,
     Customer,
     DocumentRecognition,
+    FlowSwitches,
 )
-from client_static_messages import dealer_share_ask, flow_intent_ask
+from client_static_messages import (
+    acknowledgement_fallback,
+    dealer_share_ask,
+    flow_intent_ask,
+    location_thanks,
+)
 from dealers import Dealer, DealerDirectory
 from dispose import resolve_purchase_date
 
@@ -2570,6 +2576,194 @@ def test_first_message_context_includes_preferred_language_without_remarks():
     turn_message = deps["engine"].turns[0].message
     assert "preferred language: Marathi" in turn_message
     assert deps["state"].sessions["+918286871533"].welcome_back_sent is True
+
+
+# --- CLIENT_ASSUME_DEALER_OK -------------------------------------------------
+
+
+def _shah_auto(pincode="411048"):
+    return Dealer(
+        dealer_code="11689",
+        name="Shah Auto",
+        address=f"Pune, {pincode}",
+        pincode=pincode,
+        phone="9000000001",
+        map_url="https://maps.example/11689",
+        latitude=18.52,
+        longitude=73.85,
+    )
+
+
+def test_assume_dealer_ok_pincode_card_has_no_question_and_confirms():
+    """Client request (16/09): a customer who sent a pincode is assumed to be
+    near the dealership it maps to — no "Is this dealership OK? Yes/No". The
+    card goes out as a fact and the model keeps asking its own question."""
+    dispose = FakeDisposeClient()
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(
+        dealer_directory=directory,
+        dispose_client=dispose,
+        switches=FlowSwitches(assume_dealer_ok=True),
+    )
+    session = deps["state"].sessions["+918286871533"]
+    session.lead_profile = {
+        "product_interest": "King Deluxe",
+        "purchase_timeline": "20/08/2026",
+    }
+    deps["state"].save(session)
+    deps["engine"].reply = "Noted. When are you planning to buy?"
+
+    processor.process(_event(message_id="m1", content="My pincode is 411001"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Name: Shah Auto" in reply
+    assert "Reply Yes or No" not in reply
+    assert "Is this dealership" not in reply
+    # Card first, then the model's reply — exactly one question in total.
+    assert reply.index("Name: Shah Auto") < reply.index("When are you planning")
+    assert reply.count("?") == 1, reply
+    # The model was told to keep asking, not to stay quiet.
+    turn = deps["engine"].turns[-1]
+    assert FakeEngine.SUPPRESS_QUESTION not in turn.message
+    assert "you MUST ask it" in turn.message
+    session = deps["state"].sessions["+918286871533"]
+    assert session.dealer_confirmed is True
+    assert session.awaiting_dealer_confirm is False
+    assert session.last_dealer_code == "11689"
+    assert session.dealer_shared_for_pincode == "411001"
+    # Settled on the spot, so the lead is routed immediately.
+    assert dispose.calls[0]["status"] == "interested"
+    assert dispose.calls[0]["dealer_code"] == "11689"
+    assert dispose.calls[0]["pincode"] == "411001"
+
+
+def test_assume_dealer_ok_second_pincode_redoes_the_lookup():
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(
+        dealer_directory=directory, switches=FlowSwitches(assume_dealer_ok=True)
+    )
+    deps["engine"].reply = "Got it. Do you have a licence?"
+    processor.process(_event(message_id="m1", content="411001"))
+    assert deps["state"].sessions["+918286871533"].dealer_confirmed is True
+
+    directory.dealer = Dealer(
+        dealer_code="10824",
+        name="Kanchana Motors",
+        address="Mangalore",
+        pincode="575006",
+        phone="7353767891",
+        map_url="https://maps.example/10824",
+        latitude=12.87,
+        longitude=74.88,
+    )
+    processor.process(_event(message_id="m2", content="sorry, it is 575001"))
+
+    assert directory.calls == ["411001", "575001"]
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Name: Kanchana Motors" in reply
+    assert "Reply Yes or No" not in reply
+    session = deps["state"].sessions["+918286871533"]
+    assert session.last_dealer_code == "10824"
+    assert session.dealer_shared_for_pincode == "575001"
+    assert session.dealer_confirmed is True
+
+
+def test_assume_dealer_ok_same_pincode_is_not_looked_up_again():
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(
+        dealer_directory=directory, switches=FlowSwitches(assume_dealer_ok=True)
+    )
+    deps["engine"].reply = "Got it. Do you have a licence?"
+    processor.process(_event(message_id="m1", content="411001"))
+    processor.process(_event(message_id="m2", content="411001 as I said"))
+
+    assert directory.calls == ["411001"]
+    assert "Name: Shah Auto" not in deps["reply_sender"].calls[-1]["text"]
+
+
+def test_assume_dealer_ok_yes_after_the_card_is_plain_chat():
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(
+        dealer_directory=directory, switches=FlowSwitches(assume_dealer_ok=True)
+    )
+    deps["engine"].reply = "Great. Do you have a licence?"
+    processor.process(_event(message_id="m1", content="411001"))
+
+    deps["engine"].reply = "Do you know the key features?"
+    processor.process(_event(message_id="m2", content="yes"))
+
+    # Nothing was awaiting a Yes/No: the reply goes to the model as-is.
+    assert deps["engine"].turns[-1].message.startswith("yes")
+    assert "confirmed the suggested dealership" not in deps["engine"].turns[-1].message
+    assert deps["reply_sender"].calls[-1]["text"] == "Do you know the key features?"
+
+
+def test_assume_dealer_ok_live_location_runs_an_engine_turn():
+    """The static location path ended on the card's Yes/No; without that
+    question the chat would stall on an address, so the model supplies the
+    next step under the card."""
+    dispose = FakeDisposeClient()
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(
+        dealer_directory=directory,
+        dispose_client=dispose,
+        switches=FlowSwitches(assume_dealer_ok=True),
+    )
+    deps["engine"].reply = "Thanks! When are you planning to buy?"
+
+    processor.process(
+        _event(
+            message_id="loc-1",
+            type="location",
+            content="",
+            latitude=18.5204,
+            longitude=73.8567,
+        )
+    )
+
+    assert directory.coord_calls == [(18.5204, 73.8567)]
+    assert len(deps["engine"].turns) == 1
+    assert "live location" in deps["engine"].turns[0].message
+    assert deps["engine"].turns[0].confirm_crm_dealer is False
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert reply.startswith(location_thanks("English"))
+    assert "Name: Shah Auto" in reply
+    assert reply.rstrip().endswith("When are you planning to buy?")
+    assert "Reply Yes or No" not in reply
+    assert reply.count("?") == 1
+    session = deps["state"].sessions["+918286871533"]
+    assert session.dealer_confirmed is True
+    assert session.awaiting_dealer_confirm is False
+    assert session.last_dealer_code == "11689"
+    # Routed straight away (no product yet, so the not_enquired shape).
+    assert dispose.calls and dispose.calls[0]["pincode"] == "411048"
+    assert [t["role"] for t in session.history] == ["user", "model"]
+
+
+def test_assume_dealer_ok_live_location_falls_back_when_the_model_is_down():
+    class DownEngine:
+        turns: list = []
+
+        def handle_turn(self, turn):
+            raise RuntimeError("gemini down")
+
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(
+        dealer_directory=directory,
+        engine=DownEngine(),
+        switches=FlowSwitches(assume_dealer_ok=True),
+        sleep=lambda _s: None,
+    )
+
+    processor.process(
+        _event(message_id="loc-1", type="location", content="", latitude=18.52, longitude=73.85)
+    )
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Name: Shah Auto" in reply
+    assert reply.rstrip().endswith(acknowledgement_fallback("English"))
+    assert "temporarily unavailable" not in reply
+    assert deps["state"].sessions["+918286871533"].dealer_confirmed is True
 
 
 def test_location_event_sets_nearest_dealer_without_llm():
