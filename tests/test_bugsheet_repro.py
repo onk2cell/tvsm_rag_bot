@@ -454,7 +454,6 @@ def test_welcome_back_decline_does_not_stick_to_a_reengaged_lead(monkeypatch):
         dealer_directory=FakeDealerDirectory(DEALER),
         skip_still_interested=False,
         preselect_language="English",
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "307569",

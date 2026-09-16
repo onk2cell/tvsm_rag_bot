@@ -215,9 +215,9 @@ def _processor(**overrides):
     preselect_language = overrides.pop("preselect_language", "English")
     # Qualification tests are not about welcome-back; opt in with False.
     skip_still_interested = overrides.pop("skip_still_interested", True)
-    # Production default: every chat starts fresh, only the CRM name is used.
-    # Tests of the returning-customer flow opt into the whole record.
-    crm_context = overrides.pop("crm_context", "name")
+    # Production default: the returning-customer flow reads the whole CRM
+    # record. The "name" mode (every chat starts fresh) is opt-in.
+    crm_context = overrides.pop("crm_context", "full")
     dependencies = {
         "crm_context": crm_context,
         "state": FakeState(),
@@ -700,7 +700,7 @@ def test_engine_profile_product_sends_brochure_when_requested(monkeypatch):
 def test_crm_product_enquired_without_request_does_not_send_brochure(monkeypatch):
     """CRM already knows the product, but a plain "Hi" is not an explicit ask."""
     del monkeypatch
-    processor, deps = _processor(crm_context="full")
+    processor, deps = _processor()
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -715,7 +715,7 @@ def test_crm_product_enquired_without_request_does_not_send_brochure(monkeypatch
 
 def test_crm_product_enquired_sends_brochure_when_requested(monkeypatch):
     del monkeypatch
-    processor, deps = _processor(crm_context="full")
+    processor, deps = _processor()
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -905,11 +905,12 @@ def test_fresh_start_customer_keeps_only_identity():
     assert unknown.customer_id.startswith("unknown-")
 
 
-def test_returning_customer_starts_fresh_by_default():
-    """Client decision (16/09): every chat is a new enquiry. Only the name is
-    taken from CRM — no "last time you enquired about X, still planning to
-    purchase?", no CRM-assigned dealership, no prior remarks steering the
-    model. The nearest dealer comes from the pincode, like a new customer."""
+def test_crm_context_name_starts_every_chat_fresh():
+    """CLIENT_CRM_CONTEXT=name (opt-in): every chat is a new enquiry. Only the
+    name is taken from CRM — no "last time you enquired about X, still
+    planning to purchase?", no CRM-assigned dealership, no prior remarks
+    steering the model. The nearest dealer comes from the pincode, like a
+    new customer."""
     nearest = Dealer(
         dealer_code="11689",
         name="Shah Auto",
@@ -922,7 +923,7 @@ def test_returning_customer_starts_fresh_by_default():
     )
     directory = FakeDealerDirectory(nearest)
     processor, deps = _processor(
-        dealer_directory=directory, skip_still_interested=False
+        dealer_directory=directory, skip_still_interested=False, crm_context="name"
     )
     deps["directory"].customer = _full_crm_record()
 
@@ -958,10 +959,11 @@ def test_returning_customer_starts_fresh_by_default():
     assert session.last_dealer_code == "11689"
 
 
-def test_crm_context_full_restores_the_returning_customer_flow():
-    """The same record with CLIENT_CRM_CONTEXT=full still gets the old
-    mandatory still-interested ask — the flow is switched off, not gone."""
-    processor, deps = _processor(skip_still_interested=False, crm_context="full")
+def test_returning_customer_flow_is_the_default():
+    """With no CLIENT_CRM_CONTEXT set the whole record drives the flow: the
+    mandatory still-interested ask comes first (subject to the flow switches)."""
+    processor, deps = _processor(skip_still_interested=False)
+    assert processor._crm_context == "full"
     deps["directory"].customer = _full_crm_record()
 
     processor.process(_event(message_id="m1", content="Hi"))
@@ -974,10 +976,10 @@ def test_crm_context_full_restores_the_returning_customer_flow():
     assert deps["engine"].turns == []
 
 
-def test_session_created_under_full_follows_name_rule_on_next_turn():
-    """A live session saved with the whole CRM record (before the switch)
-    is trimmed on its next message, not on its next TTL."""
-    processor, deps = _processor()
+def test_session_created_under_full_follows_name_rule_when_name_is_set():
+    """A live session saved with the whole CRM record is trimmed on its next
+    message once CLIENT_CRM_CONTEXT=name, not on its next TTL."""
+    processor, deps = _processor(crm_context="name")
     session = deps["state"].sessions["+918286871533"]
     session.customer = _full_crm_record()
     deps["state"].save(session)
@@ -1006,7 +1008,7 @@ def test_returning_customer_chooses_language_then_gets_welcome_back():
         last_remark="Interested in EV MAX",
         last_status="Interested",
     )
-    processor, deps = _processor(directory=directory, preselect_language=None, crm_context="full")
+    processor, deps = _processor(directory=directory, preselect_language=None)
 
     processor.process(_event(message_id="m1", content="Hi"))
     assert "Which language do you prefer?" in deps["reply_sender"].calls[0]["text"]
@@ -1385,7 +1387,7 @@ def test_dealership_details_are_never_sent_without_consent():
         longitude=73.73,
         spoc_name="Neha Pagar",
     )
-    processor, deps = _processor(dealer_directory=FakeDealerDirectory(dealer), crm_context="full")
+    processor, deps = _processor(dealer_directory=FakeDealerDirectory(dealer))
     deps["directory"].customer = Customer(
         "crm-1", "Asha", "English", dealership_id="11689", dealership_name="Rhythm Auto"
     )
@@ -1413,7 +1415,7 @@ def test_consent_question_is_not_stacked_on_the_models_own_question():
         latitude=18.60,
         longitude=73.73,
     )
-    processor, deps = _processor(dealer_directory=FakeDealerDirectory(dealer), crm_context="full")
+    processor, deps = _processor(dealer_directory=FakeDealerDirectory(dealer))
     deps["directory"].customer = Customer(
         "crm-1", "Asha", "English", dealership_id="11689", dealership_name="Rhythm Auto"
     )
@@ -1452,7 +1454,7 @@ def test_crm_consent_answered_with_something_else_is_asked_once_more(monkeypatch
         "client_processing.classify_share_consent_reply",
         lambda msg: "yes" if msg.strip().lower() == "yes" else "unclear",
     )
-    processor, deps = _processor(dealer_directory=FakeDealerDirectory(None), crm_context="full")
+    processor, deps = _processor(dealer_directory=FakeDealerDirectory(None))
     _alok(deps)
     # Dealer-confirm never stacks onto the very first reply — warm up first.
     processor.process(_event(message_id="m0", content="Hi"))
@@ -1485,7 +1487,7 @@ def test_crm_consent_is_re_asked_only_once(monkeypatch):
     monkeypatch.setattr(
         "client_processing.classify_share_consent_reply", lambda msg: "unclear"
     )
-    processor, deps = _processor(dealer_directory=FakeDealerDirectory(None), crm_context="full")
+    processor, deps = _processor(dealer_directory=FakeDealerDirectory(None))
     _alok(deps)
     processor.process(_event(message_id="m0", content="Hi"))
     processor.process(_event(message_id="m1", content="King Kargo"))
@@ -1527,7 +1529,7 @@ def test_pincode_answering_crm_consent_goes_straight_to_that_dealers_card(
         longitude=72.84,
     )
     directory = FakeDealerDirectory(nearest)
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     _alok(deps)
     processor.process(_event(message_id="m0", content="Hi"))
     processor.process(_event(message_id="m1", content="King Kargo"))
@@ -1555,7 +1557,7 @@ def test_crm_consent_is_not_stacked_onto_a_brochure_request_turn():
     question was bolted onto the brochure acknowledgement — burying the
     open date question. A side-request turn is not the moment to open the
     dealership question; it comes on the next free turn."""
-    processor, deps = _processor(dealer_directory=FakeDealerDirectory(None), crm_context="full")
+    processor, deps = _processor(dealer_directory=FakeDealerDirectory(None))
     _alok(deps)
     processor.process(_event(message_id="m0", content="Hi"))
 
@@ -1721,7 +1723,6 @@ def test_dispose_re_fires_when_lead_fields_change():
     processor, deps = _processor(
         dispose_client=dispose,
         dealer_directory=FakeDealerDirectory(dealer),
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "1",
@@ -1812,7 +1813,6 @@ def test_location_sets_dealer_and_syncs_dispose():
     processor, deps = _processor(
         dispose_client=dispose,
         dealer_directory=FakeDealerDirectory(nearest),
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "1",
@@ -1861,7 +1861,7 @@ def test_crm_dealer_confirm_yes_sets_last_dealer_code_and_skips_nearest():
         longitude=73.85,
     )
     directory = FakeDealerDirectory(nearest, by_code={"11982": crm_dealer})
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
         "307569",
         "Ajit",
@@ -1929,7 +1929,7 @@ def test_dealer_confirm_natural_phrasing_resolves_via_classifier(monkeypatch):
         longitude=76.54,
     )
     directory = FakeDealerDirectory(None, by_code={"15188": crm_dealer})
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2033,7 +2033,7 @@ def test_crm_dealer_name_without_id_resolves_address_from_directory():
             return dealer if name.lower() == "gk motors" else None
 
     directory = NameDirectory(None)
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2056,7 +2056,7 @@ def test_crm_dealer_name_without_id_resolves_address_from_directory():
 
 def test_unclear_reply_during_dealer_confirm_answers_without_reattaching_card():
     directory = FakeDealerDirectory(None)
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2093,7 +2093,7 @@ def test_unclear_reply_during_dealer_confirm_answers_without_reattaching_card():
 
 def test_wrap_up_nudges_deferred_dealer_confirm_once():
     directory = FakeDealerDirectory(None)
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2126,7 +2126,7 @@ def test_wrap_up_nudges_deferred_dealer_confirm_once():
 
 def test_wrap_up_dealer_confirm_nudge_resolves_on_yes():
     directory = FakeDealerDirectory(None)
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2166,7 +2166,7 @@ def test_pincode_during_dealer_confirm_redoes_nearest_lookup():
         longitude=73.85,
     )
     directory = FakeDealerDirectory(nearest)
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2207,7 +2207,7 @@ def test_crm_dealer_confirm_no_then_nearest_from_spaced_pincode():
         longitude=73.85,
     )
     directory = FakeDealerDirectory(nearest)
-    processor, deps = _processor(dealer_directory=directory, crm_context="full")
+    processor, deps = _processor(dealer_directory=directory)
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2249,7 +2249,7 @@ def test_crm_dealer_confirm_no_then_nearest_from_spaced_pincode():
 
 
 def test_product_hint_passed_to_engine_from_crm_product_enquired():
-    processor, deps = _processor(crm_context="full")
+    processor, deps = _processor()
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2262,7 +2262,7 @@ def test_product_hint_passed_to_engine_from_crm_product_enquired():
 
 def test_call_me_disposes_interested_with_callback_using_crm_fields():
     dispose = FakeDisposeClient()
-    processor, deps = _processor(dispose_client=dispose, crm_context="full")
+    processor, deps = _processor(dispose_client=dispose)
     deps["directory"].customer = Customer(
         "307569",
         "Ajit",
@@ -2302,7 +2302,6 @@ def test_dealer_confirm_not_stacked_on_organic_second_reply():
     processor, deps = _processor(
         preselect_language="Marathi",
         skip_still_interested=False,
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "1",
@@ -2336,7 +2335,6 @@ def test_welcome_back_uses_crm_remarks_on_fresh_session():
     processor, deps = _processor(
         preselect_language="English",
         skip_still_interested=False,
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "1",
@@ -2363,7 +2361,6 @@ def test_still_interested_yes_continues_qualification():
     processor, deps = _processor(
         preselect_language="Hindi",
         skip_still_interested=False,
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "1",
@@ -2394,7 +2391,7 @@ def test_still_interested_digit_reply_does_not_flip_language_choice():
     ("3"), confirms still-interested with "1" (its own "Press 1 for Yes"),
     and the reply comes back in English — because bare "1" also means
     "English" in the language menu's own numbering."""
-    processor, deps = _processor(preselect_language=None, skip_still_interested=False, crm_context="full")
+    processor, deps = _processor(preselect_language=None, skip_still_interested=False)
     deps["directory"].customer = Customer(
         "lead-9876543210",
         "Ravi Kumar",
@@ -2428,7 +2425,6 @@ def test_still_interested_accepts_free_text_no():
         preselect_language="English",
         skip_still_interested=False,
         dispose_client=dispose,
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "1",
@@ -2457,7 +2453,6 @@ def test_still_interested_no_thanks_in_selected_language():
         preselect_language="Marathi",
         skip_still_interested=False,
         dispose_client=dispose,
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "1",
@@ -2502,7 +2497,7 @@ def test_still_interested_ambiguous_reply_proceeds_to_qualification(monkeypatch)
     monkeypatch.setattr(
         "bot.graph.get_llm", lambda tier="smart": _FakeClassifierLLM(declining=False)
     )
-    processor, deps = _processor(preselect_language="English", skip_still_interested=False, crm_context="full")
+    processor, deps = _processor(preselect_language="English", skip_still_interested=False)
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -2535,7 +2530,6 @@ def test_still_interested_ambiguous_reply_llm_classifies_as_declining(monkeypatc
         preselect_language="English",
         skip_still_interested=False,
         dispose_client=dispose,
-        crm_context="full",
     )
     deps["directory"].customer = Customer(
         "1",
@@ -2562,7 +2556,7 @@ def test_still_interested_ambiguous_reply_llm_classifies_as_declining(monkeypatc
 
 
 def test_first_message_context_includes_preferred_language_without_remarks():
-    processor, deps = _processor(preselect_language="Marathi", crm_context="full")
+    processor, deps = _processor(preselect_language="Marathi")
     deps["directory"].customer = Customer(
         "1",
         "Asha",
@@ -3091,7 +3085,7 @@ def test_returning_customer_vehicle_choice_then_still_interested():
     )
     processor, deps = _processor(
         directory=directory, preselect_language=None, skip_still_interested=False
-    , crm_context="full")
+    )
     processor.process(_event(message_id="m1", content="Hi"))
     processor.process(_event(message_id="m2", content="2"))  # Hindi
     assert deps["reply_sender"].calls[-1]["text"] == flow_intent_ask("Hindi")

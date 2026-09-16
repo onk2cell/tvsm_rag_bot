@@ -597,6 +597,10 @@ class RedisClientState:
                 pgm_candidates=[
                     str(item) for item in (data.get("pgm_candidates") or [])
                 ],
+                awaiting_vehicle_pick=bool(
+                    data.get("awaiting_vehicle_pick") or False
+                ),
+                vehicle_menu_sent=bool(data.get("vehicle_menu_sent") or False),
             )
         return ClientSession(
             conversation_id=self._id_factory(),
@@ -646,6 +650,8 @@ class RedisClientState:
             "awaiting_flow_intent": session.awaiting_flow_intent,
             "flow": session.flow,
             "pgm_candidates": session.pgm_candidates,
+            "awaiting_vehicle_pick": session.awaiting_vehicle_pick,
+            "vehicle_menu_sent": session.vehicle_menu_sent,
         }
         self._redis.set(
             self._key(session.mobile),

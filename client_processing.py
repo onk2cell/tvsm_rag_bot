@@ -263,6 +263,34 @@ class Customer:
     last_status: str = ""
 
 
+@dataclass(frozen=True)
+class FlowSwitches:
+    """Which mechanical questions the bot skips by assuming the answer.
+
+    One switch per behaviour (client request, 2026-09-16) so TVS can turn
+    any one back alone. See the CLIENT_* comments in config.py for what
+    each does; ``vehicle_list`` is the numbered card shown instead of the
+    still-interested question, falling back to the admin products when
+    empty.
+    """
+
+    assume_not_still_interested: bool = False
+    skip_crm_dealer: bool = False
+    assume_dealer_ok: bool = False
+    offer_brochure_or_images: bool = False
+    vehicle_list: tuple[str, ...] = ()
+
+    @classmethod
+    def from_config(cls) -> "FlowSwitches":
+        return cls(
+            assume_not_still_interested=config.CLIENT_ASSUME_NOT_STILL_INTERESTED,
+            skip_crm_dealer=config.CLIENT_SKIP_CRM_DEALER,
+            assume_dealer_ok=config.CLIENT_ASSUME_DEALER_OK,
+            offer_brochure_or_images=config.CLIENT_OFFER_BROCHURE_OR_IMAGES,
+            vehicle_list=tuple(config.CLIENT_VEHICLE_LIST),
+        )
+
+
 @dataclass
 class ClientSession:
     conversation_id: str
@@ -325,6 +353,12 @@ class ClientSession:
     # DMS ids of the PGMs last listed, in the order shown, so a bare "2" on
     # the next turn can be resolved to a garage. Replaced by every new search.
     pgm_candidates: list[str] = field(default_factory=list)
+    # The numbered vehicle list shown to a returning customer instead of the
+    # still-interested question (FlowSwitches.assume_not_still_interested).
+    # ``awaiting_vehicle_pick`` reads the next reply as a pick; the list is
+    # sent once per conversation.
+    awaiting_vehicle_pick: bool = False
+    vehicle_menu_sent: bool = False
 
 
 @dataclass(frozen=True)
@@ -398,6 +432,7 @@ class ClientMessageProcessor:
         sleep: Callable[[float], None] = time.sleep,
         retry_wait: float = 30,
         crm_context: str | None = None,
+        switches: FlowSwitches | None = None,
     ):
         crm_context = (crm_context or config.CLIENT_CRM_CONTEXT).strip().lower()
         if crm_context not in config.CLIENT_CRM_CONTEXT_MODES:
@@ -406,6 +441,7 @@ class ClientMessageProcessor:
                 f"{', '.join(config.CLIENT_CRM_CONTEXT_MODES)}, got {crm_context!r}"
             )
         self._crm_context = crm_context
+        self._switches = switches or FlowSwitches.from_config()
         self._state = state
         self._directory = directory
         self._engine = engine

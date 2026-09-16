@@ -43,15 +43,45 @@ CLIENT_STUB_CUSTOMER = os.environ.get("CLIENT_STUB_CUSTOMER", "").lower() in {
     "yes",
 }
 # How much of the CRM customer record the bot acts on.
+#   "full" — (default) the returning-customer flow, driven by the whole
+#            record; the flow switches below decide which of its questions
+#            are actually asked.
 #   "name" — every chat is a new enquiry. Only the customer's name is kept
 #            (greeting, dispose customername): no "last time you enquired
 #            about X", no CRM-assigned dealership, no prior remarks steering
-#            the model. Client decision, 2026-09-16.
-#   "full" — the returning-customer flow, driven by the whole record.
+#            the model. Built 2026-09-16, rolled back the same evening.
 CLIENT_CRM_CONTEXT = (
-    os.environ.get("CLIENT_CRM_CONTEXT", "name").strip().lower() or "name"
+    os.environ.get("CLIENT_CRM_CONTEXT", "full").strip().lower() or "full"
 )
 CLIENT_CRM_CONTEXT_MODES = ("name", "full")
+
+
+def _flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+
+# Flow switches (client request, 2026-09-16): stop asking returning
+# customers the mechanical questions — assume the answer and move on. One
+# switch per behaviour so any one can be turned back alone. All off by
+# default; the production .env turns them on.
+#   ASSUME_NOT_STILL_INTERESTED — never ask "still planning to purchase X?";
+#       show the vehicle list instead (CLIENT_VEHICLE_LIST, or the admin
+#       products when empty). Nothing is disposed on the assumed "no".
+#   SKIP_CRM_DEALER — never offer the CRM-assigned dealership; ask for a
+#       pincode / live location at that point instead.
+#   ASSUME_DEALER_OK — the nearest-dealer card goes out without "is this
+#       dealership OK? Yes/No" and counts as confirmed.
+#   OFFER_BROCHURE_OR_IMAGES — the model offers brochure / photos / both
+#       (reply 1/2/3) instead of the brochure alone.
+CLIENT_ASSUME_NOT_STILL_INTERESTED = _flag("CLIENT_ASSUME_NOT_STILL_INTERESTED")
+CLIENT_SKIP_CRM_DEALER = _flag("CLIENT_SKIP_CRM_DEALER")
+CLIENT_ASSUME_DEALER_OK = _flag("CLIENT_ASSUME_DEALER_OK")
+CLIENT_OFFER_BROCHURE_OR_IMAGES = _flag("CLIENT_OFFER_BROCHURE_OR_IMAGES")
+CLIENT_VEHICLE_LIST: tuple[str, ...] = tuple(
+    name.strip()
+    for name in os.environ.get("CLIENT_VEHICLE_LIST", "").split(",")
+    if name.strip()
+)
 CLIENT_HTTP_TIMEOUT_SEC = float(os.environ.get("CLIENT_HTTP_TIMEOUT_SEC", "30"))
 CLIENT_RETRY_WAIT_SEC = float(os.environ.get("CLIENT_RETRY_WAIT_SEC", "30"))
 CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "3600"))
