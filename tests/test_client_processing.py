@@ -2580,6 +2580,110 @@ def test_first_message_context_includes_preferred_language_without_remarks():
     assert deps["state"].sessions["+918286871533"].welcome_back_sent is True
 
 
+# --- CLIENT_OFFER_BROCHURE_OR_IMAGES -----------------------------------------
+
+OFFER_DURAMAX = (
+    "It carries 6 passengers. Would you like the brochure, the photos, or both? "
+    "Reply 1, 2 or 3.\n"
+    "OFFERED_BROCHURE: King Duramax Plus"
+)
+DURAMAX_BROCHURE = "https://1.jamoutsourcing.com/f/King_Duramax_Plus_Petrol-English.pdf"
+
+
+def _media_offer(monkeypatch, product="King Duramax Plus", **overrides):
+    """The model has just offered brochure/photos/both for ``product``."""
+    monkeypatch.setattr(
+        "client_processing.product_image_urls",
+        lambda p: ["https://1.jamoutsourcing.com/i/DuramaxImage.jpg"]
+        if p == "King Duramax Plus"
+        else [],
+    )
+    processor, deps = _processor(
+        switches=FlowSwitches(offer_brochure_or_images=True), **overrides
+    )
+    deps["engine"].reply = f"Great choice — {product}. When are you looking to buy?"
+    processor.process(_event(message_id="m1", content=product))
+    deps["engine"].reply = OFFER_DURAMAX.replace("King Duramax Plus", product)
+    processor.process(_event(message_id="m2", content="What are the features?"))
+    assert deps["state"].sessions["+918286871533"].awaiting_brochure_offer is True
+    deps["engine"].reply = "Noted."
+    return processor, deps
+
+
+def _sent(deps):
+    return (
+        [c["link"] for c in deps["reply_sender"].document_calls],
+        [c["link"] for c in deps["reply_sender"].image_calls],
+    )
+
+
+def test_media_offer_reply_1_sends_the_brochure_only(monkeypatch):
+    processor, deps = _media_offer(monkeypatch)
+    processor.process(_event(message_id="m3", content="1"))
+    docs, imgs = _sent(deps)
+    assert docs == [DURAMAX_BROCHURE] and imgs == []
+    note = deps["engine"].turns[-1].message
+    assert "Brochure for King Duramax Plus has been sent" in note
+    assert "photos have been sent" not in note
+    # "1" answered the offer — it did not switch the chat to English/Hindi.
+    assert deps["state"].sessions["+918286871533"].language == "English"
+
+
+def test_media_offer_reply_2_sends_the_photos_only(monkeypatch):
+    processor, deps = _media_offer(monkeypatch)
+    processor.process(_event(message_id="m3", content="2"))
+    docs, imgs = _sent(deps)
+    assert docs == [] and len(imgs) == 1
+    note = deps["engine"].turns[-1].message
+    assert "photos have been sent" in note and "Brochure for" not in note
+    assert deps["state"].sessions["+918286871533"].images_sent == ["King Duramax Plus"]
+    assert deps["state"].sessions["+918286871533"].language == "English"
+
+
+def test_media_offer_reply_3_sends_both(monkeypatch):
+    processor, deps = _media_offer(monkeypatch)
+    processor.process(_event(message_id="m3", content="3"))
+    docs, imgs = _sent(deps)
+    assert docs == [DURAMAX_BROCHURE] and len(imgs) == 1
+    note = deps["engine"].turns[-1].message
+    assert "Brochure for King Duramax Plus has been sent" in note
+    assert "photos have been sent" in note
+
+
+def test_media_offer_bare_yes_sends_both(monkeypatch):
+    processor, deps = _media_offer(monkeypatch)
+    processor.process(_event(message_id="m3", content="yes"))
+    docs, imgs = _sent(deps)
+    assert docs == [DURAMAX_BROCHURE] and len(imgs) == 1
+
+
+def test_media_offer_photo_phrase_is_not_sent_twice(monkeypatch):
+    """"photo bhejo" answers the offer AND is a photo request — one send."""
+    processor, deps = _media_offer(monkeypatch)
+    processor.process(_event(message_id="m3", content="photo bhejo"))
+    docs, imgs = _sent(deps)
+    assert docs == [] and len(imgs) == 1
+
+
+def test_media_offer_photos_not_configured_tells_the_model(monkeypatch):
+    processor, deps = _media_offer(monkeypatch, product="King EV MAX")
+    processor.process(_event(message_id="m3", content="2"))
+    docs, imgs = _sent(deps)
+    assert docs == [] and imgs == []
+    note = deps["engine"].turns[-1].message
+    assert "No photos are available for King EV MAX" in note
+    assert "dealership will share" in note
+
+
+def test_media_offer_no_declines_both(monkeypatch):
+    processor, deps = _media_offer(monkeypatch)
+    processor.process(_event(message_id="m3", content="nahi"))
+    docs, imgs = _sent(deps)
+    assert docs == [] and imgs == []
+    assert "did not want the brochure or photos" in deps["engine"].turns[-1].message
+    assert deps["state"].sessions["+918286871533"].awaiting_brochure_offer is False
+
+
 # --- CLIENT_ASSUME_NOT_STILL_INTERESTED --------------------------------------
 
 VEHICLES = ("King EV MAX", "King Deluxe", "King Duramax Plus")

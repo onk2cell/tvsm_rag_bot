@@ -13,6 +13,7 @@ import config
 from bot.pgm_graph import resolve_pgm_location
 from bot.graph import (
     classify_brochure_offer_reply,
+    classify_brochure_or_images_reply,
     classify_brochure_request,
     classify_dealer_confirm_reply,
     classify_language_switch,
@@ -872,9 +873,10 @@ class ClientMessageProcessor:
                 )
                 return
 
+        media_sent = ""
         brochure_offer_applied = self._apply_brochure_offer(session, message)
         if brochure_offer_applied is not None:
-            message, _ = brochure_offer_applied
+            message, media_sent = brochure_offer_applied
 
         if wants_callback(message):
             session.callback_requested = True
@@ -891,7 +893,12 @@ class ClientMessageProcessor:
             user_message=raw_user_text,
             requested=brochure_requested,
         )
-        images_requested = wants_product_images(raw_user_text)
+        # "photo bhejo" as the answer to the offer already sent the photos
+        # above; the plain photo-request path must not send them again.
+        images_requested = wants_product_images(raw_user_text) and media_sent not in (
+            "images",
+            "both",
+        )
         message, images_product = self._prepare_product_images_context(
             session,
             message,
@@ -1370,44 +1377,67 @@ class ClientMessageProcessor:
         self,
         session: ClientSession,
         message: str,
-    ) -> tuple[str, str | None] | None:
+    ) -> tuple[str, str] | None:
         """Handle the reply to a pending brochure offer. Always hands off
         to the chat LLM (never an immediate canned reply) — a "no" or an
         unrelated reply just continues qualification normally.
 
+        Returns ``(engine_message, media_sent)`` where ``media_sent`` is
+        "" | "brochure" | "images" | "both" — what went out this turn, so
+        process() does not send the photos a second time when the reply
+        was itself a photo request.
+
         Accept/decline uses regex fast path + LLM classifier so customers
-        can reply in any language/phrasing.
+        can reply in any language/phrasing. With offer_brochure_or_images
+        the offer was "brochure, photos, or both" and the reply is read as
+        a choice between them; a plain yes sends both.
         """
         if not session.awaiting_brochure_offer:
             return None
         session.awaiting_brochure_offer = False
         product = session.pending_brochure_product
         session.pending_brochure_product = ""
-        decision = classify_brochure_offer_reply(message)
-        if decision == "yes":
+        if self._switches.offer_brochure_or_images:
+            decision = classify_brochure_or_images_reply(message)
+        else:
+            # Brochure-only offer: yes means the brochure.
+            decision = classify_brochure_offer_reply(message)
+            decision = "brochure" if decision == "yes" else decision
+        notes: list[str] = []
+        sent_kinds: list[str] = []
+        if decision in ("brochure", "both"):
             _, hints = self._resolve_brochure_product(session, message)
-            sent = self._send_brochure_pack(
+            if self._send_brochure_pack(
                 session,
                 product,
                 hints,
                 include_support_docs=wants_support_documents(message),
-            )
-            if sent:
-                enriched = (
-                    f"{message}\n\n(Brochure for {product} has been sent. "
-                    "Acknowledge briefly, then continue with the next "
-                    "qualification step.)"
+            ):
+                sent_kinds.append("brochure")
+                notes.append(f"Brochure for {product} has been sent.")
+        if decision in ("images", "both"):
+            if not product_image_urls(product):
+                notes.append(
+                    f"No photos are available for {product}. Do NOT say you "
+                    "are sending any. Say the dealership will share them."
                 )
-                return enriched, None
-            return message, None
+            elif self._send_product_images(session, product):
+                sent_kinds.append("images")
+                notes.append(f"The {product} photos have been sent.")
         if decision == "no":
-            enriched = (
-                f"{message}\n\n(Customer did not want the brochure sent. "
-                "Acknowledge briefly, then continue with the next "
-                "qualification step.)"
+            notes.append(
+                "Customer did not want the brochure"
+                + (" or photos" if self._switches.offer_brochure_or_images else "")
+                + " sent."
             )
-            return enriched, None
-        return message, None
+        if not notes:
+            return message, ""
+        enriched = (
+            f"{message}\n\n({' '.join(notes)} Acknowledge briefly, then continue "
+            "with the next qualification step.)"
+        )
+        media_sent = "both" if len(sent_kinds) == 2 else (sent_kinds[0] if sent_kinds else "")
+        return enriched, media_sent
 
     # --- vehicle-or-PGM routing -------------------------------------------
     #
@@ -2993,9 +3023,16 @@ class ClientMessageProcessor:
             # list (or nothing), never a language; a typed language name
             # still switches.
             # A bare "2" answers whichever numbered list is open (PGM
-            # candidates, the vehicle list) — it is not "switch to Hindi".
+            # candidates, the vehicle list, the brochure/photos/both offer)
+            # — it is not "switch to Hindi".
             bare_menu_pick = parse_list_pick(content, 9) > 0 and (
-                session.flow == FLOW_PGM or session.awaiting_vehicle_pick
+                session.flow == FLOW_PGM
+                or session.awaiting_vehicle_pick
+                or (
+                    session.awaiting_brochure_offer
+                    and self._switches.offer_brochure_or_images
+                    and parse_list_pick(content, 3) > 0
+                )
             )
             if (
                 event.get("type") == "text"

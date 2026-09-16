@@ -245,6 +245,36 @@ def test_brochure_offer_rule_puts_the_question_on_the_model(stores):
     assert "already sent" in system.lower()
 
 
+def test_offer_photos_rule_offers_brochure_photos_or_both(stores):
+    """Flow switch CLIENT_OFFER_BROCHURE_OR_IMAGES: the model's offer widens to
+    a 1/2/3 choice; the marker line stays the same so the code path is shared."""
+    config_store, _, _ = stores
+    system = build_system_instruction(config_store.get(), "English", offer_photos=True)
+    assert "1 = brochure, 2 = photos, 3 = both" in system
+    assert "offering the brochure and photos is your job" in system.lower()
+    assert "\nOFFERED_BROCHURE: <model name from the line-up above>\n" in system
+    assert "Reply 1, 2 or 3" in system
+    default = build_system_instruction(config_store.get(), "English")
+    assert "2 = photos" not in default
+    assert "Would you like me to send the brochure?" in default
+
+
+def test_engine_offer_photos_defaults_to_config(stores, monkeypatch):
+    config_store, lead_writer, _ = stores
+    monkeypatch.setattr("config.CLIENT_OFFER_BROCHURE_OR_IMAGES", True)
+    llm = FakeLLM(["Sure."])
+    engine = ConversationEngine(config_store=config_store, llm=llm, lead_writer=lead_writer)
+    engine.handle_turn(TurnInput(session_id="s", language="English", message="hi"))
+    assert "2 = photos" in llm.calls[0]["system_instruction"]
+
+    llm = FakeLLM(["Sure."])
+    engine = ConversationEngine(
+        config_store=config_store, llm=llm, lead_writer=lead_writer, offer_photos=False
+    )
+    engine.handle_turn(TurnInput(session_id="s", language="English", message="hi"))
+    assert "2 = photos" not in llm.calls[0]["system_instruction"]
+
+
 def test_offered_brochure_marker_is_stripped_and_returned(stores):
     text, offered = parse_offered_brochure(
         "It has a 100km range. Want the brochure?\nOFFERED_BROCHURE: King EV MAX"

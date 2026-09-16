@@ -298,6 +298,112 @@ def classify_brochure_offer_reply(user_message: str) -> str:
     return result["result"]
 
 
+# --- brochure / photos / both (flow switch CLIENT_OFFER_BROCHURE_OR_IMAGES) --
+
+
+class MediaOfferState(TypedDict):
+    user_message: str
+    result: str  # "brochure" | "images" | "both" | "no" | "unclear"
+
+
+class MediaOfferClassification(BaseModel):
+    result: Literal["brochure", "images", "both", "no", "unclear"] = Field(
+        description=(
+            "The bot offered the product brochure (1), photos (2), or both "
+            "(3). 'brochure' if they want only the PDF/catalog, 'images' if "
+            "only pictures/photos, 'both' if both or a plain yes ('haan', "
+            "'ok send', 'भेजो'), 'no' if they decline, 'unclear' for "
+            "acknowledgements or unrelated replies (a price question, a "
+            "pincode, 'thanks')."
+        )
+    )
+
+
+_MEDIA_BOTH_RE = re.compile(
+    r"(?i)(?:^\s*(?:option\s*)?3\s*[\).:\-]?\s*$)|"
+    r"\b(?:both|dono|donon|dono?hi)\b|दोनों|दोन्ही|दोन्हीही|రెండూ|இரண்டும்|ಎರಡೂ|രണ്ടും"
+)
+_MEDIA_PICK_1_RE = re.compile(r"^\s*(?:option\s*)?1\s*[\).:\-]?\s*$")
+_MEDIA_PICK_2_RE = re.compile(r"^\s*(?:option\s*)?2\s*[\).:\-]?\s*$")
+
+
+def _route_media_offer_reply(state: MediaOfferState) -> str:
+    from client_media_assets import wants_product_brochure, wants_product_images
+    from client_processing import _is_brochure_offer_accept, _is_negative
+
+    msg = state["user_message"] or ""
+    if _is_negative(msg):
+        return "no"
+    wants_pdf = wants_product_brochure(msg)
+    wants_pics = wants_product_images(msg)
+    if _MEDIA_BOTH_RE.search(msg) or (wants_pdf and wants_pics):
+        return "both"
+    if _MEDIA_PICK_1_RE.match(msg) or wants_pdf:
+        return "brochure"
+    if _MEDIA_PICK_2_RE.match(msg) or wants_pics:
+        return "images"
+    # A plain yes to "brochure, photos, or both?" — send everything rather
+    # than ask again.
+    if _is_brochure_offer_accept(msg):
+        return "both"
+    return "classify"
+
+
+def _media_offer_brochure(state: MediaOfferState) -> dict:
+    return {"result": "brochure"}
+
+
+def _media_offer_images(state: MediaOfferState) -> dict:
+    return {"result": "images"}
+
+
+def _media_offer_both(state: MediaOfferState) -> dict:
+    return {"result": "both"}
+
+
+def _media_offer_no(state: MediaOfferState) -> dict:
+    return {"result": "no"}
+
+
+def _classify_media_offer(state: MediaOfferState) -> dict:
+    try:
+        classifier = get_llm("fast").with_structured_output(MediaOfferClassification)
+        result = classifier.invoke(
+            "The bot just answered a product question and offered the product "
+            "brochure (reply 1), photos (reply 2), or both (reply 3). The "
+            f"customer replied (any language): {state['user_message']!r}. "
+            "Classify what they want sent now."
+        )
+        return {"result": result.result}
+    except Exception:
+        log.exception("media-offer classifier call failed; defaulting to unclear")
+        return {"result": "unclear"}
+
+
+media_offer_builder = StateGraph(MediaOfferState)
+media_offer_builder.add_node("brochure", _media_offer_brochure)
+media_offer_builder.add_node("images", _media_offer_images)
+media_offer_builder.add_node("both", _media_offer_both)
+media_offer_builder.add_node("no", _media_offer_no)
+media_offer_builder.add_node("classify", _classify_media_offer)
+media_offer_builder.add_conditional_edges(
+    START,
+    _route_media_offer_reply,
+    ["brochure", "images", "both", "no", "classify"],
+)
+for _node in ("brochure", "images", "both", "no", "classify"):
+    media_offer_builder.add_edge(_node, END)
+
+media_offer_graph = media_offer_builder.compile()
+
+
+def classify_brochure_or_images_reply(user_message: str) -> str:
+    """Returns "brochure" | "images" | "both" | "no" | "unclear" for a pending
+    brochure-or-photos offer — regex fast path first, LLM otherwise."""
+    result = media_offer_graph.invoke({"user_message": user_message})
+    return result["result"]
+
+
 class BrochureRequestState(TypedDict):
     user_message: str
     wants_brochure: bool

@@ -232,8 +232,13 @@ def build_system_instruction(
     *,
     product_hint: str = "",
     confirm_crm_dealer: bool = False,
+    offer_photos: bool = False,
 ) -> str:
-    """Assemble the qualification system prompt from admin config."""
+    """Assemble the qualification system prompt from admin config.
+
+    ``offer_photos`` (flow switch CLIENT_OFFER_BROCHURE_OR_IMAGES) widens the
+    model's offer from the brochure alone to brochure / photos / both.
+    """
     profile_keys = capture_field_ids(config)
     campaign = active_campaign_text(config)
     products = configured_products(config)
@@ -254,6 +259,28 @@ def build_system_instruction(
         flow_lines.append(f"   {step_number}. {guidance}")
 
     line_up = _product_menu(products) or "King EV MAX, King Deluxe, King Duramax Plus"
+    if offer_photos:
+        offer_example = (
+            '("Would you like the brochure, the photos, or both? Reply 1, 2 or 3")'
+        )
+        offer_rule = (
+            "11. Offering the brochure and photos is YOUR job — the system never asks "
+            "for you. After you answer a product question, and whenever a system note "
+            "says a brochure or photos are being sent, offer the rest for that model as "
+            'a numbered choice — "1 = brochure, 2 = photos, 3 = both" — leaving out '
+            "anything KNOWN SO FAR lists as already sent (if only one remains, offer just "
+            "that). That offer is the ONLY question in that reply. Every reply that makes "
+            "this offer ends with one extra final line, exactly:"
+        )
+    else:
+        offer_example = '("Would you like me to send the brochure?")'
+        offer_rule = (
+            "11. Offering the brochure is YOUR job — the system never asks for you. After "
+            "you answer a product question, and whenever a system note says photos are "
+            "being sent, offer the brochure for that model unless KNOWN SO FAR lists it as "
+            "already sent. That offer is the ONLY question in that reply. Every reply that "
+            "offers the brochure ends with one extra final line, exactly:"
+        )
     return f"""You are {config["bot_name"]} for TVS PASSENGER three-wheelers \
 ({line_up}).
 
@@ -280,14 +307,10 @@ gently redirect back to qualification.
 10. Brochures/PDFs: you never attach files yourself — the system does. Say you are \
 sending one ONLY when a system note in the message tells you it is being sent; then use \
 present/future tense ("Sure, sending you the brochure"). Without that note, do NOT say you \
-are sending, have sent, or will send any file — offer it instead ("Would you like me to \
-send the brochure?") and wait for their answer. NEVER claim in past tense that a file was \
-delivered, since you cannot see whether the send succeeded. Never say you are unable to \
-send a brochure.
-11. Offering the brochure is YOUR job — the system never asks for you. After you answer a \
-product question, and whenever a system note says photos are being sent, offer the brochure \
-for that model unless KNOWN SO FAR lists it as already sent. That offer is the ONLY question \
-in that reply. Every reply that offers the brochure ends with one extra final line, exactly:
+are sending, have sent, or will send any file — offer it instead {offer_example} and wait \
+for their answer. NEVER claim in past tense that a file was delivered, since you cannot see \
+whether the send succeeded. Never say you are unable to send a brochure.
+{offer_rule}
 OFFERED_BROCHURE: <model name from the line-up above>
 The system reads that line and removes it before the customer sees anything. Without it the \
 customer's "yes" cannot send the file, so never leave it out — and never write it in a reply \
@@ -387,10 +410,18 @@ class ConversationEngine:
         config_store: AdminConfigStore,
         llm: LLMPort,
         lead_writer: LeadWriter | None = None,
+        offer_photos: bool | None = None,
     ):
+        import config as app_config
+
         self._config_store = config_store
         self._llm = llm
         self._lead_writer = lead_writer
+        self._offer_photos = (
+            app_config.CLIENT_OFFER_BROCHURE_OR_IMAGES
+            if offer_photos is None
+            else offer_photos
+        )
 
     def handle_turn(self, turn: TurnInput) -> TurnOutput:
         config = self._config_store.get()
@@ -403,6 +434,7 @@ class ConversationEngine:
             turn.language,
             product_hint=turn.product_hint,
             confirm_crm_dealer=turn.confirm_crm_dealer,
+            offer_photos=self._offer_photos,
         )
         contents = build_contents(turn.history, user_text, turn.known_state)
         result = self._llm.generate(system_instruction=system, contents=contents)

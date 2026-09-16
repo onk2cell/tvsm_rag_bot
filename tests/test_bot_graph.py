@@ -186,6 +186,69 @@ def test_brochure_offer_llm_unclear_for_unrelated(monkeypatch):
     assert classify_brochure_offer_reply("what is the price?") == "unclear"
 
 
+class _FakeMediaOfferLLM:
+    def __init__(self, result: str):
+        self._result = result
+        self.prompts: list[str] = []
+
+    def with_structured_output(self, schema):
+        from bot.graph import MediaOfferClassification
+
+        assert schema is MediaOfferClassification
+        return self
+
+    def invoke(self, prompt: str):
+        self.prompts.append(prompt)
+        from bot.graph import MediaOfferClassification
+
+        return MediaOfferClassification(result=self._result)
+
+
+def test_media_offer_regex_fast_path(monkeypatch):
+    """Replies to "brochure, photos, or both? 1/2/3" that never need the LLM."""
+    from bot.graph import classify_brochure_or_images_reply as classify
+
+    _forbid_llm(monkeypatch)
+    assert classify("1") == "brochure"
+    assert classify("1.") == "brochure"
+    assert classify("brochure bhejo") == "brochure"
+    assert classify("2") == "images"
+    assert classify("photo bhejo") == "images"
+    assert classify("3") == "both"
+    assert classify("both") == "both"
+    assert classify("दोनों") == "both"
+    assert classify("photo aur brochure dono") == "both"
+    # A plain yes to a three-way offer sends everything rather than re-asking.
+    assert classify("yes") == "both"
+    assert classify("haan") == "both"
+    assert classify("bhejo") == "both"
+    assert classify("no") == "no"
+    assert classify("nahi") == "no"
+
+
+def test_media_offer_natural_phrasing_uses_llm(monkeypatch):
+    from bot.graph import classify_brochure_or_images_reply as classify
+
+    fake = _FakeMediaOfferLLM(result="images")
+    monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": fake)
+    assert classify("फक्त गाडी कशी दिसते ते दाखवा") == "images"
+    assert fake.prompts and "reply 3" in fake.prompts[0]
+
+
+def test_media_offer_classifier_failure_defaults_to_unclear(monkeypatch):
+    from bot.graph import classify_brochure_or_images_reply as classify
+
+    class _Broken:
+        def with_structured_output(self, schema):
+            return self
+
+        def invoke(self, prompt):
+            raise RuntimeError("quota")
+
+    monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": _Broken())
+    assert classify("what is the price?") == "unclear"
+
+
 class _FakeBrochureRequestLLM:
     def __init__(self, wants: bool):
         self._wants = wants
