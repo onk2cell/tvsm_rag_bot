@@ -72,6 +72,7 @@ from client_static_messages import (
     location_need_pincode,
     location_no_dealer,
     location_thanks,
+    pincode_or_location_ask,
     location_unreadable,
     pgm_ask_bigger_city,
     pgm_card,
@@ -884,11 +885,15 @@ class ClientMessageProcessor:
 
         confirm_was_pending = session.awaiting_dealer_confirm
         product_hint = _product_hint_for(customer)
-        confirm_crm = (
+        crm_offer_pending = (
             _crm_dealer_available(customer)
             and not session.dealer_confirmed
             and not session.crm_dealer_offered
         )
+        # With skip_crm_dealer the CRM dealership is never put to the
+        # customer, so the model is not told to hold back at the location
+        # step — it asks for a pincode / live location like for any new lead.
+        confirm_crm = crm_offer_pending and not self._switches.skip_crm_dealer
         is_first_qualification_reply = not session.qualification_started
         # A turn spent on a side request (brochure, photos) is not the
         # moment to open the dealership question. The customer asked for a
@@ -913,13 +918,15 @@ class ClientMessageProcessor:
         # up front so the guard covers it too — without this the customer
         # got the campaign blurb, a purchase-date question AND the dealer
         # card in one bubble (bug 010801).
+        has_pincode = bool(extract_pincode(raw_user_text))
         crm_card_will_attach = (
-            confirm_crm
+            crm_offer_pending
             and not crm_offer_deferred
-            and (
-                not is_first_qualification_reply
-                or bool(extract_pincode(raw_user_text))
-            )
+            and (not is_first_qualification_reply or has_pincode)
+            # Under skip_crm_dealer the CRM moment becomes "please share a
+            # pincode" — pointless when this very message carries one; the
+            # nearest lookup owns that turn instead.
+            and not (self._switches.skip_crm_dealer and has_pincode)
         )
         # _maybe_offer_crm_dealer runs first and sets awaiting_dealer_confirm,
         # which short-circuits _attach_nearest_dealer — so when the CRM card
@@ -1729,7 +1736,11 @@ class ClientMessageProcessor:
             or (customer.preferred_language or "").strip()
         )
         product = _product_hint_for(customer)
-        dealership = (customer.dealership_name or "").strip()
+        dealership = (
+            ""
+            if self._switches.skip_crm_dealer
+            else (customer.dealership_name or "").strip()
+        )
 
         # Brand-new / untouched leads often only say "No Response" with no note.
         empty_status = status.lower() in {"", "no response", "null", "none"}
@@ -1883,6 +1894,8 @@ class ClientMessageProcessor:
             if dealer is not None:
                 return dealer.name
         customer = session.customer
+        if self._switches.skip_crm_dealer:
+            return ""  # the CRM dealership is never in play
         if customer and customer.dealership_name:
             return customer.dealership_name
         return ""
@@ -2219,6 +2232,16 @@ class ClientMessageProcessor:
             return reply
         assert customer is not None
         session.crm_dealer_offered = True
+        if self._switches.skip_crm_dealer:
+            # Assumed "no" to the CRM dealership: ask for a location at the
+            # same moment instead, once. Deliberately NOT via
+            # _dealer_share_ask_for_session (that would route the lead to
+            # the CRM code) and NOT dealer_share_declined (that would block
+            # the nearest-dealer path the pincode should open).
+            if extract_pincode(user_message):
+                return reply
+            ask = pincode_or_location_ask(self._session_language(session))
+            return f"{reply.rstrip()}\n\n{ask}"
         resolved = self._resolve_crm_dealer(customer)
         code = ""
         if resolved is not None and resolved.dealer_code:

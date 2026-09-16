@@ -149,6 +149,44 @@ _SHARE_LOCATION_ASK = {
     ),
 }
 
+# Asked instead of offering the CRM-assigned dealership (flow switch
+# CLIENT_SKIP_CRM_DEALER). Unlike share_location_ask it does not refer to
+# the how-to image, because none is sent with it.
+_PINCODE_OR_LOCATION_ASK = {
+    "English": (
+        "Please type your 6-digit pincode, or share your current WhatsApp "
+        "location, so I can find your nearest dealership."
+    ),
+    "Hindi": (
+        "कृपया अपना 6-अंकों का पिनकोड टाइप करें, या अपनी WhatsApp करेंट लोकेशन "
+        "शेयर करें, ताकि मैं आपकी नज़दीकी डीलरशिप ढूँढ सकूँ।"
+    ),
+    "Marathi": (
+        "कृपया तुमचा 6-अंकी पिनकोड टाइप करा, किंवा तुमची WhatsApp करंट लोकेशन "
+        "शेअर करा, म्हणजे मी तुमच्या जवळची डीलरशिप शोधू शकेन."
+    ),
+    "Telugu": (
+        "దయచేసి మీ 6-అంకెల పిన్‌కోడ్ టైప్ చేయండి, లేదా మీ ప్రస్తుత WhatsApp "
+        "లొకేషన్ షేర్ చేయండి, తద్వారా నేను మీకు సమీపంలోని డీలర్‌షిప్‌ను "
+        "కనుగొనగలను."
+    ),
+    "Tamil": (
+        "உங்களுக்கு அருகிலுள்ள டீலர்ஷிப்பை நான் கண்டுபிடிக்க, உங்கள் 6-இலக்க "
+        "பின்கோடை டைப் செய்யுங்கள், அல்லது உங்கள் தற்போதைய WhatsApp "
+        "லொகேஷனை ஷேர் செய்யுங்கள்."
+    ),
+    "Kannada": (
+        "ದಯವಿಟ್ಟು ನಿಮ್ಮ 6-ಅಂಕಿಯ ಪಿನ್‌ಕೋಡ್ ಟೈಪ್ ಮಾಡಿ, ಅಥವಾ ನಿಮ್ಮ ಪ್ರಸ್ತುತ "
+        "WhatsApp ಲೊಕೇಶನ್ ಶೇರ್ ಮಾಡಿ, ಇದರಿಂದ ನಾನು ನಿಮ್ಮ ಹತ್ತಿರದ ಡೀಲರ್‌ಶಿಪ್ "
+        "ಹುಡುಕಬಹುದು."
+    ),
+    "Malayalam": (
+        "ദയവായി നിങ്ങളുടെ 6-അക്ക പിൻകോഡ് ടൈപ്പ് ചെയ്യുക, അല്ലെങ്കിൽ നിങ്ങളുടെ "
+        "ഇപ്പോഴത്തെ WhatsApp ലൊക്കേഷൻ ഷെയർ ചെയ്യുക, അങ്ങനെ എനിക്ക് നിങ്ങളുടെ "
+        "അടുത്തുള്ള ഡീലർഷിപ്പ് കണ്ടെത്താൻ കഴിയും."
+    ),
+}
+
 _LOCATION_THANKS = {
     "English": "Thanks for sharing your location.",
     "Hindi": "लोकेशन शेयर करने के लिए धन्यवाद।",
@@ -621,6 +659,7 @@ MESSAGE_DEFAULTS: dict[str, dict[str, str]] = {
     "invalid_pincode_ask": _INVALID_PINCODE_ASK,
     "invalid_pincode_location": _INVALID_PINCODE_LOCATION,
     "share_location_ask": _SHARE_LOCATION_ASK,
+    "pincode_or_location_ask": _PINCODE_OR_LOCATION_ASK,
     "location_thanks": _LOCATION_THANKS,
     "location_unreadable": _LOCATION_UNREADABLE,
     "location_need_pincode": _LOCATION_NEED_PIN,
@@ -798,6 +837,10 @@ def invalid_pincode_location_fallback(language: str = "English") -> str:
 
 def share_location_ask(language: str = "English") -> str:
     return message_text("share_location_ask", language)
+
+
+def pincode_or_location_ask(language: str = "English") -> str:
+    return message_text("pincode_or_location_ask", language)
 
 
 def location_thanks(language: str = "English") -> str:

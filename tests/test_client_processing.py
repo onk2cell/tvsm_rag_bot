@@ -16,6 +16,7 @@ from client_static_messages import (
     dealer_share_ask,
     flow_intent_ask,
     location_thanks,
+    pincode_or_location_ask,
 )
 from dealers import Dealer, DealerDirectory
 from dispose import resolve_purchase_date
@@ -2576,6 +2577,123 @@ def test_first_message_context_includes_preferred_language_without_remarks():
     turn_message = deps["engine"].turns[0].message
     assert "preferred language: Marathi" in turn_message
     assert deps["state"].sessions["+918286871533"].welcome_back_sent is True
+
+
+# --- CLIENT_SKIP_CRM_DEALER --------------------------------------------------
+
+
+def _skip_crm(deps_switches=None, **overrides):
+    """Alok (CRM dealership 11982 'Arc, Andheri') with the CRM dealer switched
+    off, warmed past the first reply so the dealer moment can fire."""
+    nearest = FakeDealerDirectory(
+        Dealer(
+            dealer_code="11689",
+            name="Shah Auto",
+            address="Malad, 400064",
+            pincode="400064",
+            phone="9000000001",
+            map_url="https://maps.example/11689",
+            latitude=19.18,
+            longitude=72.84,
+        )
+    )
+    processor, deps = _processor(
+        dealer_directory=nearest,
+        switches=deps_switches or FlowSwitches(skip_crm_dealer=True),
+        **overrides,
+    )
+    _alok(deps)
+    processor.process(_event(message_id="m0", content="Hi"))
+    return processor, deps, nearest
+
+
+def test_skip_crm_dealer_asks_for_a_location_instead_of_offering_the_crm_dealer():
+    """Client request (16/09): assume "no" to the CRM-assigned dealership.
+    At the moment the consent question used to be attached, the bot asks
+    for a pincode / live location instead — text only, no how-to image."""
+    processor, deps, nearest = _skip_crm()
+
+    processor.process(_event(message_id="m1", content="King Kargo"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert reply.endswith(pincode_or_location_ask("English"))
+    assert dealer_share_ask("English") not in reply
+    assert "Arc, Andheri" not in reply
+    assert deps["reply_sender"].image_calls == []
+    turn = deps["engine"].turns[-1]
+    assert turn.confirm_crm_dealer is False
+    assert FakeEngine.SUPPRESS_QUESTION in turn.message
+    session = deps["state"].sessions["+918286871533"]
+    assert session.awaiting_dealer_share_consent is False
+    assert session.dealer_share_declined is False
+    assert session.crm_dealer_offered is True
+    assert session.last_dealer_code == ""
+    assert "Arc, Andheri" not in (turn.known_state or "")
+
+
+def test_skip_crm_dealer_location_ask_is_attached_once():
+    processor, deps, _ = _skip_crm()
+    processor.process(_event(message_id="m1", content="King Kargo"))
+    assert pincode_or_location_ask("English") in deps["reply_sender"].calls[-1]["text"]
+
+    deps["engine"].reply = "Noted. Do you have a licence?"
+    processor.process(_event(message_id="m2", content="15th nov"))
+
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert pincode_or_location_ask("English") not in reply
+    assert dealer_share_ask("English") not in reply
+
+
+def test_skip_crm_dealer_pincode_gets_the_nearest_card_never_the_crm_one():
+    processor, deps, nearest = _skip_crm()
+    processor.process(_event(message_id="m1", content="King Kargo"))
+
+    processor.process(_event(message_id="m2", content="400064"))
+
+    assert nearest.calls == ["400064"]
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert "Name: Shah Auto" in reply
+    assert all("Arc, Andheri" not in c["text"] for c in deps["reply_sender"].calls)
+    assert deps["state"].sessions["+918286871533"].last_dealer_code == "11689"
+
+
+def test_skip_crm_dealer_pincode_in_the_same_message_skips_the_location_ask():
+    """No point asking for a pincode in reply to a pincode — the nearest
+    lookup owns that turn."""
+    processor, deps, nearest = _skip_crm()
+
+    processor.process(_event(message_id="m1", content="King Kargo, my pin is 400064"))
+
+    assert nearest.calls == ["400064"]
+    reply = deps["reply_sender"].calls[-1]["text"]
+    assert pincode_or_location_ask("English") not in reply
+    assert "Name: Shah Auto" in reply
+
+
+def test_skip_crm_dealer_dispose_still_falls_back_to_the_crm_dealership_id():
+    """Routing is a CRM fact: when no dealer is ever located in the chat, the
+    lead still goes to the assigned dealership."""
+    dispose = FakeDisposeClient()
+    processor, deps = _processor(
+        dispose_client=dispose, switches=FlowSwitches(skip_crm_dealer=True)
+    )
+    deps["directory"].customer = Customer(
+        "307569",
+        "Ajit",
+        "English",
+        product_enquired="TVS KING PASSENGER DELUXE",
+        dealership_id="11982",
+        dealership_name="Sarthak Auto",
+        city="Pune",
+    )
+    deps["engine"].reply = "Sure, the dealership will call you."
+    session = deps["state"].load_or_start("+918286871533")
+    session.dealer_shared_for_pincode = "411019"
+    deps["state"].save(session)
+
+    processor.process(_event(content="Please call me"))
+
+    assert dispose.calls[0]["dealer_code"] == "11982"
 
 
 # --- CLIENT_ASSUME_DEALER_OK -------------------------------------------------
