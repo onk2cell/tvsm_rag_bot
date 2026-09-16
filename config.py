@@ -42,6 +42,16 @@ CLIENT_STUB_CUSTOMER = os.environ.get("CLIENT_STUB_CUSTOMER", "").lower() in {
     "true",
     "yes",
 }
+# How much of the CRM customer record the bot acts on.
+#   "name" — every chat is a new enquiry. Only the customer's name is kept
+#            (greeting, dispose customername): no "last time you enquired
+#            about X", no CRM-assigned dealership, no prior remarks steering
+#            the model. Client decision, 2026-09-16.
+#   "full" — the returning-customer flow, driven by the whole record.
+CLIENT_CRM_CONTEXT = (
+    os.environ.get("CLIENT_CRM_CONTEXT", "name").strip().lower() or "name"
+)
+CLIENT_CRM_CONTEXT_MODES = ("name", "full")
 CLIENT_HTTP_TIMEOUT_SEC = float(os.environ.get("CLIENT_HTTP_TIMEOUT_SEC", "30"))
 CLIENT_RETRY_WAIT_SEC = float(os.environ.get("CLIENT_RETRY_WAIT_SEC", "30"))
 CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "3600"))

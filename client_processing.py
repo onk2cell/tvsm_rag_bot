@@ -207,6 +207,21 @@ def _crm_dealer_available(customer: Customer | None) -> bool:
     return bool(customer.dealership_id or customer.dealership_name)
 
 
+def fresh_start_customer(customer: Customer) -> Customer:
+    """Keep who they are; forget what CRM remembers about them.
+
+    With ``CLIENT_CRM_CONTEXT=name`` every chat is a new enquiry: no "last
+    time you enquired about X", no CRM-assigned dealership, no prior remarks
+    or status steering the model. The name still comes from CRM so the bot
+    can greet the customer and dispose can send ``customername``;
+    ``customer_id`` stays so an unknown number is still recognised as one.
+    The returning-customer paths (_maybe_offer_still_interested,
+    _maybe_offer_crm_dealer, _maybe_welcome_back) are untouched — they just
+    never see anything to act on.
+    """
+    return Customer(customer_id=customer.customer_id, name=customer.name)
+
+
 def _product_hint_for(customer: Customer | None) -> str:
     if customer is None:
         return ""
@@ -382,7 +397,15 @@ class ClientMessageProcessor:
         dispose_client: DisposeClient | None = None,
         sleep: Callable[[float], None] = time.sleep,
         retry_wait: float = 30,
+        crm_context: str | None = None,
     ):
+        crm_context = (crm_context or config.CLIENT_CRM_CONTEXT).strip().lower()
+        if crm_context not in config.CLIENT_CRM_CONTEXT_MODES:
+            raise ValueError(
+                f"CLIENT_CRM_CONTEXT must be one of "
+                f"{', '.join(config.CLIENT_CRM_CONTEXT_MODES)}, got {crm_context!r}"
+            )
+        self._crm_context = crm_context
         self._state = state
         self._directory = directory
         self._engine = engine
@@ -440,6 +463,11 @@ class ClientMessageProcessor:
                 )
                 self._state.save(session)
                 return
+        if self._crm_context == "name":
+            # Applied every turn, not only after the lookup, so a session
+            # restored from Redis that was created under "full" follows the
+            # rule from its next message rather than its next TTL.
+            session.customer = fresh_start_customer(session.customer)
 
         customer = session.customer
         choice_event = event

@@ -223,6 +223,20 @@ Notes:
   1. English  2. हिंदी  3. मराठी  4. தமிழ்
 - Customer can later switch by saying the language name or `1`–`4`
 
+### What the bot does with the record
+
+`CLIENT_CRM_CONTEXT` (server `.env`, default `name`) decides how much of the
+returned lead the bot acts on:
+
+| Mode | Behaviour |
+|---|---|
+| `name` (default since 2026-09-16) | **Every chat is a new enquiry.** Only the customer's name is used — in the greeting and as dispose `customername`. The product enquired, assigned dealership, city/state and previous remarks/status are ignored: no "Last time you enquired about X, still planning to purchase?", no CRM-assigned dealership offer. The dealership comes from the customer's pincode / live location, exactly as for a number CRM does not know. |
+| `full` | The returning-customer flow: mandatory still-interested Yes/No for the product enquired, the CRM-assigned dealership offered first (with consent), previous remarks seeding the first reply. |
+
+Switching modes needs no code change — set the variable and restart the worker.
+A session that is mid-conversation when the mode changes follows the new rule
+from its next message.
+
 ### Legacy CRM GET shape (mock / Basic Auth)
 
 ```http
