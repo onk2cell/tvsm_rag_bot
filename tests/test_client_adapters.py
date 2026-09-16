@@ -269,6 +269,29 @@ def test_jam_whatsapp_reply_sender_send_document():
     }
 
 
+def test_jam_whatsapp_reply_sender_send_document_names_the_file():
+    """WhatsApp shows the API's `filename`, not the link's basename — the
+    brochure landed on phones as "Untitled" (JAM feedback, 2026-09-16)."""
+    from client_adapters import JamWhatsAppReplySender
+
+    http = FakeHttp([FakeResponse(200, {"status": "success", "data": {}})])
+    sender = JamWhatsAppReplySender(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send",
+        api_key="secret-key",
+        http=http,
+        sleep=lambda _: None,
+    )
+
+    sender.send_document(
+        mobile="+918459522206",
+        link="https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        caption="King EV MAX brochure",
+        filename="TVS King EV MAX Brochure.pdf",
+    )
+
+    assert http.calls[0]["json"]["filename"] == "TVS King EV MAX Brochure.pdf"
+
+
 def test_jam_dispose_client_posts_payload_with_api_key():
     from client_adapters import JamDisposeClient
 

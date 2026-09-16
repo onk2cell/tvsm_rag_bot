@@ -1,12 +1,15 @@
 """Public HTTPS media URLs for WhatsApp outbound images/documents."""
 from __future__ import annotations
 
+import logging
 import re
 
 import admin_config
 import config
 import dispose
 from dispose import normalize_product_name
+
+log = logging.getLogger(__name__)
 
 SHARE_LOCATION_CAPTIONS = {
     "English": (
@@ -83,13 +86,24 @@ PRODUCT_BROCHURE_SLUG = {
 # Literal document requests only — these get the PDF/document sent
 # immediately. General info questions (PRODUCT_INFO_ASK_RE below) get a text
 # answer and an offer to send the brochure instead, not an automatic send.
+#
+# Spelling is loose on purpose. Typed asks arrive as "brouchers"/"brochers",
+# and a voice note in a Hindi session is transcribed in Devanagari with the
+# English words transliterated — "कैटालॉग्स", "ब्रोचर", "पीडीऍफ़" — none of
+# which the original word list matched, so those asks got a text answer and
+# no PDF (JAM tester, 2026-09-11; reported as "brochure sent only sometimes
+# through audio", 2026-09-16). The Latin stem takes any vowel run, the
+# "borcher" letter swap and an optional trailing s; the Devanagari forms
+# take either sibilant and any matra, and the catalog stem allows the long आ.
 PRODUCT_DOCUMENT_ASK_RE = re.compile(
     r"(?i)("
-    r"\b(brochure|brocher|brochar|borcher|broucher|broshar|broshure|"
-    r"pdf|catalogue|catalog|pamphlet|leaflet|"
+    r"\b(b[oau]?r[oau]*[cs]+h*[aeiouy]*r+[aeiouy]*s?|"
+    r"pdfs?|catalogues?|catalogs?|pamphlets?|leaflets?|"
     r"send\s+(me\s+)?(the\s+)?(pdf|brochure|brocher|brochar|borcher))\b|"
-    r"ब्रोशर|पीडीएफ|कैटलॉग|"
-    r"ब्रॉशर|कॅटलॉग"
+    r"[बप]्र[ोौॉ]?[शसच]ि?[यु]?ू?र(्?स)?|"
+    r"पी\s?डी\s?[एऍऐय]?[फ़फ]़?|"
+    r"क[ैॅेा]?ट[ाेैॅ]?ल[ॉोा]?ग|"
+    r"బ్రోచర్|బ్రోషర్|பிரோஷர்|புரோஷர்|ಬ್ರೋಷರ್|ಬ್ರೋಚರ್|ബ്രോഷർ|ബ്രോച്ചർ"
     r")"
 )
 
@@ -228,17 +242,47 @@ def wants_product_images(message: str | None) -> bool:
     return bool(PRODUCT_IMAGE_ASK_RE.search((message or "").strip()))
 
 
+# WhatsApp renders JPEG and PNG in an image message and nothing else —
+# WebP is accepted by the send API but only ever delivered as a sticker, so
+# an image message pointing at one is silently dropped by Meta while JAM's
+# gateway still reports success. Every product photo on the JAM CDN was
+# .webp, which is why "sending you the photos now" was followed by no
+# photos (JAM feedback, 2026-09-16).
+WHATSAPP_IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png")
+
+
+def is_whatsapp_image_url(url: str | None) -> bool:
+    """True when `url` names a file WhatsApp will deliver as an image."""
+    path = (url or "").strip().split("?", 1)[0].split("#", 1)[0].lower()
+    return path.endswith(WHATSAPP_IMAGE_SUFFIXES)
+
+
 def product_image_urls(product: str) -> list[str]:
     """HTTPS image URLs configured for `product`, or an empty list.
 
     Admin-configurable the same way brochures are: upload via
     POST /admin/api/media/product_images, then add the returned URL(s) to
     documents[product].images.
+
+    Only JPEG/PNG links are returned; anything else is dropped here so the
+    bot never tells the customer photos are coming that WhatsApp will not
+    deliver. The admin API refuses such links up front — this covers a
+    config edited by hand.
     """
     product = (product or "").strip()
     entry = product_documents().get(product) or {}
-    urls = entry.get("images") or []
-    return [url for url in urls if isinstance(url, str) and url.strip()]
+    urls = [
+        url for url in (entry.get("images") or [])
+        if isinstance(url, str) and url.strip()
+    ]
+    usable = [url for url in urls if is_whatsapp_image_url(url)]
+    if len(usable) < len(urls):
+        log.warning(
+            "product image links skipped (not JPEG/PNG) product=%s links=%s",
+            product,
+            [url for url in urls if not is_whatsapp_image_url(url)],
+        )
+    return usable
 
 
 def wants_product_info(message: str | None) -> bool:
@@ -327,3 +371,35 @@ def product_document_pack(
 
 def product_brochure_caption(product: str) -> str:
     return f"{product} brochure"
+
+
+_DOCUMENT_KIND_LABEL = {
+    "brochure": "Brochure",
+    "warranty": "Warranty Policy",
+    "pms": "PMS Schedule",
+}
+
+
+def product_document_filename(product: str, kind: str, url: str = "") -> str:
+    """Display name WhatsApp shows on a sent document, e.g.
+    ``TVS King EV MAX Brochure.pdf``.
+
+    WhatsApp takes the name from the send API's ``filename`` field and
+    ignores the link's basename — without one every PDF shows as
+    "Untitled". The product name is what the customer asked for, so it is
+    the name they should see; the JAM CDN basenames ("King_EV_MAX-English")
+    are not.
+    """
+    name = " ".join((product or "").split())
+    if not name:
+        name = "TVS"
+    elif not name.upper().startswith("TVS"):
+        name = f"TVS {name}"
+    label = _DOCUMENT_KIND_LABEL.get(kind, "Document")
+    suffix = ".pdf"
+    path = url.split("?", 1)[0].split("#", 1)[0]
+    if "." in path.rsplit("/", 1)[-1]:
+        ext = path.rsplit(".", 1)[-1].lower()
+        if ext.isalnum() and len(ext) <= 5:
+            suffix = f".{ext}"
+    return f"{name} {label}{suffix}"

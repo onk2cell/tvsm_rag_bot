@@ -306,12 +306,38 @@ Content-Type: application/json
 }
 ```
 
+Media replies use the same endpoint with `type` `image` or `document`, a
+public `link`, and the caption in `message`. Document sends also carry a
+`filename`:
+
+```json
+{
+  "mobile": "918459522206",
+  "type": "document",
+  "link": "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+  "message": "King EV MAX brochure",
+  "filename": "TVS King EV MAX Brochure.pdf"
+}
+```
+
 Notes:
 
 - Mobile must be digits only (`91...`), no `+`
 - Success is HTTP `200` with `"status":"success"`
 - No `in_reply_to` field in JAM send API; correlation is by mobile
 - Customer lookup uses the same `X-API-KEY` against `/whatsapp_bot/customer`
+- **`filename` (document sends).** WhatsApp names a received document from
+  the Cloud API's `document.filename`, never from the link — without it the
+  phone shows the PDF as **"Untitled"** (JAM tester feedback, 2026-09-16).
+  The bot sends `filename` on every document; JAM's gateway must forward it
+  to Meta as `document.filename` for the name to appear. It is not in JAM's
+  published contract yet, so until the gateway passes it through, documents
+  keep arriving as "Untitled".
+- **Image formats.** WhatsApp delivers `image` messages only for JPEG and
+  PNG links; a `.webp` link is accepted by the send API and then dropped by
+  Meta (WebP is the sticker format), so the customer sees the caption and no
+  photo. The bot skips non-JPEG/PNG links and the admin API refuses them —
+  product photos hosted on the JAM CDN must be `.jpg`/`.png`.
 
 ### Lead disposition (JAM Dispose API)
 

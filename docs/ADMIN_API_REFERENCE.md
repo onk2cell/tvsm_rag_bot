@@ -370,8 +370,14 @@ file write — no CDN account, no third party, no long-running job.
 |---|---|---|---|---|
 | `brochures` | `data/media/brochures` | `.pdf` | 25 MB | Product brochures, warranty and PMS PDFs |
 | `images` | `data/media/share_location` | `.jpg` `.jpeg` `.png` | 5 MB | The how-to share-location cards |
+| `product_images` | `data/media/products` | `.jpg` `.jpeg` `.png` | 5 MB | Vehicle photos (`documents.<product>.images`) |
 
 Any other kind returns `404`.
+
+JPEG/PNG is a WhatsApp rule, not ours: an `image` message pointing at a
+`.webp` is accepted by the send API and then dropped by Meta (WebP is the
+sticker format), so the customer gets the caption and no photo. The vehicle
+endpoints refuse `images` links with any other extension for the same reason.
 
 **Uploading does not change what the bot sends.** An admin still points
 `documents.<product>.brochure` or `share_location_image.url` at the returned

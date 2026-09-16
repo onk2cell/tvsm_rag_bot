@@ -316,23 +316,33 @@ class BrochureRequestClassification(BaseModel):
 
 
 # Soft gate so we don't call the LLM on every turn — only when the
-# message might be a document-send ask the regex missed.
+# message might be a document-send ask the regex missed. Voice notes in a
+# Hindi session are transcribed with the English verbs transliterated
+# ("सेंड", "शेयर"), so those count as signals too.
 _BROCHURE_REQUEST_SOFT_RE = re.compile(
     r"(?i)("
-    r"bhej|behj|send|share|pdf|brochure|brocher|catalog|catalogue|"
-    r"document|pamphlet|leaflet|file|"
-    r"भेज|ब्रोशर|ब्रॉशर|पीडीएफ|कैटलॉग|कॅटलॉग|पाठव|"
-    r"బ్రోచర్|பிரோஷர்|ಬ್ರೋಷರ್|ബ്രോഷർ"
+    r"bhej|behj|send|share|pdf|broch|brouch|brosh|bruch|"
+    r"catalog|catalogue|document|pamphlet|leaflet|file|"
+    r"भेज|पाठव|सेंड|शेयर|शेअर|"
+    r"ब्रो|ब्रॉ|प्रोश|पीडी|कैट|कॅट|"
+    r"బ్రోచర్|பிரோஷர்|ಬ್ರೋಷರ್|ബ്രോഷർ"
     r")"
 )
 
 
 def _route_brochure_request(state: BrochureRequestState) -> str:
-    from client_media_assets import wants_product_brochure
+    from client_media_assets import wants_product_brochure, wants_product_images
 
     msg = state["user_message"]
     if wants_product_brochure(msg):
         return "yes"
+    # "Send me photos" is a photo ask, not a document ask — but "send"
+    # trips the soft gate and the classifier is happy to call a photo a
+    # brochure, which is how a photo request came back as a PDF (JAM
+    # feedback, 2026-09-16). The photos path handles it; nothing to
+    # classify here unless a document word is also present (caught above).
+    if wants_product_images(msg):
+        return "no"
     if not _BROCHURE_REQUEST_SOFT_RE.search(msg or ""):
         return "no"
     return "classify"
@@ -353,9 +363,12 @@ def _classify_brochure_request(state: BrochureRequestState) -> dict:
         )
         result = classifier.invoke(
             "In a TVS three-wheeler sales WhatsApp chat, the customer "
-            "said (any language): "
+            "said (any language, possibly a voice-note transcript with "
+            "English words transliterated): "
             f"{state['user_message']!r}. "
-            "Are they asking you to send a brochure/PDF/catalog document?"
+            "Are they asking you to send a brochure/PDF/catalog document? "
+            "A request for photos/images/pictures of the vehicle is NOT a "
+            "document request."
         )
         return {"wants_brochure": bool(result.wants_brochure)}
     except Exception:

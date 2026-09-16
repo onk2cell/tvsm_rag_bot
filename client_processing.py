@@ -52,6 +52,7 @@ from client_media_assets import (
     brochure_product_from_text,
     doesnt_know_pincode,
     is_bare_dont_know,
+    product_document_filename,
     product_document_pack,
     product_image_urls,
     share_location_caption,
@@ -326,7 +327,9 @@ class ReplySender(Protocol):
 
     def send_image(self, *, mobile: str, link: str, caption: str = "") -> None: ...
 
-    def send_document(self, *, mobile: str, link: str, caption: str = "") -> None: ...
+    def send_document(
+        self, *, mobile: str, link: str, caption: str = "", filename: str = ""
+    ) -> None: ...
 
 
 class DisposeClient(Protocol):
@@ -1028,6 +1031,7 @@ class ClientMessageProcessor:
                     mobile=session.mobile,
                     link=link,
                     caption=product_doc_caption(product, kind, language),
+                    filename=product_document_filename(product, kind, link),
                 )
                 sent_any = True
             except Exception:

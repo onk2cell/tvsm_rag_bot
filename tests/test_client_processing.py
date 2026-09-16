@@ -138,9 +138,16 @@ class FakeReplySender:
             {"mobile": mobile, "link": link, "caption": caption}
         )
 
-    def send_document(self, *, mobile: str, link: str, caption: str = "") -> None:
+    def send_document(
+        self, *, mobile: str, link: str, caption: str = "", filename: str = ""
+    ) -> None:
         self.document_calls.append(
-            {"mobile": mobile, "link": link, "caption": caption}
+            {
+                "mobile": mobile,
+                "link": link,
+                "caption": caption,
+                "filename": filename,
+            }
         )
 
 
@@ -358,6 +365,8 @@ def test_explicit_brochure_request_sends_pdf_once(monkeypatch):
             "mobile": "+918286871533",
             "link": "https://1.jamoutsourcing.com/f/King_Deluxe_Petrol-English.pdf",
             "caption": "King Deluxe brochure",
+            # What WhatsApp shows as the file's name — "Untitled" without it.
+            "filename": "TVS King Deluxe Brochure.pdf",
         },
     ]
     assert deps["state"].sessions["+918286871533"].brochures_sent == ["King Deluxe"]
@@ -2825,7 +2834,7 @@ def test_routing_ask_survives_a_redis_round_trip():
 
 # --- product photos -------------------------------------------------------
 
-DURAMAX_PHOTO = "https://1.jamoutsourcing.com/i/DuramaxImage.webp"
+DURAMAX_PHOTO = "https://1.jamoutsourcing.com/i/DuramaxImage.jpg"
 
 
 def _duramax_photos(monkeypatch):

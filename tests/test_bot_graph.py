@@ -212,3 +212,25 @@ def test_brochure_request_soft_signal_uses_llm(monkeypatch):
     # Soft signal "bhej"/"file" but not the hard brochure/pdf regex.
     assert classify_brochure_request("woh file bhej dena please") is True
     assert fake.prompts
+
+
+def test_brochure_request_transliterated_verb_reaches_llm(monkeypatch):
+    """Voice notes in a Hindi session come back with "send"/"share" in
+    Devanagari; the soft gate has to let those through to the classifier."""
+    fake = _FakeBrochureRequestLLM(wants=True)
+    monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": fake)
+    assert classify_brochure_request("वो डॉक्यूमेंट सेंड कर दो") is True
+    assert fake.prompts
+
+
+def test_photo_request_never_reaches_the_brochure_classifier(monkeypatch):
+    """"Send me photos" trips the "send" soft signal, and the classifier
+    was willing to call a photo a brochure — the customer asked for
+    pictures and got a PDF (JAM feedback, 2026-09-16)."""
+    fake = _FakeBrochureRequestLLM(wants=True)
+    monkeypatch.setattr("bot.graph.get_llm", lambda tier="smart": fake)
+    assert classify_brochure_request("send me photos of king ev max") is False
+    assert classify_brochure_request("मुझे फोटो भेजो") is False
+    assert fake.prompts == []
+    # ...unless a document word is there too — then it is a brochure ask.
+    assert classify_brochure_request("send photos and the brochure") is True

@@ -268,6 +268,37 @@ def create_admin_app(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
 
+    def _checked_images(images: Any) -> list[str]:
+        """Refuse photo links WhatsApp cannot deliver as an image.
+
+        Meta renders JPEG/PNG only; a .webp link is accepted by the send API
+        and then dropped, so the bot promises photos that never arrive. The
+        upload endpoint already enforces this for files we host — this
+        catches links pasted from elsewhere (the JAM CDN photos were .webp).
+        """
+        from client_media_assets import is_whatsapp_image_url
+
+        if images in (None, ""):
+            return []
+        if not isinstance(images, list) or not all(
+            isinstance(url, str) for url in images
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="images must be a list of URLs.",
+            )
+        cleaned = [url.strip() for url in images if url.strip()]
+        bad = [url for url in cleaned if not is_whatsapp_image_url(url)]
+        if bad:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "images must be .jpg/.jpeg/.png links — WhatsApp does not "
+                    f"deliver other formats as photos: {', '.join(bad)}"
+                ),
+            )
+        return cleaned
+
     def _vehicle_view(name: str, entry: dict[str, Any]) -> dict[str, Any]:
         """One vehicle, showing the aliases actually in force.
 
@@ -391,7 +422,7 @@ def create_admin_app(
             "brochure": payload.get("brochure", ""),
             "fuel": payload.get("fuel") or {},
             "support": payload.get("support") or [],
-            "images": payload.get("images") or [],
+            "images": _checked_images(payload.get("images")),
             "aliases": _resolve_aliases(payload, name, docs),
         }
         docs[name] = entry
@@ -421,7 +452,11 @@ def create_admin_app(
             "brochure": payload.get("brochure", current.get("brochure", "")),
             "fuel": payload.get("fuel", current.get("fuel") or {}),
             "support": payload.get("support", current.get("support") or []),
-            "images": payload.get("images", current.get("images") or []),
+            "images": (
+                _checked_images(payload["images"])
+                if "images" in payload
+                else current.get("images") or []
+            ),
             "aliases": (
                 _resolve_aliases(payload, name, docs)
                 if "aliases" in payload

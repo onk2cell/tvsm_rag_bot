@@ -167,7 +167,10 @@ class HttpReplySender:
         text = caption.strip() if caption else f"Please open this link: {link}"
         self.send(mobile=mobile, in_reply_to="image", text=text)
 
-    def send_document(self, *, mobile: str, link: str, caption: str = "") -> None:
+    def send_document(
+        self, *, mobile: str, link: str, caption: str = "", filename: str = ""
+    ) -> None:
+        del filename  # text fallback has nothing to name
         text = caption.strip() if caption else f"Please open this document: {link}"
         self.send(mobile=mobile, in_reply_to="document", text=text)
 
@@ -232,7 +235,9 @@ class JamWhatsAppReplySender:
             payload["message"] = caption.strip()
         self._deliver(payload)
 
-    def send_document(self, *, mobile: str, link: str, caption: str = "") -> None:
+    def send_document(
+        self, *, mobile: str, link: str, caption: str = "", filename: str = ""
+    ) -> None:
         payload = {
             "mobile": _jam_mobile(mobile),
             "type": "document",
@@ -240,6 +245,13 @@ class JamWhatsAppReplySender:
         }
         if caption.strip():
             payload["message"] = caption.strip()
+        # WhatsApp names a document from the API's `filename` field, not
+        # from the link — without it every PDF lands as "Untitled" (JAM
+        # tester feedback, 2026-09-16). JAM's gateway forwards this to
+        # Meta's `document.filename`; it is not in their documented
+        # contract, so keep it optional here.
+        if filename.strip():
+            payload["filename"] = filename.strip()
         self._deliver(payload)
 
     def _deliver(self, payload: dict) -> None:

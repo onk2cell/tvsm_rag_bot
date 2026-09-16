@@ -35,6 +35,11 @@ PRODUCT_ALIASES: tuple[tuple[str, str], ...] = (
     ("इलेक्ट्रिक", "King EV MAX"),
     ("इलेक्ट्रीक", "King EV MAX"),
     ("ईवी", "King EV MAX"),
+    # Voice transcripts spell the letters out: "ई वी मैक्स". Anchored on
+    # "max" — a bare "ई वी" sits inside "भाई वीडियो".
+    ("ई वी मैक्स", "King EV MAX"),
+    ("ई वी मॅक्स", "King EV MAX"),
+    ("ई-वी मैक्स", "King EV MAX"),
     ("ईव्ही", "King EV MAX"),
     ("इव्ही", "King EV MAX"),
     ("ई व्ही", "King EV MAX"),

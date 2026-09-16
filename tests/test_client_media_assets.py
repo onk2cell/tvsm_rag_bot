@@ -4,12 +4,16 @@ from __future__ import annotations
 from client_media_assets import (
     brochure_product_from_text,
     doesnt_know_pincode,
+    is_whatsapp_image_url,
     product_brochure_caption,
     product_brochure_url,
+    product_document_filename,
     product_document_pack,
+    product_image_urls,
     share_location_caption,
     share_location_image_url,
     wants_product_brochure,
+    wants_product_images,
     wants_product_info,
 )
 
@@ -326,3 +330,101 @@ def test_an_unreadable_config_still_yields_a_card(monkeypatch):
     monkeypatch.setattr(client_media_assets.admin_config, "get_store", explode)
     monkeypatch.setattr(client_media_assets, "media_base_url", lambda: "https://m/media")
     assert client_media_assets.share_location_image_url("Hindi").endswith("how_to.jpg")
+
+
+def test_product_document_filename_is_the_product_name():
+    """WhatsApp displays the send API's filename; the CDN basename
+    ("King_EV_MAX-English") is never shown and without a filename the
+    phone says "Untitled"."""
+    assert (
+        product_document_filename(
+            "King EV MAX", "brochure",
+            "https://1.jamoutsourcing.com/f/King_EV_MAX-English.pdf",
+        )
+        == "TVS King EV MAX Brochure.pdf"
+    )
+    # Already-prefixed names are not doubled.
+    assert (
+        product_document_filename("TVS King Kargo", "brochure")
+        == "TVS King Kargo Brochure.pdf"
+    )
+    assert (
+        product_document_filename(
+            "King Deluxe", "warranty",
+            "https://1.jamoutsourcing.com/f/Deluxe-Warranty-Policy-new.pdf?v=2",
+        )
+        == "TVS King Deluxe Warranty Policy.pdf"
+    )
+    assert (
+        product_document_filename("King Deluxe", "pms")
+        == "TVS King Deluxe PMS Schedule.pdf"
+    )
+
+
+def test_product_image_urls_drop_formats_whatsapp_cannot_show(monkeypatch):
+    """Meta renders JPEG/PNG only; a .webp link is accepted by the send API
+    and then dropped, so the customer got "sending you the photos" and no
+    photos — every product image on the JAM CDN was .webp (2026-09-16)."""
+    monkeypatch.setattr(
+        "client_media_assets.product_documents",
+        lambda: {
+            "King EV MAX": {
+                "brochure": "https://1.jamoutsourcing.com/f/x.pdf",
+                "images": [
+                    "https://1.jamoutsourcing.com/i/TVSKINGEVMAX.webp",
+                    "https://1.jamoutsourcing.com/i/TVSKingNew.jpg",
+                    "https://1.jamoutsourcing.com/i/side.PNG?x=1",
+                    "",
+                ],
+            }
+        },
+    )
+    assert product_image_urls("King EV MAX") == [
+        "https://1.jamoutsourcing.com/i/TVSKingNew.jpg",
+        "https://1.jamoutsourcing.com/i/side.PNG?x=1",
+    ]
+    assert is_whatsapp_image_url("https://x/a.jpeg")
+    assert not is_whatsapp_image_url("https://x/a.webp")
+    assert not is_whatsapp_image_url("https://x/a.pdf")
+    assert not is_whatsapp_image_url("")
+
+
+def test_brochure_ask_survives_misspellings_and_transliteration():
+    """Typed asks arrive as "brouchers"; a Hindi voice note is transcribed
+    with the English words in Devanagari ("कैटालॉग्स", "सेंड"). Both were
+    missed on 2026-09-11 and got a text answer with no PDF."""
+    for text in (
+        "i need brouchers",
+        "can you plz share me brochers of king EV max",
+        "broucher pls",
+        "brochar bhejo",
+        "catalogs please",
+        "क्या आप मुझे ई वी मैक्स के कैटालॉग्स या कुछ फोटोस सेंड कर सकते हो क्या?",
+        "ब्रोचर चाहिए",
+        "ब्रोशियर भेजो",
+        "प्रोशर भेजो",
+        "पीडीऍफ़ चाहिए",
+        "ब्रॉशर पाठवा",
+        "బ్రోచర్ పంపండి",
+        "பிரோஷர் அனுப்புங்கள்",
+    ):
+        assert wants_product_brochure(text), text
+    for text in (
+        "send me photos",
+        "give me images",
+        "my brother wants one",
+        "branches near me",
+        "मुझे फोटो भेजो",
+        "प्रोसेस क्या है",
+        "प्रचार",
+        "प्रशंसा",
+    ):
+        assert not wants_product_brochure(text), text
+
+
+def test_photo_ask_is_not_a_brochure_ask():
+    assert wants_product_images("send me photos")
+    assert not wants_product_brochure("send me photos")
+    # Both asked for: both flags, so both go out.
+    text = "कैटालॉग्स या कुछ फोटोस सेंड कर सकते हो"
+    assert wants_product_brochure(text) and wants_product_images(text)

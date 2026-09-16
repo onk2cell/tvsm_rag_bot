@@ -149,6 +149,52 @@ def test_update_replaces_documents_and_keeps_aliases(tmp_path):
     assert "delux" in resp.json()["aliases"]
 
 
+def test_webp_image_links_are_refused(tmp_path):
+    """WhatsApp only delivers JPEG/PNG as photos; a .webp link is accepted
+    by the send API and silently dropped, so the bot would promise photos
+    that never arrive. Every JAM CDN photo was .webp (2026-09-16)."""
+    client = _c(tmp_path)
+    resp = client.put(
+        "/admin/api/vehicles/King Deluxe", headers=_auth(),
+        json={"images": [
+            "https://1.jamoutsourcing.com/i/deluxe-black-right.webp",
+            "https://1.jamoutsourcing.com/i/deluxe-blue-right.jpg",
+        ]},
+    )
+    assert resp.status_code == 400
+    assert "deluxe-black-right.webp" in resp.json()["detail"]
+    assert ".jpg/.jpeg/.png" in resp.json()["detail"]
+
+    resp = client.post(
+        "/admin/api/vehicles", headers=_auth(),
+        json={"name": "King Kargo", "images": ["https://x/kargo.webp"]},
+    )
+    assert resp.status_code == 400
+    # Nothing was written.
+    names = [v["name"] for v in client.get("/admin/api/vehicles", headers=_auth()).json()["vehicles"]]
+    assert "King Kargo" not in names
+
+
+def test_jpeg_and_png_image_links_are_kept(tmp_path):
+    client = _c(tmp_path)
+    resp = client.put(
+        "/admin/api/vehicles/King Deluxe", headers=_auth(),
+        json={"images": [" https://1.jamoutsourcing.com/i/deluxe-blue-right.jpg ", "https://x/y.PNG"]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["images"] == [
+        "https://1.jamoutsourcing.com/i/deluxe-blue-right.jpg", "https://x/y.PNG",
+    ]
+    # An update that does not mention images leaves them alone.
+    resp = client.put(
+        "/admin/api/vehicles/King Deluxe", headers=_auth(),
+        json={"brochure": "https://x/new.pdf"},
+    )
+    assert resp.json()["images"] == [
+        "https://1.jamoutsourcing.com/i/deluxe-blue-right.jpg", "https://x/y.PNG",
+    ]
+
+
 def test_rename_keeps_aliases_that_were_only_builtins(tmp_path):
     """Built-ins are keyed by the old name, so a rename must materialise them.
 

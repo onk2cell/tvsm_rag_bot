@@ -69,7 +69,9 @@ class PrintingSender:
     def send_image(self, *, mobile: str, link: str, caption: str = "") -> None:
         print(f"\nBOT IMAGE: {link}\n  caption: {caption}\n{'-' * 60}")
 
-    def send_document(self, *, mobile: str, link: str, caption: str = "") -> None:
+    def send_document(
+        self, *, mobile: str, link: str, caption: str = "", filename: str = ""
+    ) -> None:
         print(f"\nBOT PDF: {link}\n  caption: {caption}\n{'-' * 60}")
 
 
