@@ -601,6 +601,9 @@ class RedisClientState:
                     data.get("awaiting_vehicle_pick") or False
                 ),
                 vehicle_menu_sent=bool(data.get("vehicle_menu_sent") or False),
+                questions_asked=[
+                    str(item) for item in (data.get("questions_asked") or [])
+                ],
             )
         return ClientSession(
             conversation_id=self._id_factory(),
@@ -652,6 +655,7 @@ class RedisClientState:
             "pgm_candidates": session.pgm_candidates,
             "awaiting_vehicle_pick": session.awaiting_vehicle_pick,
             "vehicle_menu_sent": session.vehicle_menu_sent,
+            "questions_asked": session.questions_asked,
         }
         self._redis.set(
             self._key(session.mobile),

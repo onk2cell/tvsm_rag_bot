@@ -2774,6 +2774,71 @@ def test_card_is_not_sent_once_a_dealer_is_settled():
     assert [c for c in deps["reply_sender"].image_calls if "share_location" in c["link"]] == []
 
 
+# --- each qualification question is asked once ------------------------------
+
+
+def test_ignored_question_is_reported_as_already_asked():
+    """Client (17/09): "if users ignore a question then let it be ignored —
+    one question, one time only." The model only knew what was captured,
+    so an ignored question looked unasked and came back every turn."""
+    processor, deps = _processor()
+    deps["engine"].reply = (
+        "To help us assist you better, do you currently have a valid driving "
+        "licence, a commercial permit, and a commercial badge?"
+    )
+    processor.process(_event(message_id="m1", content="King Deluxe"))
+    assert "ALREADY ASKED" not in (deps["engine"].turns[-1].known_state or "")
+
+    deps["engine"].reply = "Sure. What else can I help with?"
+    processor.process(_event(message_id="m2", content="what is the mileage?"))
+
+    known = deps["engine"].turns[-1].known_state or ""
+    assert "ALREADY ASKED, not answered" in known
+    assert "licence / permit / badge" in known
+    assert deps["state"].sessions["+918286871533"].questions_asked == ["documents"]
+
+
+def test_asked_questions_accumulate_and_drop_once_answered():
+    processor, deps = _processor()
+    deps["engine"].reply = "When are you planning to buy or take delivery?"
+    processor.process(_event(message_id="m1", content="King Deluxe"))
+    deps["engine"].reply = "Do you already know the key features of the King Deluxe?"
+    processor.process(_event(message_id="m2", content="price?"))
+
+    known = deps["engine"].turns[-1].known_state or ""
+    assert "purchase timeline" in known and "ALREADY ASKED" in known
+    session = deps["state"].sessions["+918286871533"]
+    assert session.questions_asked == ["timeline", "feature_awareness"]
+
+    # A captured answer takes the question off the "unanswered" list from the
+    # next turn on; the other one stays until it is answered.
+    deps["engine"].reply = "Noted. Anything else?"
+    processor.process(_event(message_id="m3", content="15/11/2026"))
+    processor.process(_event(message_id="m4", content="ok"))
+    known = deps["engine"].turns[-1].known_state or ""
+    assert "purchase timeline: 15/11/2026" in known
+    assert "ALREADY ASKED, not answered — do NOT ask again, leave blank and move on: feature awareness" in known
+
+
+def test_statement_mentioning_documents_is_not_recorded_as_a_question():
+    processor, deps = _processor()
+    deps["engine"].reply = (
+        "Thank you! Noted: driving licence, permit and badge available. "
+        "Our team will contact you."
+    )
+    processor.process(_event(message_id="m1", content="yes I have all"))
+    assert deps["state"].sessions["+918286871533"].questions_asked == []
+
+
+def test_pincode_and_model_questions_are_not_tracked():
+    processor, deps = _processor()
+    deps["engine"].reply = "Which TVS passenger model are you interested in?"
+    processor.process(_event(message_id="m1", content="hi"))
+    deps["engine"].reply = "Could you share your 6-digit pincode so I can find the nearest dealership?"
+    processor.process(_event(message_id="m2", content="King Deluxe"))
+    assert deps["state"].sessions["+918286871533"].questions_asked == []
+
+
 # --- CLIENT_ASSUME_NOT_STILL_INTERESTED --------------------------------------
 
 VEHICLES = ("King EV MAX", "King Deluxe", "King Duramax Plus")

@@ -245,6 +245,14 @@ def test_brochure_offer_rule_puts_the_question_on_the_model(stores):
     assert "already sent" in system.lower()
 
 
+def test_ask_once_rule_in_system_prompt(stores):
+    config_store, _, _ = stores
+    system = build_system_instruction(config_store.get(), "English")
+    assert "asked at most ONCE" in system
+    assert "ALREADY ASKED is closed" in system
+    assert "which model they want and their pincode" in system
+
+
 def test_offer_photos_rule_offers_brochure_photos_or_both(stores):
     """Flow switch CLIENT_OFFER_BROCHURE_OR_IMAGES: the model's offer widens to
     a 1/2/3 choice; the marker line stays the same so the code path is shared."""

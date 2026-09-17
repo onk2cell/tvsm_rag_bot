@@ -118,6 +118,42 @@ _ASKS_FOR_LOCATION_RE = re.compile(
     r"(?:live|current)\s+location|लोकेशन|లొకేషన్|லொகேஷன்|ಲೊಕೇಶನ್|ലൊക്കേഷൻ"
 )
 
+# Which qualification question a bot reply is asking, by keyword, in the
+# menu languages. Used only to tell the model "you already asked this" — a
+# miss just means the model may repeat itself, which is what happened before.
+# Product and pincode are deliberately not tracked: nothing can be routed or
+# sold without them, so those two may be asked again.
+_QUESTION_MARKERS: tuple[tuple[str, str, "re.Pattern[str]"], ...] = (
+    (
+        "documents",
+        "licence / permit / badge",
+        re.compile(
+            r"(?i)licen[cs]e|permit|badge|"
+            r"लाइसेंस|लायसन्स|परमिट|परवाना|बैज|बॅज|"
+            r"లైసెన్స్|పర్మిట్|బ్యాడ్జ్|உரிமம்|லைசென்ஸ்|பெர்மிட்|பேட்ஜ்|"
+            r"ಲೈಸೆನ್ಸ್|ಪರ್ಮಿಟ್|ಬ್ಯಾಡ್ಜ್|ലൈസൻസ്|പെർമിറ്റ്|ബാഡ്ജ്"
+        ),
+    ),
+    (
+        "timeline",
+        "purchase timeline",
+        re.compile(
+            r"(?i)\bwhen\b.*\b(?:buy|buying|purchase|deliver|delivery|take)\b|"
+            r"\bexact date\b|dd/mm|"
+            r"कब.*(?:खरीद|लेना|लेने|लेंगे|डिलीवरी)|कधी.*(?:घे|खरेदी|डिलिव्हरी)|"
+            r"ఎప్పుడు|எப்போது|ಯಾವಾಗ|എപ്പോൾ"
+        ),
+    ),
+    (
+        "feature_awareness",
+        "feature awareness",
+        re.compile(
+            r"(?i)\bfeatures?\b|\bspecifications?\b|"
+            r"फीचर|खूबिय|वैशिष्ट्य|विशेषता|ఫీచర్|అంశాల|அம்சங்க|ಫೀಚರ್|ವೈಶಿಷ್ಟ್ಯ|ഫീച്ചർ|സവിശേഷത"
+        ),
+    ),
+)
+
 _NEGATIVE_RE = re.compile(
     r"(?i)^\s*(no|n|nope|nah|nahi|nahin|wrong|"
     r"illa|illai|ledu|beda|nako|naka|vendam|"
@@ -373,6 +409,10 @@ class ClientSession:
     # sent once per conversation.
     awaiting_vehicle_pick: bool = False
     vehicle_menu_sent: bool = False
+    # Qualification questions the bot has already put to the customer (step
+    # ids from _QUESTION_MARKERS). Each is asked once: an ignored question
+    # stays ignored instead of coming back every turn (client, 17/09).
+    questions_asked: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1053,6 +1093,7 @@ class ClientMessageProcessor:
             reply_text = "\n\n".join(
                 part for part in (reply_text.rstrip(), intro, nudge) if part
             )
+        self._note_questions_asked(session, reply_text)
         history_reply = reply_text
         if confirm_was_pending and session.awaiting_dealer_confirm:
             # Re-attach the pending dealer card after answering the customer,
@@ -1969,6 +2010,31 @@ class ClientMessageProcessor:
             "Do not re-ask facts already clear from context; only fill gaps.)"
         )
 
+    def _note_questions_asked(self, session: ClientSession, reply: str) -> None:
+        """Remember which qualification question this reply put to them."""
+        if not self._asks_a_question(reply):
+            return
+        for step, _label, pattern in _QUESTION_MARKERS:
+            if step not in session.questions_asked and pattern.search(reply or ""):
+                session.questions_asked.append(step)
+
+    def _questions_asked_but_unanswered(self, session: ClientSession) -> list[str]:
+        """Labels of asked questions whose answer is not on file yet."""
+        profile = session.lead_profile
+        answered = {
+            "timeline": bool(str(profile.get("purchase_timeline") or "").strip()),
+            "feature_awareness": bool(str(profile.get("feature_awareness") or "").strip()),
+            "documents": any(
+                str(profile.get(key) or "").strip()
+                for key in ("doc_license", "doc_permit", "doc_badge")
+            ),
+        }
+        return [
+            label
+            for step, label, _pattern in _QUESTION_MARKERS
+            if step in session.questions_asked and not answered.get(step)
+        ]
+
     def _known_state_block(self, session: ClientSession) -> str:
         """A one-line snapshot of everything already captured this session.
 
@@ -2030,6 +2096,13 @@ class ClientMessageProcessor:
 
         if session.callback_requested:
             bits.append("callback requested")
+
+        asked = self._questions_asked_but_unanswered(session)
+        if asked:
+            bits.append(
+                "ALREADY ASKED, not answered — do NOT ask again, leave blank and "
+                "move on: " + ", ".join(asked)
+            )
 
         if not bits:
             return ""
@@ -2929,6 +3002,7 @@ class ClientMessageProcessor:
         )
         if output is not None:
             self._arm_brochure_offer(session, output.offered_brochure, user_message="")
+            self._note_questions_asked(session, follow_up)
         self._maybe_dispose(session, profile=output.profile if output else None)
         session.pending_replies[event["message_id"]] = {
             "language": language,

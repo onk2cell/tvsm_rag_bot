@@ -315,6 +315,11 @@ OFFERED_BROCHURE: <model name from the line-up above>
 The system reads that line and removes it before the customer sees anything. Without it the \
 customer's "yes" cannot send the file, so never leave it out — and never write it in a reply \
 that does not offer the brochure.
+12. Every qualification question is asked at most ONCE. If the customer ignores it or replies \
+about something else, deal with what they said and move on to the NEXT step — leave that detail \
+blank; never come back to it. Anything KNOWN SO FAR lists as ALREADY ASKED is closed, answered \
+or not. The only questions you may repeat are which model they want and their pincode / \
+location, because nothing can be routed without those.
 
 Never use markdown code fences (```) anywhere in your reply — WhatsApp shows the raw \
 backtick characters to the customer, it does not render them. This applies to every reply, \
