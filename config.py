@@ -77,6 +77,10 @@ CLIENT_ASSUME_NOT_STILL_INTERESTED = _flag("CLIENT_ASSUME_NOT_STILL_INTERESTED")
 CLIENT_SKIP_CRM_DEALER = _flag("CLIENT_SKIP_CRM_DEALER")
 CLIENT_ASSUME_DEALER_OK = _flag("CLIENT_ASSUME_DEALER_OK")
 CLIENT_OFFER_BROCHURE_OR_IMAGES = _flag("CLIENT_OFFER_BROCHURE_OR_IMAGES")
+#   CAMPAIGN_ON_REQUEST — the scheme (CAMPAIGN section) is never brought up
+#       by the bot; it is explained only when the customer asks about
+#       offers / schemes / benefits. Client request 2026-09-17.
+CLIENT_CAMPAIGN_ON_REQUEST = _flag("CLIENT_CAMPAIGN_ON_REQUEST")
 CLIENT_VEHICLE_LIST: tuple[str, ...] = tuple(
     name.strip()
     for name in os.environ.get("CLIENT_VEHICLE_LIST", "").split(",")

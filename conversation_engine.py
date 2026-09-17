@@ -233,11 +233,15 @@ def build_system_instruction(
     product_hint: str = "",
     confirm_crm_dealer: bool = False,
     offer_photos: bool = False,
+    campaign_on_request: bool = False,
 ) -> str:
     """Assemble the qualification system prompt from admin config.
 
     ``offer_photos`` (flow switch CLIENT_OFFER_BROCHURE_OR_IMAGES) widens the
     model's offer from the brochure alone to brochure / photos / both.
+    ``campaign_on_request`` (CLIENT_CAMPAIGN_ON_REQUEST) keeps the scheme out
+    of the flow: the CAMPAIGN section becomes reference material the model
+    uses only when the customer asks about offers or benefits.
     """
     profile_keys = capture_field_ids(config)
     campaign = active_campaign_text(config)
@@ -246,8 +250,10 @@ def build_system_instruction(
     step_number = 0
     for step in config["flow_steps"]:
         # With no live campaign there is nothing to be aware of: keeping the
-        # step would have the bot announce a scheme that has expired.
-        if step == "campaign_awareness" and not campaign:
+        # step would have the bot announce a scheme that has expired. On
+        # request only, the step goes too — the scheme is answered, not
+        # pitched (client, 17/09: no Vaada in between the normal chat).
+        if step == "campaign_awareness" and (not campaign or campaign_on_request):
             continue
         step_number += 1
         guidance = _step_guidance(
@@ -259,6 +265,17 @@ def build_system_instruction(
         flow_lines.append(f"   {step_number}. {guidance}")
 
     line_up = _product_menu(products) or "King EV MAX, King Deluxe, King Duramax Plus"
+    campaign_goal = "" if campaign_on_request else _campaign_goal(campaign)
+    campaign_rule = ""
+    if campaign and campaign_on_request:
+        campaign_rule = (
+            "\n13. The CAMPAIGN section is reference material, not a talking point. "
+            "NEVER bring the scheme, offer or its benefits up on your own — not in the "
+            "greeting, not after a model is chosen, not at wrap-up. ONLY when the customer "
+            "asks about offers, schemes, discounts, benefits, warranty, insurance or "
+            "similar, explain it briefly from the CAMPAIGN section, then continue "
+            "qualification."
+        )
     if offer_photos:
         offer_example = (
             '("Would you like the brochure, the photos, or both? Reply 1, 2 or 3")'
@@ -285,7 +302,7 @@ def build_system_instruction(
 ({line_up}).
 
 YOUR GOAL is NOT to answer every question in depth. Your goal is to QUALIFY and PROFILE \
-the lead in a short, friendly chat, {_campaign_goal(campaign)}then hand \
+the lead in a short, friendly chat, {campaign_goal}then hand \
 them to the dealership.
 
 RULES
@@ -319,7 +336,7 @@ that does not offer the brochure.
 about something else, deal with what they said and move on to the NEXT step — leave that detail \
 blank; never come back to it. Anything KNOWN SO FAR lists as ALREADY ASKED is closed, answered \
 or not. The only questions you may repeat are which model they want and their pincode / \
-location, because nothing can be routed without those.
+location, because nothing can be routed without those.{campaign_rule}
 
 Never use markdown code fences (```) anywhere in your reply — WhatsApp shows the raw \
 backtick characters to the customer, it does not render them. This applies to every reply, \
@@ -416,6 +433,7 @@ class ConversationEngine:
         llm: LLMPort,
         lead_writer: LeadWriter | None = None,
         offer_photos: bool | None = None,
+        campaign_on_request: bool | None = None,
     ):
         import config as app_config
 
@@ -426,6 +444,11 @@ class ConversationEngine:
             app_config.CLIENT_OFFER_BROCHURE_OR_IMAGES
             if offer_photos is None
             else offer_photos
+        )
+        self._campaign_on_request = (
+            app_config.CLIENT_CAMPAIGN_ON_REQUEST
+            if campaign_on_request is None
+            else campaign_on_request
         )
 
     def handle_turn(self, turn: TurnInput) -> TurnOutput:
@@ -440,6 +463,7 @@ class ConversationEngine:
             product_hint=turn.product_hint,
             confirm_crm_dealer=turn.confirm_crm_dealer,
             offer_photos=self._offer_photos,
+            campaign_on_request=self._campaign_on_request,
         )
         contents = build_contents(turn.history, user_text, turn.known_state)
         result = self._llm.generate(system_instruction=system, contents=contents)

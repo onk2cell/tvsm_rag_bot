@@ -58,7 +58,7 @@ DEFAULT_FLOW_STEPS = [
 ]
 
 DEFAULT_CAMPAIGN_TEXT = """\
-ACTIVE CAMPAIGN — "Vaada" scheme (mention proactively, briefly):
+ACTIVE CAMPAIGN — "Vaada" scheme:
 - 2-year warranty + 3 free maintenance services
 - 1 year free RSA (roadside assistance, towing to showroom)
 - Accident coverage package up to Rs 10 lakh

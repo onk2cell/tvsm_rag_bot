@@ -253,6 +253,44 @@ def test_ask_once_rule_in_system_prompt(stores):
     assert "which model they want and their pincode" in system
 
 
+def test_campaign_on_request_keeps_the_scheme_out_of_the_flow(stores):
+    """Client (17/09): no Vaada pitch in between the normal chat — explain the
+    scheme only when the customer asks about it."""
+    config_store, _, _ = stores
+    cfg = config_store.get()
+    assert cfg["campaign_text"].strip(), "fixture config must carry a live campaign"
+
+    system = build_system_instruction(cfg, "English", campaign_on_request=True)
+    assert "Proactively mention the current campaign" not in system
+    assert "make them aware of the active campaign" not in system
+    assert "NEVER bring the scheme, offer or its benefits up on your own" in system
+    assert "ONLY when the customer asks about offers" in system
+    # The details stay available for when they do ask.
+    assert "CAMPAIGN:" in system and "Vaada" in system
+
+    default = build_system_instruction(cfg, "English")
+    assert "Proactively mention the current campaign" in default
+    assert "make them aware of the active campaign" in default
+    assert "NEVER bring the scheme" not in default
+
+
+def test_campaign_on_request_with_no_live_campaign_adds_no_rule(stores, monkeypatch):
+    config_store, _, _ = stores
+    monkeypatch.setattr("conversation_engine.active_campaign_text", lambda cfg: "")
+    system = build_system_instruction(config_store.get(), "English", campaign_on_request=True)
+    assert "CAMPAIGN:" not in system
+    assert "NEVER bring the scheme" not in system
+
+
+def test_engine_campaign_on_request_defaults_to_config(stores, monkeypatch):
+    config_store, lead_writer, _ = stores
+    monkeypatch.setattr("config.CLIENT_CAMPAIGN_ON_REQUEST", True)
+    llm = FakeLLM(["Sure."])
+    engine = ConversationEngine(config_store=config_store, llm=llm, lead_writer=lead_writer)
+    engine.handle_turn(TurnInput(session_id="s", language="English", message="hi"))
+    assert "NEVER bring the scheme" in llm.calls[0]["system_instruction"]
+
+
 def test_offer_photos_rule_offers_brochure_photos_or_both(stores):
     """Flow switch CLIENT_OFFER_BROCHURE_OR_IMAGES: the model's offer widens to
     a 1/2/3 choice; the marker line stays the same so the code path is shared."""

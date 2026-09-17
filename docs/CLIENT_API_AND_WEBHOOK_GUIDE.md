@@ -250,6 +250,7 @@ any one can be turned back alone. Restart the worker after changing them.
 | `CLIENT_SKIP_CRM_DEALER` | CRM-known customers | "Would you like me to share your nearest dealership details?" → CRM dealer card → Yes/No | Never offered — taken as **no**. At that moment the bot asks "type your 6-digit pincode or share your live location" (text only). The dealer comes from the pincode / location; dispose still falls back to the CRM dealership id if none is ever located. |
 | `CLIENT_ASSUME_DEALER_OK` | everyone | Nearest-dealer card + "Is this dealership near you / OK for you? Reply Yes or No" | Card **without** the question, taken as **yes** on the spot (lead routed immediately); the model's next question follows under the card. A different pincode later still replaces the dealer. A shared live location gets the card plus a model turn instead of a static reply. |
 | `CLIENT_OFFER_BROCHURE_OR_IMAGES` | everyone | Model asks "Would you like me to send you the brochure?" | Model asks "brochure, photos, or both? Reply 1, 2 or 3"; the code sends what was picked (a plain yes = both). Photos need `documents.<product>.images` to be configured. |
+| `CLIENT_CAMPAIGN_ON_REQUEST` | everyone | The scheme (`campaign_text`) is pitched proactively as a flow step | Never brought up by the bot. Explained briefly, from `campaign_text`, only when the customer asks about offers, schemes, benefits, warranty or insurance. The campaign dates still decide whether it is live at all. |
 
 ### Legacy CRM GET shape (mock / Basic Auth)
 
