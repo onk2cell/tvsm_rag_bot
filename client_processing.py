@@ -108,6 +108,16 @@ _AFFIRMATIVE_RE = re.compile(
     r"होय|हो|हाँ|हां|ठीक|सही|"
     r"ಹೌದು|ಸರಿ|అవును|సరే|ஆம்|ஆமாம்|சரி|അതെ|ശരി)\s*[!.।]*\s*$"
 )
+# A bot reply that asks the customer for their pincode / live location, in
+# any menu language. Used to pair the how-to-share-location card with the
+# model's own ask, the way the static asks already do.
+_ASKS_FOR_LOCATION_RE = re.compile(
+    r"(?i)pin\s*-?\s*code|पिन\s*-?\s*कोड|पिनकोड|"
+    r"పిన్\s*-?\s*కోడ్|పిన్‌కోడ్|பின்\s*-?\s*கோடு|பின்கோடு|"
+    r"ಪಿನ್\s*-?\s*ಕೋಡ್|ಪಿನ್‌ಕೋಡ್|പിൻ\s*-?\s*കോഡ്|പിൻകോഡ്|"
+    r"(?:live|current)\s+location|लोकेशन|లొకేషన్|லொகேஷன்|ಲೊಕೇಶನ್|ലൊക്കേഷൻ"
+)
+
 _NEGATIVE_RE = re.compile(
     r"(?i)^\s*(no|n|nope|nah|nahi|nahin|wrong|"
     r"illa|illai|ledu|beda|nako|naka|vendam|"
@@ -1061,6 +1071,7 @@ class ClientMessageProcessor:
             requested=brochure_requested,
         )
         self._send_product_images(session, images_product)
+        self._maybe_send_location_guide_for_reply(session, reply_text)
         # After the sends, so a brochure that just went out is never armed
         # for a second offer.
         self._arm_brochure_offer(
@@ -1405,6 +1416,15 @@ class ClientMessageProcessor:
             decision = "brochure" if decision == "yes" else decision
         notes: list[str] = []
         sent_kinds: list[str] = []
+        brochure_done = product in session.brochures_sent
+        photos_done = product in session.images_sent
+        if decision == "both":
+            # "Both" / a plain yes means whatever is still outstanding. After
+            # the photos went out the model offers just the brochure, so a
+            # "yes" there must not blast the photos a second time (tester,
+            # 17/09). (An offer is never armed once the brochure is out, so
+            # at least one of the two is always outstanding here.)
+            decision = "brochure" if photos_done else "both"
         if decision in ("brochure", "both"):
             _, hints = self._resolve_brochure_product(session, message)
             if self._send_brochure_pack(
@@ -1415,8 +1435,21 @@ class ClientMessageProcessor:
             ):
                 sent_kinds.append("brochure")
                 notes.append(f"Brochure for {product} has been sent.")
+            elif brochure_done and decision == "brochure":
+                notes.append(
+                    f"The {product} brochure was ALREADY sent earlier in this "
+                    "chat and will NOT be sent again. Do NOT say you are sending "
+                    "it. Tell them to check the PDF sent earlier."
+                )
         if decision in ("images", "both"):
-            if not product_image_urls(product):
+            if photos_done:
+                if decision == "images":
+                    notes.append(
+                        f"The {product} photos were ALREADY sent earlier in this "
+                        "chat and will NOT be sent again. Do NOT say you are "
+                        "sending them. Tell them to check the photos above."
+                    )
+            elif not product_image_urls(product):
                 notes.append(
                     f"No photos are available for {product}. Do NOT say you "
                     "are sending any. Say the dealership will share them."
@@ -2162,6 +2195,27 @@ class ClientMessageProcessor:
         self._send_share_location_guide(session, with_caption=False)
         return invalid_pincode_location_fallback(lang)
 
+    def _maybe_send_location_guide_for_reply(
+        self, session: ClientSession, reply: str
+    ) -> None:
+        """Pair the how-to card with the model's own pincode/location ask.
+
+        The static asks (invalid pincode, "don't know my pincode", the
+        skip-CRM-dealer ask) already send the card; a new customer, whose
+        location question comes from the model, got only text (tester,
+        17/09). Once per conversation, and never once a dealer is settled
+        or a pincode is already on file.
+        """
+        if session.share_location_guide_sent or self._dealer_directory is None:
+            return
+        if session.dealer_confirmed or session.awaiting_dealer_confirm:
+            return
+        if session.dealer_shared_for_pincode:
+            return
+        if not self._asks_a_question(reply) or not _ASKS_FOR_LOCATION_RE.search(reply):
+            return
+        self._send_share_location_guide(session, with_caption=False)
+
     def _send_share_location_guide(
         self,
         session: ClientSession,
@@ -2386,6 +2440,9 @@ class ClientMessageProcessor:
             # the nearest-dealer path the pincode should open).
             if extract_pincode(user_message):
                 return reply
+            # The how-to-share-location card goes with the ask (tester,
+            # 17/09) — image first, then the text that follows it.
+            self._send_share_location_guide(session, with_caption=False)
             ask = pincode_or_location_ask(self._session_language(session))
             return f"{reply.rstrip()}\n\n{ask}"
         resolved = self._resolve_crm_dealer(customer)

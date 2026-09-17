@@ -2684,6 +2684,96 @@ def test_media_offer_no_declines_both(monkeypatch):
     assert deps["state"].sessions["+918286871533"].awaiting_brochure_offer is False
 
 
+def test_media_offer_yes_after_photos_sends_only_the_brochure(monkeypatch):
+    """Tester (17/09): picked 2 (photos), the model then offered just the
+    brochure, "yes" sent the brochure AND the photos again. A plain yes
+    means whatever is still outstanding."""
+    processor, deps = _media_offer(monkeypatch)
+    processor.process(_event(message_id="m3", content="2"))
+    docs, imgs = _sent(deps)
+    assert docs == [] and len(imgs) == 1
+
+    # The model offers the rest (only the brochure is left) and arms it.
+    deps["engine"].reply = (
+        "Would you like the brochure as well?\nOFFERED_BROCHURE: King Duramax Plus"
+    )
+    processor.process(_event(message_id="m4", content="ok"))
+    assert deps["state"].sessions["+918286871533"].awaiting_brochure_offer is True
+    deps["engine"].reply = "Sent. Do you have a licence?"
+    processor.process(_event(message_id="m5", content="yes"))
+
+    docs, imgs = _sent(deps)
+    assert docs == [DURAMAX_BROCHURE]
+    assert len(imgs) == 1, "photos must not go out a second time"
+    note = deps["engine"].turns[-1].message
+    assert "Brochure for King Duramax Plus has been sent" in note
+    assert "photos have been sent" not in note
+
+
+def test_media_offer_repeat_pick_of_sent_photos_is_not_resent(monkeypatch):
+    processor, deps = _media_offer(monkeypatch)
+    processor.process(_event(message_id="m3", content="2"))
+    deps["engine"].reply = (
+        "Would you like the brochure as well?\nOFFERED_BROCHURE: King Duramax Plus"
+    )
+    processor.process(_event(message_id="m4", content="ok"))
+    deps["engine"].reply = "Noted."
+    processor.process(_event(message_id="m5", content="2"))
+
+    docs, imgs = _sent(deps)
+    assert docs == [] and len(imgs) == 1
+    assert "photos were ALREADY sent" in deps["engine"].turns[-1].message
+
+
+# --- how-to-share-location card with the model's own pincode ask -----------
+
+
+def test_models_pincode_ask_sends_the_share_location_card_once():
+    """Tester (17/09): a new customer asked for a pincode got text only; the
+    static asks send the how-to card, so the model's ask should too."""
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(dealer_directory=directory)
+    deps["engine"].reply = (
+        "Could you please share your 6-digit pincode or WhatsApp live location "
+        "so I can connect you with the nearest dealership?"
+    )
+
+    processor.process(_event(message_id="m1", content="I want King Deluxe"))
+
+    guides = [c for c in deps["reply_sender"].image_calls if "share_location" in c["link"]]
+    assert len(guides) == 1 and guides[0]["caption"] == ""
+    # Image first, then the text carrying the ask.
+    assert deps["reply_sender"].calls[-1]["text"].startswith("Could you please share")
+
+    deps["engine"].reply = "It helps me find the closest one. What is your 6-digit pincode?"
+    processor.process(_event(message_id="m2", content="why do you need it?"))
+    guides = [c for c in deps["reply_sender"].image_calls if "share_location" in c["link"]]
+    assert len(guides) == 1  # once per conversation
+
+
+def test_models_pincode_mention_without_a_question_sends_no_card():
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(dealer_directory=directory)
+    deps["engine"].reply = "Thanks, I have noted your pincode. The dealership will call you."
+
+    processor.process(_event(message_id="m1", content="ok"))
+
+    assert [c for c in deps["reply_sender"].image_calls if "share_location" in c["link"]] == []
+
+
+def test_card_is_not_sent_once_a_dealer_is_settled():
+    directory = FakeDealerDirectory(_shah_auto())
+    processor, deps = _processor(
+        dealer_directory=directory, switches=FlowSwitches(assume_dealer_ok=True)
+    )
+    deps["engine"].reply = "Great. Do you have a licence?"
+    processor.process(_event(message_id="m1", content="411001"))
+    deps["engine"].reply = "Is your pincode 411001 or a different one?"
+    processor.process(_event(message_id="m2", content="hmm"))
+
+    assert [c for c in deps["reply_sender"].image_calls if "share_location" in c["link"]] == []
+
+
 # --- CLIENT_ASSUME_NOT_STILL_INTERESTED --------------------------------------
 
 VEHICLES = ("King EV MAX", "King Deluxe", "King Duramax Plus")
@@ -2864,7 +2954,8 @@ def _skip_crm(deps_switches=None, **overrides):
 def test_skip_crm_dealer_asks_for_a_location_instead_of_offering_the_crm_dealer():
     """Client request (16/09): assume "no" to the CRM-assigned dealership.
     At the moment the consent question used to be attached, the bot asks
-    for a pincode / live location instead — text only, no how-to image."""
+    for a pincode / live location instead, with the how-to-share-location
+    card (tester, 17/09: the card was missing)."""
     processor, deps, nearest = _skip_crm()
 
     processor.process(_event(message_id="m1", content="King Kargo"))
@@ -2873,7 +2964,8 @@ def test_skip_crm_dealer_asks_for_a_location_instead_of_offering_the_crm_dealer(
     assert reply.endswith(pincode_or_location_ask("English"))
     assert dealer_share_ask("English") not in reply
     assert "Arc, Andheri" not in reply
-    assert deps["reply_sender"].image_calls == []
+    guides = [c for c in deps["reply_sender"].image_calls if "share_location" in c["link"]]
+    assert len(guides) == 1 and guides[0]["caption"] == ""
     turn = deps["engine"].turns[-1]
     assert turn.confirm_crm_dealer is False
     assert FakeEngine.SUPPRESS_QUESTION in turn.message
@@ -2896,6 +2988,7 @@ def test_skip_crm_dealer_location_ask_is_attached_once():
     reply = deps["reply_sender"].calls[-1]["text"]
     assert pincode_or_location_ask("English") not in reply
     assert dealer_share_ask("English") not in reply
+    assert len(deps["reply_sender"].image_calls) == 1  # the card is not repeated
 
 
 def test_skip_crm_dealer_pincode_gets_the_nearest_card_never_the_crm_one():
