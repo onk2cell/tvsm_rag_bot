@@ -121,9 +121,13 @@ CLIENT_TEST_MEDIA_HOSTS = {
     if host.strip()
 }
 CLIENT_QUEUE_NAME = os.environ.get("CLIENT_QUEUE_NAME", "default")
+# Where the outbound WhatsApp images/documents (data/media) are served from.
+# The public hostname is JAM's edge on :9004, which the force-router
+# forwards to tvsm-media-nginx (scripts/media_public_route.sh); a
+# trycloudflare tunnel URL here is the ephemeral fallback, not the plan.
 CLIENT_MEDIA_BASE_URL = os.environ.get(
     "CLIENT_MEDIA_BASE_URL",
-    "https://aichatbot.jamoutsourcing.com/media",
+    "https://aichatbot.jamoutsourcing.com:9004/media",
 ).strip()
 
 # --- Admin ---

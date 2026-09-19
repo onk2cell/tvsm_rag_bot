@@ -1,7 +1,10 @@
 # Public media for WhatsApp outbound images/documents
 
-Served in production at `https://aichatbot.jamoutsourcing.com/media/...`
-(config: `CLIENT_MEDIA_BASE_URL`).
+Served in production at `https://aichatbot.jamoutsourcing.com:9004/media/...`
+(config: `CLIENT_MEDIA_BASE_URL`): `tvsm-media-nginx` on host port 8088, reached
+through the `force-router` nginx's `/media/` route on the public port. Apply or
+re-apply with `bash scripts/media_public_route.sh`. The old cloudflared quick
+tunnel (`tvsm-media-tunnel`) is no longer needed.
 
 ## Layout
 
