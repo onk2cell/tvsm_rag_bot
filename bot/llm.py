@@ -3,7 +3,9 @@ should need to change to add/swap a provider or tier.
 
 get_llm("smart") returns the existing, production-proven grounded adapter
 (raw google-genai SDK + Gemini File Search over the product KB) — unchanged
-behavior, just re-exposed behind this factory.
+behavior, just re-exposed behind this factory. With CACHED_CONTEXT=true it
+is instead the cached-context adapter (the whole KB in a Gemini context
+cache, cached_context.py) with that same adapter as its fallback.
 
 get_llm("fast") returns a plain LangChain chat model, reserved for future
 non-grounded calls (e.g. LLM-driven tool routing). Nothing in bot/graph.py
@@ -22,9 +24,9 @@ Tier = Literal["fast", "smart"]
 @lru_cache
 def get_llm(tier: Tier = "smart"):
     if tier == "smart":
-        from conversation_engine import GeminiLLMAdapter
+        from cached_context import build_smart_llm
 
-        return GeminiLLMAdapter(MODEL_SMART, FILE_SEARCH_STORE)
+        return build_smart_llm(MODEL_SMART, FILE_SEARCH_STORE)
 
     from langchain_google_genai import ChatGoogleGenerativeAI
 

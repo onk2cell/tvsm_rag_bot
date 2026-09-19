@@ -86,6 +86,23 @@ CLIENT_VEHICLE_LIST: tuple[str, ...] = tuple(
     for name in os.environ.get("CLIENT_VEHICLE_LIST", "").split(",")
     if name.strip()
 )
+# --- Cached context (the knowledge base in a Gemini context cache) ---
+# Off: the model grounds on the File Search store (FILE_SEARCH_STORE), as it
+# always has. On: the whole knowledge base (KNOWLEDGE_BASE_DIR/*.md) sits in a
+# provider-side prompt cache together with the system instruction, and the
+# model answers from it in one call with no retrieval step; the File Search
+# path stays the fallback for any failure. See docs/CACHED_CONTEXT.md.
+CACHED_CONTEXT = _flag("CACHED_CONTEXT")
+KNOWLEDGE_BASE_DIR = os.environ.get("KNOWLEDGE_BASE_DIR", "knowledge_base")
+CACHED_CONTEXT_TTL_SECONDS = int(os.environ.get("CACHED_CONTEXT_TTL_SECONDS", "3600"))
+# Refuse to cache a corpus over this (estimated) size: a runaway knowledge
+# base becomes a startup error, not a bill.
+CACHED_CONTEXT_MAX_TOKENS = int(os.environ.get("CACHED_CONTEXT_MAX_TOKENS", "200000"))
+# Where live cache handles are remembered between worker processes (the RQ
+# worker forks one per job). Under data/ so it reaches every process.
+CACHED_CONTEXT_REGISTRY_PATH = os.environ.get(
+    "CACHED_CONTEXT_REGISTRY_PATH", "data/context_caches.json"
+)
 CLIENT_HTTP_TIMEOUT_SEC = float(os.environ.get("CLIENT_HTTP_TIMEOUT_SEC", "30"))
 CLIENT_RETRY_WAIT_SEC = float(os.environ.get("CLIENT_RETRY_WAIT_SEC", "30"))
 CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "3600"))

@@ -184,6 +184,7 @@ def create_admin_app(
             "source": source,
             "model": config.MODEL,
             "file_search_store": config.FILE_SEARCH_STORE,
+            "cached_context": config.CACHED_CONTEXT,
         }
 
     @app.get("/", include_in_schema=False)

@@ -50,3 +50,6 @@ skills-lock.json
 
 # Stale legacy export (runtime leads live in data/leads.csv)
 /leads.csv
+
+# Corpus bundle written by `python corpus.py --write`
+build/

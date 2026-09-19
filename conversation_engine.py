@@ -537,5 +537,7 @@ def make_engine(
 
     store = config_store or __import__("admin_config").get_store()
     writer = LeadWriter(Path(leads_path or app_config.LEADS_CSV_PATH), store)
-    llm = GeminiLLMAdapter(app_config.MODEL, app_config.FILE_SEARCH_STORE)
+    from cached_context import build_smart_llm
+
+    llm = build_smart_llm(app_config.MODEL, app_config.FILE_SEARCH_STORE)
     return ConversationEngine(config_store=store, llm=llm, lead_writer=writer)
