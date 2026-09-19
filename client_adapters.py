@@ -19,6 +19,18 @@ from client_language import (
 from client_processing import ClientSession, Customer
 from session_keys import client_session_key
 
+# A picture is never worth the reply. Media sends (the share-location card,
+# brochures, photos) get a short budget: a short timeout, no retry on a
+# rejection — JAM's 400 will not change on the next try — and one quick
+# retry on a network error only. Before this, one image JAM could not fetch
+# cost 3 × 30 s timeouts plus 2 × 30 s sleeps, the customer waited three
+# minutes for a text reply, and every other customer queued behind them
+# (docs/LATENCY_REPORT_2026-09-18.md, finding A). Text keeps the patient
+# policy: the text *is* the reply.
+MEDIA_TYPES = frozenset({"image", "document"})
+MEDIA_TIMEOUT_SEC = 10.0
+MEDIA_RETRY_WAIT_SEC = 1.0
+
 
 class CustomerLookupError(RuntimeError):
     pass
@@ -204,6 +216,8 @@ class JamWhatsAppReplySender:
         api_key: str,
         timeout: float = 30,
         retry_wait: float = 30,
+        media_timeout: float = MEDIA_TIMEOUT_SEC,
+        media_retry_wait: float = MEDIA_RETRY_WAIT_SEC,
         http=requests,
         sleep: Callable[[float], None] = time.sleep,
     ):
@@ -211,6 +225,8 @@ class JamWhatsAppReplySender:
         self._api_key = api_key
         self._timeout = timeout
         self._retry_wait = retry_wait
+        self._media_timeout = media_timeout
+        self._media_retry_wait = media_retry_wait
         self._http = http
         self._sleep = sleep
 
@@ -255,8 +271,12 @@ class JamWhatsAppReplySender:
         self._deliver(payload)
 
     def _deliver(self, payload: dict) -> None:
+        media = payload.get("type") in MEDIA_TYPES
+        timeout = min(self._timeout, self._media_timeout) if media else self._timeout
+        attempts = 2 if media else 3
+        retry_wait = self._media_retry_wait if media else self._retry_wait
         last_error = "JAM WhatsApp send failed"
-        for attempt in range(3):
+        for attempt in range(attempts):
             try:
                 response = self._http.post(
                     self._url,
@@ -265,7 +285,7 @@ class JamWhatsAppReplySender:
                         "X-API-KEY": self._api_key,
                         "Content-Type": "application/json",
                     },
-                    timeout=self._timeout,
+                    timeout=timeout,
                 )
                 if response.status_code == 200:
                     body = _safe_json(response)
@@ -274,10 +294,12 @@ class JamWhatsAppReplySender:
                     last_error = f"JAM send rejected payload: {body}"
                 else:
                     last_error = f"JAM send returned HTTP {response.status_code}"
+                if media:
+                    break  # rejected, not lost: retrying cannot change the answer
             except (requests.RequestException, ValueError, TypeError) as error:
                 last_error = str(error)
-            if attempt < 2:
-                self._sleep(self._retry_wait)
+            if attempt < attempts - 1:
+                self._sleep(retry_wait)
         raise ReplyDeliveryError(last_error)
 
 

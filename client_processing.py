@@ -2297,7 +2297,7 @@ class ClientMessageProcessor:
     ) -> bool:
         """Send the Android/iOS how-to image asking for current location.
 
-        Retries briefly on send failure. Returns True when the image was sent.
+        Returns True when the image was sent.
         Use ``with_caption=False`` when a separate text reply will carry the ask,
         so WhatsApp does not show the same instruction twice.
         """
@@ -2310,28 +2310,24 @@ class ClientMessageProcessor:
             )
             return False
         caption = share_location_caption(language) if with_caption else ""
-        last_error: Exception | None = None
-        for attempt in range(3):
-            try:
-                self._reply_sender.send_image(
-                    mobile=session.mobile,
-                    link=image_url,
-                    caption=caption,
-                )
-                session.share_location_guide_sent = True
-                return True
-            except Exception as error:
-                last_error = error
-                if attempt < 2:
-                    # Quick retry — do not use the long Gemini backoff.
-                    self._sleep(0)
-        log.error(
-            "share-location image send failed mobile=%s url=%s",
-            session.mobile,
-            image_url,
-            exc_info=last_error,
-        )
-        return False
+        # One attempt: the sender already retries a lost request once, and a
+        # rejected one will not be accepted on a second try. The text ask
+        # that follows must not wait on this picture.
+        try:
+            self._reply_sender.send_image(
+                mobile=session.mobile,
+                link=image_url,
+                caption=caption,
+            )
+        except Exception:
+            log.exception(
+                "share-location image send failed mobile=%s url=%s",
+                session.mobile,
+                image_url,
+            )
+            return False
+        session.share_location_guide_sent = True
+        return True
 
     @staticmethod
     def _asks_a_question(text: str) -> bool:

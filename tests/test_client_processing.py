@@ -813,31 +813,34 @@ def test_invalid_pincode_asks_once_then_offers_location(monkeypatch):
     assert len(deps["reply_sender"].image_calls) == 1
 
 
-def test_share_location_image_retries_on_transient_failure(monkeypatch):
+def test_share_location_image_failure_never_delays_the_text_ask(monkeypatch):
+    """The sender owns retrying (bounded, seconds). The processor tries the
+    card once and sends the text ask regardless — a picture JAM cannot
+    fetch used to cost the customer three minutes (latency report, A)."""
     monkeypatch.setattr(
         "client_media_assets.media_base_url",
         lambda: "https://example.com/media",
     )
 
-    class FlakyImageSender(FakeReplySender):
+    class BrokenImageSender(FakeReplySender):
         def __init__(self):
             super().__init__()
             self.attempts = 0
 
         def send_image(self, *, mobile: str, link: str, caption: str = "") -> None:
             self.attempts += 1
-            if self.attempts < 2:
-                raise RuntimeError("transient send failure")
-            super().send_image(mobile=mobile, link=link, caption=caption)
+            raise RuntimeError("JAM could not fetch the image")
 
-    sender = FlakyImageSender()
-    processor, deps = _processor(reply_sender=sender, sleep=lambda _s: None)
+    sender = BrokenImageSender()
+    slept: list[float] = []
+    processor, deps = _processor(reply_sender=sender, sleep=slept.append)
 
     processor.process(_event(message_id="m1", content="nahi pata"))
 
-    assert sender.attempts == 2
-    assert deps["state"].sessions["+918286871533"].share_location_guide_sent is True
-    assert sender.image_calls
+    assert sender.attempts == 1
+    assert slept == []
+    assert deps["state"].sessions["+918286871533"].share_location_guide_sent is False
+    assert sender.calls, "the text ask still went out"
 
 
 def test_unsupported_crm_language_prompts_for_language_choice():

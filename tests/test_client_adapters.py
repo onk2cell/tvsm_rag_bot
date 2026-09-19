@@ -571,3 +571,81 @@ def test_client_state_round_trips_every_session_field():
 
     for name, value in non_default.items():
         assert getattr(loaded, name) == value, f"{name} did not round-trip"
+
+
+# --- media sends are bounded: a picture is never worth the reply -------------
+
+def _jam_sender(http, slept):
+    from client_adapters import JamWhatsAppReplySender
+
+    return JamWhatsAppReplySender(
+        "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send",
+        api_key="secret-key",
+        timeout=30,
+        retry_wait=30,
+        http=http,
+        sleep=slept.append,
+    )
+
+
+def test_jam_image_rejected_by_jam_is_not_retried():
+    import pytest
+    from client_adapters import ReplyDeliveryError
+
+    http = FakeHttp([FakeResponse(400, {"status": "error", "message": "bad image"})])
+    slept: list[float] = []
+    sender = _jam_sender(http, slept)
+
+    with pytest.raises(ReplyDeliveryError, match="HTTP 400"):
+        sender.send_image(mobile="+918459522206", link="https://x/y.jpg")
+
+    assert len(http.calls) == 1
+    assert slept == []
+    assert http.calls[0]["timeout"] == 10.0
+
+
+def test_jam_image_that_times_out_is_retried_once_quickly():
+    import pytest
+    import requests
+    from client_adapters import ReplyDeliveryError
+
+    http = FakeHttp([requests.Timeout("read timed out"), requests.Timeout("read timed out")])
+    slept: list[float] = []
+    sender = _jam_sender(http, slept)
+
+    with pytest.raises(ReplyDeliveryError, match="timed out"):
+        sender.send_document(mobile="+918459522206", link="https://x/b.pdf", filename="b.pdf")
+
+    assert len(http.calls) == 2
+    assert slept == [1.0]
+    assert all(call["timeout"] == 10.0 for call in http.calls)
+
+
+def test_jam_image_retry_succeeds_after_one_network_error():
+    import requests
+
+    http = FakeHttp([
+        requests.ConnectionError("reset"),
+        FakeResponse(200, {"status": "success", "data": {}}),
+    ])
+    slept: list[float] = []
+    _jam_sender(http, slept).send_image(mobile="+918459522206", link="https://x/y.jpg")
+
+    assert len(http.calls) == 2
+    assert slept == [1.0]
+
+
+def test_jam_text_keeps_the_patient_retry_policy():
+    import requests
+
+    http = FakeHttp([
+        requests.Timeout("t"),
+        FakeResponse(500, {}),
+        FakeResponse(200, {"status": "success", "data": {}}),
+    ])
+    slept: list[float] = []
+    _jam_sender(http, slept).send(mobile="+918459522206", in_reply_to="x", text="hello")
+
+    assert len(http.calls) == 3
+    assert slept == [30, 30]
+    assert all(call["timeout"] == 30 for call in http.calls)
