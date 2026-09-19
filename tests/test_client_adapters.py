@@ -226,6 +226,7 @@ def test_jam_whatsapp_reply_sender_send_image():
     sender = JamWhatsAppReplySender(
         "https://tvsm.jamoutsourcing.com/index.php/whatsapp_bot/send",
         api_key="secret-key",
+        images_as_documents=False,   # the inline contract, for when JAM fixes their gateway
         http=http,
         sleep=lambda _: None,
     )
@@ -575,7 +576,7 @@ def test_client_state_round_trips_every_session_field():
 
 # --- media sends are bounded: a picture is never worth the reply -------------
 
-def _jam_sender(http, slept):
+def _jam_sender(http, slept, **kwargs):
     from client_adapters import JamWhatsAppReplySender
 
     return JamWhatsAppReplySender(
@@ -585,6 +586,7 @@ def _jam_sender(http, slept):
         retry_wait=30,
         http=http,
         sleep=slept.append,
+        **kwargs,
     )
 
 
@@ -649,3 +651,38 @@ def test_jam_text_keeps_the_patient_retry_policy():
     assert len(http.calls) == 3
     assert slept == [30, 30]
     assert all(call["timeout"] == 30 for call in http.calls)
+
+
+# --- images go out as documents while JAM's gateway rejects images -----------
+
+def test_jam_image_is_sent_as_a_document_by_default(monkeypatch):
+    monkeypatch.setattr("config.CLIENT_IMAGES_AS_DOCUMENTS", True)
+    http = FakeHttp([FakeResponse(200, {"status": "success", "data": {}})])
+    _jam_sender(http, []).send_image(
+        mobile="+918459522206",
+        link="https://aichatbot.jamoutsourcing.com:9004/media/products/TVSKINGEVMAX.jpg",
+        caption="TVS King EV MAX",
+    )
+    assert http.calls[0]["json"] == {
+        "mobile": "918459522206",
+        "type": "document",
+        "link": "https://aichatbot.jamoutsourcing.com:9004/media/products/TVSKINGEVMAX.jpg",
+        "message": "TVS King EV MAX",
+        "filename": "TVSKINGEVMAX.jpg",
+    }
+
+
+def test_jam_image_as_document_gets_a_showable_filename():
+    from client_adapters import _image_filename
+
+    assert _image_filename("https://x/media/share_location/how_to.jpg") == "how_to.jpg"
+    assert _image_filename("https://x/i/photo.PNG?v=2") == "photo.PNG"
+    assert _image_filename("https://x/i/photo") == "photo.jpg"
+
+
+def test_jam_image_switch_off_restores_the_inline_image(monkeypatch):
+    monkeypatch.setattr("config.CLIENT_IMAGES_AS_DOCUMENTS", False)
+    http = FakeHttp([FakeResponse(200, {"status": "success", "data": {}})])
+    _jam_sender(http, []).send_image(mobile="+918459522206", link="https://x/y.jpg")
+    assert http.calls[0]["json"]["type"] == "image"
+    assert "filename" not in http.calls[0]["json"]

@@ -31,6 +31,23 @@ MEDIA_TYPES = frozenset({"image", "document"})
 MEDIA_TIMEOUT_SEC = 10.0
 MEDIA_RETRY_WAIT_SEC = 1.0
 
+# JAM's gateway adds a `filename` to every image it forwards, and Meta
+# rejects it: `Unexpected key "filename" on param "image"` (HTTP 400, every
+# image send, with or without a caption — verified 2026-09-19; the Force
+# bot hit the same, D24). The field is legal on a document, and a JPEG
+# sent as a document arrives with a thumbnail. Until JAM fixes their side,
+# every image goes out as a document (CLIENT_IMAGES_AS_DOCUMENTS).
+_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
+
+
+def _image_filename(link: str) -> str:
+    """A name WhatsApp can show for the file: the link's basename, .jpg if
+    it has no image extension."""
+    name = link.rsplit("?", 1)[0].rstrip("/").rsplit("/", 1)[-1].strip() or "photo.jpg"
+    if not name.lower().endswith(_IMAGE_EXTENSIONS):
+        name += ".jpg"
+    return name
+
 
 class CustomerLookupError(RuntimeError):
     pass
@@ -218,11 +235,17 @@ class JamWhatsAppReplySender:
         retry_wait: float = 30,
         media_timeout: float = MEDIA_TIMEOUT_SEC,
         media_retry_wait: float = MEDIA_RETRY_WAIT_SEC,
+        images_as_documents: bool | None = None,
         http=requests,
         sleep: Callable[[float], None] = time.sleep,
     ):
         self._url = url
         self._api_key = api_key
+        if images_as_documents is None:
+            import config
+
+            images_as_documents = config.CLIENT_IMAGES_AS_DOCUMENTS
+        self._images_as_documents = images_as_documents
         self._timeout = timeout
         self._retry_wait = retry_wait
         self._media_timeout = media_timeout
@@ -242,6 +265,11 @@ class JamWhatsAppReplySender:
             )
 
     def send_image(self, *, mobile: str, link: str, caption: str = "") -> None:
+        if self._images_as_documents:
+            self.send_document(
+                mobile=mobile, link=link, caption=caption, filename=_image_filename(link)
+            )
+            return
         payload = {
             "mobile": _jam_mobile(mobile),
             "type": "image",

@@ -32,6 +32,8 @@ old=$(grep -E '^CLIENT_MEDIA_BASE_URL=' "$last" || true)
 [ -n "$old" ] || { echo "backup has no CLIENT_MEDIA_BASE_URL"; exit 1; }
 sed -i "s#^CLIENT_MEDIA_BASE_URL=.*#${old}#" .env
 grep -E '^CLIENT_MEDIA_BASE_URL=' .env
+cfg=$(ls -t data/admin_config.json.bak-media-* 2>/dev/null | head -1)
+[ -n "$cfg" ] && cp -p "$cfg" data/admin_config.json && echo "admin config restored from $cfg"
 docker compose --profile client up -d client-worker 2>&1 | tail -1
 echo REVERTED
 REMOTE
@@ -77,6 +79,22 @@ cd ~/tvsm_rag_bot
 cp -p .env .env.bak-media-$STAMP
 sed -i 's#^CLIENT_MEDIA_BASE_URL=.*#CLIENT_MEDIA_BASE_URL=https://aichatbot.jamoutsourcing.com:9004/media#' .env
 grep -E '^CLIENT_MEDIA_BASE_URL=' .env
+echo "== 2b. admin config: product photo URLs -> public hostname"
+# documents.<product>.images are absolute URLs in data/admin_config.json,
+# unlike the share-location card; rewrite the tunnel prefix in place.
+STAMP=$STAMP python3 - <<'PY'
+import os, re
+from pathlib import Path
+p = Path("data/admin_config.json"); s = p.read_text(encoding="utf-8")
+new = re.sub(r"https://[a-z0-9-]+\.trycloudflare\.com/media/",
+             "https://aichatbot.jamoutsourcing.com:9004/media/", s)
+if new == s:
+    print("   no tunnel URLs in admin config; nothing to change")
+else:
+    p.with_name("admin_config.json.bak-media-" + os.environ["STAMP"]).write_text(s, encoding="utf-8")
+    p.write_text(new, encoding="utf-8")
+    print("   rewrote", s.count("trycloudflare.com/media/"), "photo URL(s)")
+PY
 docker compose --profile client up -d client-worker 2>&1 | tail -1
 sleep 5
 docker compose --profile client exec -T client-worker python3 -c "

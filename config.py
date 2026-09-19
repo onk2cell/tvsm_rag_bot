@@ -103,6 +103,13 @@ CACHED_CONTEXT_MAX_TOKENS = int(os.environ.get("CACHED_CONTEXT_MAX_TOKENS", "200
 CACHED_CONTEXT_REGISTRY_PATH = os.environ.get(
     "CACHED_CONTEXT_REGISTRY_PATH", "data/context_caches.json"
 )
+# JAM's gateway adds `filename` to image sends and Meta rejects it (HTTP 400
+# on every photo and share-location card, 2026-09-19). On (the default),
+# JamWhatsAppReplySender sends each image as a WhatsApp document instead —
+# it arrives, with a thumbnail, as a file. Set false once JAM fixes it.
+CLIENT_IMAGES_AS_DOCUMENTS = (
+    os.environ.get("CLIENT_IMAGES_AS_DOCUMENTS", "true").strip().lower() in {"1", "true", "yes"}
+)
 CLIENT_HTTP_TIMEOUT_SEC = float(os.environ.get("CLIENT_HTTP_TIMEOUT_SEC", "30"))
 CLIENT_RETRY_WAIT_SEC = float(os.environ.get("CLIENT_RETRY_WAIT_SEC", "30"))
 CLIENT_HISTORY_TTL_SEC = int(os.environ.get("CLIENT_HISTORY_TTL_SEC", "3600"))
