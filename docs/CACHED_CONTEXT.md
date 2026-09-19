@@ -101,6 +101,22 @@ the flag becomes a no-op.
 Caches the provider still holds expire on their own TTL (default one
 hour) and cost nothing after that; nothing needs deleting.
 
+## Measured (2026-09-19, prod container, gemini-3.5-flash-lite)
+
+Three turns through the adapter with a 300 s TTL:
+
+| turn | mode | total | prompt | cache read | output |
+|---|---|---|---|---|---|
+| spec question (cold, creates cache) | cache | 4946 ms | 9,652 | 9,627 | 119 |
+| follow-up with history | cache | 2013 ms | 9,787 | 9,627 | 120 |
+| Hindi question (new instruction → new cache) | cache | 4686 ms | 9,642 | 9,627 | 101 |
+
+Gemini counted the corpus plus instruction at 9,627 tokens (the estimate
+said ~10,200). Every turn read the whole cache and paid uncached for only
+the history and question. Cache creation costs ~3 s on the turn that needs
+it; a warm turn is ~2 s end to end. Turned on in production the same day,
+with `GEMINI_MODEL=gemini-3.5-flash-lite`.
+
 ## What holds
 
 **Flag off is the old path, untouched.** `build_smart_llm()` returns the
