@@ -655,7 +655,7 @@ def test_jam_text_keeps_the_patient_retry_policy():
 
 # --- images go out as documents while JAM's gateway rejects images -----------
 
-def test_jam_image_is_sent_as_a_document_by_default(monkeypatch):
+def test_jam_image_is_sent_as_a_document_when_switched_on(monkeypatch):
     monkeypatch.setattr("config.CLIENT_IMAGES_AS_DOCUMENTS", True)
     http = FakeHttp([FakeResponse(200, {"status": "success", "data": {}})])
     _jam_sender(http, []).send_image(

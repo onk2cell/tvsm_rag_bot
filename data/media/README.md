@@ -24,9 +24,10 @@ tunnel (`tvsm-media-tunnel`) is no longer needed.
 JPEG/PNG/PDF binaries are gitignored; keep placeholders and this README in git.
 Upload binaries to the server under `~/tvsm_rag_bot/data/media/`.
 
-## Images are sent as documents for now
+## If images start failing with `Unexpected key "filename" on param "image"`
 
-JAM's gateway adds a `filename` to every `image` send and Meta rejects it (HTTP 400,
-2026-09-19), so with `CLIENT_IMAGES_AS_DOCUMENTS` on (the default) every photo and
-the share-location card go out as WhatsApp documents — they arrive as a file with a
-thumbnail. Set `CLIENT_IMAGES_AS_DOCUMENTS=false` once JAM stops injecting the field.
+That is JAM's gateway adding a `filename` to `image` sends (it happened on
+2026-09-19; they fixed it the same day). Until they fix it again, set
+`CLIENT_IMAGES_AS_DOCUMENTS=true` and restart the worker: every photo and the
+share-location card then go out as WhatsApp documents — a file with a thumbnail —
+instead of not arriving at all.
